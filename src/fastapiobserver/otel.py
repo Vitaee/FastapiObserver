@@ -4,6 +4,7 @@ import importlib
 import logging
 import threading
 from typing import Any, Literal, Mapping
+from urllib.parse import urlparse, urlunparse
 
 from fastapi import FastAPI
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -235,6 +236,11 @@ def install_otel(
 
 
 def _build_span_exporter(otel_settings: OTelSettings) -> Any:
+    endpoint = _normalize_otlp_endpoint(
+        otel_settings.otlp_endpoint,
+        otel_settings.protocol,
+    )
+
     if otel_settings.protocol == "http/protobuf":
         exporter_module = _import_otel_module(
             "opentelemetry.exporter.otlp.proto.http.trace_exporter"
@@ -244,8 +250,8 @@ def _build_span_exporter(otel_settings: OTelSettings) -> Any:
             "opentelemetry.exporter.otlp.proto.grpc.trace_exporter"
         )
 
-    if otel_settings.otlp_endpoint:
-        return exporter_module.OTLPSpanExporter(endpoint=otel_settings.otlp_endpoint)
+    if endpoint:
+        return exporter_module.OTLPSpanExporter(endpoint=endpoint)
     return exporter_module.OTLPSpanExporter()
 
 
@@ -291,3 +297,21 @@ def _parse_resource_attributes(value: object) -> dict[str, str]:
             attributes[normalized_key] = raw_value.strip()
         return attributes
     raise ValueError("extra_resource_attributes must be a mapping or key=value CSV string")
+
+
+def _normalize_otlp_endpoint(
+    endpoint: str | None,
+    protocol: Literal["grpc", "http/protobuf"],
+) -> str | None:
+    if endpoint is None:
+        return None
+    normalized_endpoint = endpoint.strip()
+    if not normalized_endpoint:
+        return None
+    if protocol != "http/protobuf":
+        return normalized_endpoint
+
+    parsed = urlparse(normalized_endpoint)
+    if parsed.path and parsed.path != "/":
+        return normalized_endpoint
+    return urlunparse(parsed._replace(path="/v1/traces"))

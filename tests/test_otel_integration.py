@@ -89,3 +89,19 @@ def test_otel_settings_parse_extra_resource_attributes_from_env(
         "k8s.namespace": "prod",
         "custom.team": "platform",
     }
+
+
+def test_normalize_http_otlp_endpoint_adds_default_trace_path() -> None:
+    normalized = otel_module._normalize_otlp_endpoint(  # type: ignore[attr-defined]
+        "http://127.0.0.1:4318",
+        "http/protobuf",
+    )
+    assert normalized == "http://127.0.0.1:4318/v1/traces"
+
+
+def test_normalize_http_otlp_endpoint_keeps_explicit_path() -> None:
+    normalized = otel_module._normalize_otlp_endpoint(  # type: ignore[attr-defined]
+        "http://127.0.0.1:4318/custom/path",
+        "http/protobuf",
+    )
+    assert normalized == "http://127.0.0.1:4318/custom/path"
