@@ -103,6 +103,38 @@ Run the example:
 uvicorn examples.basic_app:app --reload
 ```
 
+## Multi-Worker Gunicorn (Prometheus)
+
+For Gunicorn + multiple Uvicorn workers, enable Prometheus multiprocess mode:
+
+```bash
+export PROMETHEUS_MULTIPROC_DIR=/tmp/prometheus-metrics
+rm -rf "$PROMETHEUS_MULTIPROC_DIR"
+mkdir -p "$PROMETHEUS_MULTIPROC_DIR"
+```
+
+In `gunicorn.conf.py`:
+
+```python
+from observabilityfastapi import mark_prometheus_process_dead
+
+def child_exit(server, worker):
+    mark_prometheus_process_dead(worker.pid)
+```
+
+Without this setup, request counters can appear empty or inconsistent in multi-worker deployments.
+
+## Centralized Monitoring Across Multiple Servers
+
+Yes, this package supports remote FastAPI instances on different servers.
+
+Recommended topology:
+- Every FastAPI instance exposes `/metrics` and OTLP traces/logs.
+- A central Prometheus scrapes all instances.
+- Grafana reads from central Prometheus/Loki/Tempo.
+
+Prometheus target labels (`job`, `instance`) plus this package's metric labels (`service`, `environment`) make cross-server dashboards and filtering straightforward.
+
 ## Release Tracks
 
 - `0.1.x`: secure-by-default core

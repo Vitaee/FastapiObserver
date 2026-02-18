@@ -27,7 +27,11 @@ def install_observability(
     setup_logging(settings, security_policy=security_policy)
 
     enable_metrics = settings.metrics_enabled if metrics_enabled is None else metrics_enabled
-    metrics_backend = build_metrics_backend(enable_metrics)
+    metrics_backend = build_metrics_backend(
+        enable_metrics,
+        service=settings.service,
+        environment=settings.environment,
+    )
 
     if isinstance(metrics_backend, PrometheusMetricsBackend):
         mount_metrics_endpoint(app, settings.metrics_path)

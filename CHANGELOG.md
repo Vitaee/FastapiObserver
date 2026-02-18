@@ -7,6 +7,9 @@ All notable changes to this project will be documented in this file.
 ### Added
 - Explicit log schema version (`log_schema_version`) and package version metadata in every JSON log.
 - Public package version export (`observabilityfastapi.__version__`).
+- Prometheus metric labels now include `service` and `environment` for better cross-instance aggregation.
+- Gunicorn helper `mark_prometheus_process_dead()` to support Prometheus multiprocess cleanup.
+- Prometheus multiprocess directory validation when `PROMETHEUS_MULTIPROC_DIR` is enabled.
 - Environment-based constructors:
   - `SecurityPolicy.from_env()`
   - `TrustedProxyPolicy.from_env()`

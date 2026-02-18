@@ -3,6 +3,7 @@ from .config import ObservabilitySettings
 from .control_plane import RuntimeControlSettings, mount_control_plane
 from .fastapi import install_observability
 from .logging import LOG_SCHEMA_VERSION, RequestIdFilter, StructuredJsonFormatter, setup_logging
+from .metrics import mark_prometheus_process_dead
 from .otel import OTelSettings, create_otel_resource, install_otel
 from .plugins import register_log_enricher, register_metric_hook
 from .request_context import (
@@ -42,6 +43,7 @@ __all__ = [
     "get_user_context",
     "install_observability",
     "install_otel",
+    "mark_prometheus_process_dead",
     "mount_control_plane",
     "register_log_enricher",
     "register_metric_hook",
