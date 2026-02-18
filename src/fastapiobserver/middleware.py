@@ -155,9 +155,12 @@ class RequestLoggingMiddleware:
             else:
                 self.logger.info("request.completed", extra={"event": safe_event})
 
+            # Prefer route template for bounded cardinality
+            route_template = _extract_route_template(scope, path)
+
             self.metrics_recorder.observe(
                 method=method,
-                path=path,
+                path=route_template,
                 status_code=status_code,
                 duration_seconds=duration_seconds,
             )
@@ -384,6 +387,24 @@ def _classify_error(status_code: int, error: Exception | None) -> str:
     if status_code >= 400:
         return "client_error"
     return "ok"
+
+def _extract_route_template(scope: Scope, raw_path: str) -> str:
+    """Return the matched route template for bounded metric cardinality.
+
+    After Starlette's router runs, ``scope["route"]`` contains the matched
+    ``Route`` object whose ``.path`` is the template string
+    (e.g. ``/users/{user_id}``).
+
+    Falls back to *raw_path* when:
+    * No route matched (404 / unmatched sub-apps)
+    * ``scope["route"]`` is not a Starlette ``Route`` with a ``path`` attr
+    """
+    route = scope.get("route")
+    if route is not None:
+        template = getattr(route, "path", None)
+        if template:
+            return template
+    return raw_path
 
 
 __all__ = ["RequestLoggingMiddleware"]

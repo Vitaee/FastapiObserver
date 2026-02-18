@@ -51,6 +51,35 @@ All notable changes to this project will be documented in this file.
 - Optional preset fields can be explicitly unset via `none|null|unset` values.
 - OTel integration tests reset global tracer provider state between tests to avoid cross-test exporter leakage.
 
+### Sprint C: OTel/Logs/Metrics Production Hardening
+
+### Added
+- Pluggable logging sink architecture with `LogSink` protocol and built-in sinks (`StdoutSink`, `RotatingFileSink`, `LogtailSink`), plus entry-point discovery.
+- Outbound trace propagation helpers:
+  - `inject_trace_headers()`
+  - `instrument_httpx_client()`
+  - `instrument_requests_session()`
+- OTLP logs environment loader: `OTelLogsSettings.from_env()` with `OTEL_LOGS_*` variables.
+- Route-template cardinality tests, excluded-URL precedence tests, OTLP logs pipeline tests, and Accept negotiation tests.
+- README production collector pipeline section with processors, sampling, and TLS guidance.
+
+### Changed
+- `setup_logging()` now supports `logs_mode` (`local_json`/`otlp`/`both`) and `extra_handlers` routed through a single queue pipeline.
+- OTLP log export now reuses provider-scoped idempotency keys instead of global one-time flags.
+- OTLP log handler is wrapped in a sanitizing adapter so OTLP attributes align with local redaction policy.
+- Excluded URL precedence is now explicit:
+  1. `OTEL_EXCLUDED_URLS` setting
+  2. OTel env vars (`OTEL_PYTHON_FASTAPI_EXCLUDED_URLS`, `OTEL_PYTHON_EXCLUDED_URLS`)
+  3. package defaults
+- `OTEL_EXCLUDED_URLS=""` is now treated as an explicit "no exclusions" configuration.
+- Metrics middleware now prefers Starlette route templates (`/users/{user_id}`) over raw paths to prevent cardinality explosion.
+- `metrics_format="negotiate"` now performs real Accept-based format negotiation between OpenMetrics and Prometheus.
+
+### Fixed
+- OTLP-only mode now fails fast when no OTLP log handler can be created, preventing silent log loss.
+- Accept header parsing now handles quoted quality factors (for example `q="0"`).
+- Prometheus negotiation tests now assert content-type behavior for both positive and negative cases.
+
 ## [0.1.0] - 2026-02-18
 
 ### Added

@@ -30,7 +30,6 @@ license = "MIT"
 license-files = ["LICENSE"]
 dependencies = [
     "fastapi>=0.129.0",
-    "orjson>=3.11.7",
     "pydantic-settings>=2.10.1",
     "starlette>=0.52.1",
 ]
@@ -42,6 +41,9 @@ Repository = "https://github.com/Vitaee/FastapiObserver.git"
 Issues = "https://github.com/Vitaee/FastapiObserver/issues"
 
 [project.optional-dependencies]
+fast-json = [
+    "orjson>=3.11.7",
+]
 prometheus = [
     "prometheus-client>=0.24.1",
 ]
@@ -52,13 +54,22 @@ otel = [
     "opentelemetry-instrumentation-fastapi>=0.60b1",
     "opentelemetry-instrumentation-logging>=0.60b1",
 ]
+otel-httpx = [
+    "opentelemetry-instrumentation-httpx>=0.60b1",
+]
+otel-requests = [
+    "opentelemetry-instrumentation-requests>=0.60b1",
+]
 all = [
+    "orjson>=3.11.7",
     "prometheus-client>=0.24.1",
     "opentelemetry-api>=1.39.1",
     "opentelemetry-sdk>=1.39.1",
     "opentelemetry-exporter-otlp>=1.39.1",
     "opentelemetry-instrumentation-fastapi>=0.60b1",
     "opentelemetry-instrumentation-logging>=0.60b1",
+    "opentelemetry-instrumentation-httpx>=0.60b1",
+    "opentelemetry-instrumentation-requests>=0.60b1",
 ]
 dev = [
     "httpx>=0.28.1",

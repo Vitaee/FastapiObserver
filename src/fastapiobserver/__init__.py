@@ -4,8 +4,15 @@ from .control_plane import RuntimeControlSettings, mount_control_plane
 from .fastapi import install_observability
 from .logging import LOG_SCHEMA_VERSION, RequestIdFilter, StructuredJsonFormatter, setup_logging
 from .metrics import mark_prometheus_process_dead
-from .otel import OTelSettings, create_otel_resource, install_otel
+from .otel import OTelLogsSettings, OTelSettings, create_otel_resource, install_otel, install_otel_logs
 from .plugins import register_log_enricher, register_metric_hook
+from .propagation import (
+    inject_trace_headers,
+    instrument_httpx_client,
+    instrument_requests_session,
+    uninstrument_httpx_client,
+    uninstrument_requests_session,
+)
 from .request_context import (
     clear_request_id,
     clear_span_id,
@@ -32,43 +39,76 @@ from .security import (
     is_body_capturable,
     sanitize_event,
 )
+from .sinks import (
+    LogSink,
+    LogtailSink,
+    RotatingFileSink,
+    StdoutSink,
+    register_sink,
+    unregister_sink,
+)
 
 __all__ = [
+    # Models / Settings
+    "OTelLogsSettings",
     "OTelSettings",
     "ObservabilitySettings",
-    "RequestIdFilter",
     "RuntimeControlSettings",
     "SecurityPolicy",
-    "StructuredJsonFormatter",
     "TrustedProxyPolicy",
+    # Logging
+    "LOG_SCHEMA_VERSION",
+    "RequestIdFilter",
+    "StructuredJsonFormatter",
+    "setup_logging",
+    # Sinks
+    "LogSink",
+    "LogtailSink",
+    "RotatingFileSink",
+    "StdoutSink",
+    "register_sink",
+    "unregister_sink",
+    # Metrics
+    "mark_prometheus_process_dead",
+    # OTel
+    "create_otel_resource",
+    "install_observability",
+    "install_otel",
+    "install_otel_logs",
+    # Control plane
+    "mount_control_plane",
+    # Propagation
+    "inject_trace_headers",
+    "instrument_httpx_client",
+    "instrument_requests_session",
+    "uninstrument_httpx_client",
+    "uninstrument_requests_session",
+    # Security constants
     "DEFAULT_REDACTED_FIELDS",
     "DEFAULT_REDACTED_HEADERS",
-    "STRICT_HEADER_ALLOWLIST",
-    "PCI_REDACTED_FIELDS",
     "GDPR_REDACTED_FIELDS",
+    "PCI_REDACTED_FIELDS",
     "SECURITY_POLICY_PRESETS",
-    "LOG_SCHEMA_VERSION",
-    "__version__",
+    "STRICT_HEADER_ALLOWLIST",
+    "is_body_capturable",
+    "sanitize_event",
+    # Plugins
+    "register_log_enricher",
+    "register_metric_hook",
+    # Request context
     "clear_request_id",
     "clear_span_id",
     "clear_trace_id",
     "clear_user_context",
-    "create_otel_resource",
     "get_request_id",
     "get_span_id",
     "get_trace_id",
     "get_user_context",
-    "install_observability",
-    "install_otel",
-    "mark_prometheus_process_dead",
-    "mount_control_plane",
-    "register_log_enricher",
-    "register_metric_hook",
-    "is_body_capturable",
-    "sanitize_event",
     "set_request_id",
     "set_span_id",
     "set_trace_id",
     "set_user_context",
-    "setup_logging",
+    # Version
+    "__version__",
 ]
+

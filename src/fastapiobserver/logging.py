@@ -3,19 +3,17 @@ from __future__ import annotations
 import json
 import logging
 import logging.handlers
-import os
 import queue
-import sys
 import threading
 from datetime import datetime, timezone
-from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from ._version import __version__
 from .config import ObservabilitySettings
 from .plugins import apply_log_enrichers
 from .request_context import get_request_id, get_span_id, get_trace_id, get_user_context
 from .security import SecurityPolicy, sanitize_event
+from .sinks import build_sink_handlers
 
 orjson: Any
 try:
@@ -29,7 +27,19 @@ _MANAGED_OUTPUT_HANDLERS: list[logging.Handler] = []
 LOG_SCHEMA_VERSION = "1.0.0"
 
 
+# ---------------------------------------------------------------------------
+# Formatter — Single Responsibility: formats *what* each log record contains
+# ---------------------------------------------------------------------------
+
+
 class StructuredJsonFormatter(logging.Formatter):
+    """Serialize log records into structured JSON.
+
+    Fields include service identity, request ID, trace/span IDs for
+    correlation, and user context.  Plugin enrichers are applied unless
+    the record has ``_skip_enrichers`` set.
+    """
+
     def __init__(
         self,
         settings: ObservabilitySettings,
@@ -85,7 +95,14 @@ class StructuredJsonFormatter(logging.Formatter):
         return _json_dumps(sanitized_payload)
 
 
+# ---------------------------------------------------------------------------
+# Filters — separate concerns: request ID and trace context injection
+# ---------------------------------------------------------------------------
+
+
 class RequestIdFilter(logging.Filter):
+    """Attach request ID from context vars to every log record."""
+
     def filter(self, record: logging.LogRecord) -> bool:
         if not getattr(record, "request_id", None):
             record.request_id = get_request_id()
@@ -93,6 +110,8 @@ class RequestIdFilter(logging.Filter):
 
 
 class TraceContextFilter(logging.Filter):
+    """Attach OTel trace_id / span_id to every log record."""
+
     def filter(self, record: logging.LogRecord) -> bool:
         trace_id = get_trace_id()
         span_id = get_span_id()
@@ -109,10 +128,15 @@ class TraceContextFilter(logging.Filter):
             pass
 
         if trace_id:
-            record.trace_id = trace_id
+            record.trace_id = trace_id  # type: ignore[attr-defined]
         if span_id:
-            record.span_id = span_id
+            record.span_id = span_id  # type: ignore[attr-defined]
         return True
+
+
+# ---------------------------------------------------------------------------
+# Setup — orchestrates formatter, queue-based pipeline, and sink handlers
+# ---------------------------------------------------------------------------
 
 
 def setup_logging(
@@ -120,7 +144,24 @@ def setup_logging(
     *,
     force: bool = True,
     security_policy: SecurityPolicy | None = None,
+    logs_mode: Literal["local_json", "otlp", "both"] = "local_json",
+    extra_handlers: list[logging.Handler] | None = None,
 ) -> None:
+    """Configure the root logger with structured JSON output.
+
+    Uses a ``QueueHandler`` → ``QueueListener`` pipeline so that I/O
+    happens in a background thread, keeping request handlers non-blocking.
+
+    Parameters
+    ----------
+    logs_mode:
+        ``"local_json"`` — normal local sinks only (default).
+        ``"otlp"`` — only OTLP handler (local sinks suppressed).
+        ``"both"`` — local sinks **and** OTLP handler.
+    extra_handlers:
+        Additional output handlers (e.g. OTel ``LoggingHandler``) to route
+        through the ``QueueListener`` pipeline alongside local sinks.
+    """
     global _QUEUE_LISTENER
     global _MANAGED_OUTPUT_HANDLERS
 
@@ -152,7 +193,21 @@ def setup_logging(
         )
         root_logger.setLevel(settings.log_level.upper())
 
-        output_handlers = _build_output_handlers(settings, formatter)
+        # Build output handlers based on logs_mode
+        output_handlers: list[logging.Handler] = []
+        if logs_mode in ("local_json", "both"):
+            output_handlers = build_sink_handlers(settings, formatter)
+        if extra_handlers:
+            output_handlers.extend(extra_handlers)
+        if not output_handlers:
+            raise RuntimeError(
+                "Logging setup resolved zero output handlers. "
+                "Configure at least one local sink or OTLP handler."
+            )
+        for output_handler in output_handlers:
+            if output_handler.formatter is None:
+                output_handler.setFormatter(formatter)
+
         log_queue: queue.SimpleQueue[logging.LogRecord] = queue.SimpleQueue()
         queue_handler = logging.handlers.QueueHandler(log_queue)
         _configure_queue_handler(queue_handler)
@@ -174,36 +229,9 @@ def setup_logging(
             uvicorn_logger.setLevel(settings.log_level.upper())
 
 
-def _build_output_handlers(
-    settings: ObservabilitySettings,
-    formatter: logging.Formatter,
-) -> list[logging.Handler]:
-    handlers: list[logging.Handler] = []
-    stream_handler = logging.StreamHandler(sys.stdout)
-    _configure_output_handler(stream_handler, formatter)
-    handlers.append(stream_handler)
-
-    if settings.log_dir:
-        log_dir = Path(settings.log_dir)
-        log_dir.mkdir(parents=True, exist_ok=True)
-        file_name = f"{settings.service or settings.app_name}.log"
-        file_handler = logging.handlers.RotatingFileHandler(
-            os.fspath(log_dir / file_name),
-            maxBytes=10 * 1024 * 1024,
-            backupCount=5,
-            encoding="utf-8",
-        )
-        _configure_output_handler(file_handler, formatter)
-        handlers.append(file_handler)
-    return handlers
-
-
-def _configure_output_handler(
-    handler: logging.Handler,
-    formatter: logging.Formatter,
-) -> None:
-    handler.setFormatter(formatter)
-    handler.setLevel(logging.NOTSET)
+# ---------------------------------------------------------------------------
+# Internal helpers
+# ---------------------------------------------------------------------------
 
 
 def _configure_queue_handler(handler: logging.Handler) -> None:

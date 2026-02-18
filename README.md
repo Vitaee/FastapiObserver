@@ -481,6 +481,70 @@ Recommended topology:
 
 Prometheus target labels (`job`, `instance`) plus this package's metric labels (`service`, `environment`) make cross-server dashboards and filtering straightforward.
 
+### Production OTel Collector Pipeline
+
+For production deployments, run an [OpenTelemetry Collector](https://opentelemetry.io/docs/collector/) (or Grafana Alloy) between your apps and backends. A minimal `otel-collector-config.yaml`:
+
+```yaml
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  batch:
+    send_batch_size: 512
+    timeout: 5s
+  memory_limiter:
+    limit_mib: 512
+    spike_limit_mib: 128
+    check_interval: 5s
+  tail_sampling:           # requires contrib distribution
+    policies:
+      - name: errors
+        type: status_code
+        status_code: { status_codes: [ERROR] }
+      - name: slow-requests
+        type: latency
+        latency: { threshold_ms: 2000 }
+      - name: probabilistic
+        type: probabilistic
+        probabilistic: { sampling_percentage: 10 }
+
+exporters:
+  otlp/tempo:
+    endpoint: tempo:4317
+    tls:
+      insecure: false
+      cert_file: /certs/client.crt
+      key_file: /certs/client.key
+  otlp/loki:
+    endpoint: loki:3100
+    tls:
+      insecure: true
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, tail_sampling, batch]
+      exporters: [otlp/tempo]
+    logs:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [otlp/loki]
+```
+
+Key production considerations:
+- **`memory_limiter`** — prevent OOM under load bursts
+- **`tail_sampling`** — reduce trace volume while keeping errors & slow requests (100%)
+- **`batch`** — amortize network overhead
+- **TLS** — always enable in production (`tls.insecure: false`)
+- **Auth** — use `headers_setter` extension or `bearertokenauth` for backend auth
+
 ---
 
 ## Environment Variables Reference
@@ -509,6 +573,11 @@ All settings can be configured via environment variables:
 | `OTEL_EXPORTER_OTLP_PROTOCOL` | `grpc` | `grpc` or `http/protobuf` |
 | `OTEL_TRACE_SAMPLING_RATIO` | `1.0` | Initial sampling ratio (0.0–1.0) |
 | `OTEL_EXTRA_RESOURCE_ATTRIBUTES` | — | CSV of `key=value` pairs |
+| `OTEL_EXCLUDED_URLS` | _(auto-derived)_ | CSV of URLs to exclude from tracing; `""` = no exclusions |
+| `OTEL_LOGS_ENABLED` | `false` | Enable OTLP log export |
+| `OTEL_LOGS_MODE` | `local_json` | `local_json`, `otlp`, or `both` |
+| `OTEL_LOGS_ENDPOINT` | — | OTLP log collector endpoint |
+| `OTEL_LOGS_PROTOCOL` | `grpc` | `grpc` or `http/protobuf` |
 | `OBSERVABILITY_CONTROL_TOKEN` | — | Bearer token for control plane |
 
 ---

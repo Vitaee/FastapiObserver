@@ -298,7 +298,6 @@ version = "0.2.0.dev1"
 source = { editable = "." }
 dependencies = [
     { name = "fastapi" },
-    { name = "orjson" },
     { name = "pydantic-settings" },
     { name = "starlette" },
 ]
@@ -308,8 +307,11 @@ all = [
     { name = "opentelemetry-api" },
     { name = "opentelemetry-exporter-otlp" },
     { name = "opentelemetry-instrumentation-fastapi" },
+    { name = "opentelemetry-instrumentation-httpx" },
     { name = "opentelemetry-instrumentation-logging" },
+    { name = "opentelemetry-instrumentation-requests" },
     { name = "opentelemetry-sdk" },
+    { name = "orjson" },
     { name = "prometheus-client" },
 ]
 dev = [
@@ -321,12 +323,21 @@ dev = [
     { name = "pytest-randomly" },
     { name = "ruff" },
 ]
+fast-json = [
+    { name = "orjson" },
+]
 otel = [
     { name = "opentelemetry-api" },
     { name = "opentelemetry-exporter-otlp" },
     { name = "opentelemetry-instrumentation-fastapi" },
     { name = "opentelemetry-instrumentation-logging" },
     { name = "opentelemetry-sdk" },
+]
+otel-httpx = [
+    { name = "opentelemetry-instrumentation-httpx" },
+]
+otel-requests = [
+    { name = "opentelemetry-instrumentation-requests" },
 ]
 prometheus = [
     { name = "prometheus-client" },
@@ -344,11 +355,16 @@ requires-dist = [
     { name = "opentelemetry-exporter-otlp", marker = "extra == 'otel'", specifier = ">=1.39.1" },
     { name = "opentelemetry-instrumentation-fastapi", marker = "extra == 'all'", specifier = ">=0.60b1" },
     { name = "opentelemetry-instrumentation-fastapi", marker = "extra == 'otel'", specifier = ">=0.60b1" },
+    { name = "opentelemetry-instrumentation-httpx", marker = "extra == 'all'", specifier = ">=0.60b1" },
+    { name = "opentelemetry-instrumentation-httpx", marker = "extra == 'otel-httpx'", specifier = ">=0.60b1" },
     { name = "opentelemetry-instrumentation-logging", marker = "extra == 'all'", specifier = ">=0.60b1" },
     { name = "opentelemetry-instrumentation-logging", marker = "extra == 'otel'", specifier = ">=0.60b1" },
+    { name = "opentelemetry-instrumentation-requests", marker = "extra == 'all'", specifier = ">=0.60b1" },
+    { name = "opentelemetry-instrumentation-requests", marker = "extra == 'otel-requests'", specifier = ">=0.60b1" },
     { name = "opentelemetry-sdk", marker = "extra == 'all'", specifier = ">=1.39.1" },
     { name = "opentelemetry-sdk", marker = "extra == 'otel'", specifier = ">=1.39.1" },
-    { name = "orjson", specifier = ">=3.11.7" },
+    { name = "orjson", marker = "extra == 'all'", specifier = ">=3.11.7" },
+    { name = "orjson", marker = "extra == 'fast-json'", specifier = ">=3.11.7" },
     { name = "pip-audit", marker = "extra == 'dev'", specifier = ">=2.10.0" },
     { name = "prometheus-client", marker = "extra == 'all'", specifier = ">=0.24.1" },
     { name = "prometheus-client", marker = "extra == 'prometheus'", specifier = ">=0.24.1" },
@@ -358,7 +374,7 @@ requires-dist = [
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.15.1" },
     { name = "starlette", specifier = ">=0.52.1" },
 ]
-provides-extras = ["prometheus", "otel", "all", "dev"]
+provides-extras = ["fast-json", "prometheus", "otel", "otel-httpx", "otel-requests", "all", "dev"]
 
 [[package]]
 name = "filelock"
@@ -1068,6 +1084,22 @@ wheels = [
 ]
 
 [[package]]
+name = "opentelemetry-instrumentation-httpx"
+version = "0.60b1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "opentelemetry-api" },
+    { name = "opentelemetry-instrumentation" },
+    { name = "opentelemetry-semantic-conventions" },
+    { name = "opentelemetry-util-http" },
+    { name = "wrapt" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/86/08/11208bcfcab4fc2023252c3f322aa397fd9ad948355fea60f5fc98648603/opentelemetry_instrumentation_httpx-0.60b1.tar.gz", hash = "sha256:a506ebaf28c60112cbe70ad4f0338f8603f148938cb7b6794ce1051cd2b270ae", size = 20611, upload-time = "2025-12-11T13:37:01.661Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/43/59/b98e84eebf745ffc75397eaad4763795bff8a30cbf2373a50ed4e70646c5/opentelemetry_instrumentation_httpx-0.60b1-py3-none-any.whl", hash = "sha256:f37636dd742ad2af83d896ba69601ed28da51fa4e25d1ab62fde89ce413e275b", size = 15701, upload-time = "2025-12-11T13:36:04.56Z" },
+]
+
+[[package]]
 name = "opentelemetry-instrumentation-logging"
 version = "0.60b1"
 source = { registry = "https://pypi.org/simple" }
@@ -1078,6 +1110,21 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/60/a6/4515895b383113677fd2ad21813df5e56108a2df14ebb7916c962c9a0234/opentelemetry_instrumentation_logging-0.60b1.tar.gz", hash = "sha256:98f4b9c7aeb9314a30feee7c002c7ea9abea07c90df5f97fb058b850bc45b89a", size = 9968, upload-time = "2025-12-11T13:37:03.974Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/f1/f9/8a4ce3901bc52277794e4b18c4ac43dc5929806eff01d22812364132f45f/opentelemetry_instrumentation_logging-0.60b1-py3-none-any.whl", hash = "sha256:f2e18cbc7e1dd3628c80e30d243897fdc93c5b7e0c8ae60abd2b9b6a99f82343", size = 12577, upload-time = "2025-12-11T13:36:08.123Z" },
+]
+
+[[package]]
+name = "opentelemetry-instrumentation-requests"
+version = "0.60b1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "opentelemetry-api" },
+    { name = "opentelemetry-instrumentation" },
+    { name = "opentelemetry-semantic-conventions" },
+    { name = "opentelemetry-util-http" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/9d/4a/bb9d47d7424fc33aeba75275256ae6e6031f44b6a9a3f778d611c0c3ac27/opentelemetry_instrumentation_requests-0.60b1.tar.gz", hash = "sha256:9a1063c16c44a3ba6e81870c4fa42a0fac3ecef5a4d60a11d0976eec9046f3d4", size = 16366, upload-time = "2025-12-11T13:37:12.456Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/f2/7f/969b59a5acccb4c35317421843d63d7853ad7a18078ca3a9b80c248be448/opentelemetry_instrumentation_requests-0.60b1-py3-none-any.whl", hash = "sha256:eec9fac3fab84737f663a2e08b12cb095b4bd67643b24587a8ecfa3cf4d0ca4c", size = 13141, upload-time = "2025-12-11T13:36:23.696Z" },
 ]
 
 [[package]]
