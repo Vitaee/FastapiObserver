@@ -20,7 +20,18 @@ from .request_context import (
     set_trace_id,
     set_user_context,
 )
-from .security import SecurityPolicy, TrustedProxyPolicy, is_body_capturable, sanitize_event
+from .security import (
+    DEFAULT_REDACTED_FIELDS,
+    DEFAULT_REDACTED_HEADERS,
+    GDPR_REDACTED_FIELDS,
+    PCI_REDACTED_FIELDS,
+    SECURITY_POLICY_PRESETS,
+    STRICT_HEADER_ALLOWLIST,
+    SecurityPolicy,
+    TrustedProxyPolicy,
+    is_body_capturable,
+    sanitize_event,
+)
 
 __all__ = [
     "OTelSettings",
@@ -30,6 +41,12 @@ __all__ = [
     "SecurityPolicy",
     "StructuredJsonFormatter",
     "TrustedProxyPolicy",
+    "DEFAULT_REDACTED_FIELDS",
+    "DEFAULT_REDACTED_HEADERS",
+    "STRICT_HEADER_ALLOWLIST",
+    "PCI_REDACTED_FIELDS",
+    "GDPR_REDACTED_FIELDS",
+    "SECURITY_POLICY_PRESETS",
     "LOG_SCHEMA_VERSION",
     "__version__",
     "clear_request_id",

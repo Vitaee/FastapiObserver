@@ -12,6 +12,8 @@ from fastapiobserver.request_context import (
     clear_user_context,
 )
 
+pytest_plugins = ("tests.conftest_otlp",)
+
 
 @pytest.fixture(autouse=True)
 def reset_global_state() -> None:

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 
+import fastapiobserver
 from fastapiobserver.security import SecurityPolicy, sanitize_event
 
 
@@ -62,3 +63,9 @@ def test_preset_can_be_overridden_by_env(monkeypatch: pytest.MonkeyPatch) -> Non
 
     assert policy.redaction_mode == "mask"
     assert policy.redacted_fields == ("password",)
+
+
+def test_preset_constants_are_available_in_public_api() -> None:
+    assert "strict" in fastapiobserver.SECURITY_POLICY_PRESETS
+    assert fastapiobserver.PCI_REDACTED_FIELDS
+    assert fastapiobserver.GDPR_REDACTED_FIELDS

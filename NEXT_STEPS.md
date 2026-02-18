@@ -1,37 +1,48 @@
-# Next Steps (v0.2.0)
+# Next Steps (v0.2.0.dev1+)
 
-This file tracks implementation priorities after `v0.1.0`.
+This file tracks what is completed and what remains before stable `0.2.x`.
 
-## 1) OTel Enhancements
+## Completed
 
-- Add log correlation tests that assert trace/span IDs in emitted logs under instrumented requests.
-- Add integration test fixture for OTLP export to a local collector mock.
-- Support configurable resource attributes beyond service metadata.
+### OTel
+- [x] Log correlation test coverage (`tests/test_otel_log_correlation.py`).
+- [x] OTLP collector fixture + integration test (`tests/conftest_otlp.py`, `tests/test_otlp_export_integration.py`).
+- [x] Configurable OTel resource attributes (`extra_resource_attributes`, `OTEL_EXTRA_RESOURCE_ATTRIBUTES`).
+- [x] Coexistence logic when a host app already configured a global tracer provider.
 
-## 2) Security Hardening
+### Security
+- [x] Allowlist-only sanitization mode (`header_allowlist`, `event_key_allowlist`).
+- [x] Redaction presets (`strict`, `pci`, `gdpr`) with tests.
+- [x] Body media-type allowlist for capture.
+- [x] Preset override behavior from env, including explicit unsetting with `none|null|unset` for optional allowlists.
+- [x] Preset metadata/constants exported from package API.
 
-- Add optional allowlist-only logging mode for headers and event keys.
-- Add redaction policy presets (`strict`, `pci`, `gdpr`) with contract tests.
-- Add request body media-type allowlist before body capture.
+### Logging / Middleware
+- [x] Queue-based logging pipeline (`QueueHandler` + `QueueListener`) for async-friendly request path behavior.
+- [x] Structured error classification (`error_type`, `exception_class`).
+- [x] Middleware ordering warning when body capture is enabled late.
 
-## 3) Dynamic Runtime Controls
+## Open Work
 
-- Add optional audit trail sink for control-plane changes.
-- Add runtime toggle for per-path sampling profiles.
-- Add auth extensibility interface for non-token control-plane auth.
+### Dynamic Runtime Controls
+- [ ] Add optional audit trail sink for control-plane changes.
+- [ ] Add runtime toggle for per-path sampling profiles.
+- [ ] Add auth extensibility interface for non-token control-plane auth.
 
-## 4) Performance and Reliability
+### Performance & Reliability
+- [ ] Add middleware overhead benchmark with CI regression threshold.
+- [ ] Add high-concurrency tests for context isolation.
+- [ ] Add graceful fallback behavior if Prometheus endpoint mount fails.
 
-- Add middleware overhead benchmark with regression threshold in CI.
-- Add high-concurrency tests for context isolation.
-- Add graceful fallback metrics path if Prometheus endpoint cannot mount.
+### DX / Platform
+- [ ] Add first-class health/readiness helper endpoint integration.
+- [ ] Add explicit middleware-ordering section to examples docs (beyond runtime warning).
 
-## 5) Release Pipeline
-
-- Configure Trusted Publishing on PyPI and TestPyPI environments.
-- Add release checklist gating:
+### Release Pipeline
+- [ ] Configure Trusted Publishing for TestPyPI and PyPI.
+- [ ] Add release gates:
   - changelog entry
   - schema compatibility check
   - test matrix green
   - SBOM generated
-- Publish `0.2.0.dev*` pre-releases to TestPyPI before stable `0.2.0`.
+- [ ] Publish and validate `0.2.0.dev1` on TestPyPI, then cut stable `0.2.x`.

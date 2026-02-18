@@ -47,6 +47,17 @@ def test_security_policy_rejects_invalid_max_body_length() -> None:
         SecurityPolicy(max_body_length=0)
 
 
+def test_security_policy_can_unset_preset_optional_fields_from_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OBS_REDACTION_PRESET", "strict")
+    monkeypatch.setenv("OBS_HEADER_ALLOWLIST", "none")
+
+    policy = SecurityPolicy.from_env()
+
+    assert policy.header_allowlist is None
+
+
 def test_trusted_proxy_policy_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("OBS_TRUSTED_PROXY_ENABLED", "false")
     monkeypatch.setenv("OBS_TRUSTED_CIDRS", "10.0.0.0/8, 127.0.0.1/32")

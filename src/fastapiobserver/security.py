@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import ipaddress
+import os
 from typing import Any, Literal, Mapping
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator
@@ -83,6 +84,25 @@ SECURITY_POLICY_PRESETS: dict[str, dict[str, Any]] = {
         "log_response_body": False,
     },
 }
+_SECURITY_POLICY_ENV_MAP = {
+    "redaction_preset": "OBS_REDACTION_PRESET",
+    "redacted_fields": "OBS_REDACTED_FIELDS",
+    "redacted_headers": "OBS_REDACTED_HEADERS",
+    "redaction_mode": "OBS_REDACTION_MODE",
+    "mask_text": "OBS_MASK_TEXT",
+    "log_request_body": "OBS_LOG_REQUEST_BODY",
+    "log_response_body": "OBS_LOG_RESPONSE_BODY",
+    "max_body_length": "OBS_MAX_BODY_LENGTH",
+    "header_allowlist": "OBS_HEADER_ALLOWLIST",
+    "event_key_allowlist": "OBS_EVENT_KEY_ALLOWLIST",
+    "body_capture_media_types": "OBS_BODY_CAPTURE_MEDIA_TYPES",
+}
+_NULLISH_VALUES = {"none", "null", "unset"}
+_OPTIONAL_SECURITY_FIELDS = {
+    "header_allowlist",
+    "event_key_allowlist",
+    "body_capture_media_types",
+}
 
 _DROP = object()
 RedactionMode = Literal["mask", "hash", "drop"]
@@ -162,7 +182,14 @@ class SecurityPolicy(BaseModel):
     @classmethod
     def from_env(cls) -> "SecurityPolicy":
         env_settings = _SecurityPolicySettings()
-        overrides = env_settings.model_dump(exclude_none=True)
+        overrides: dict[str, Any] = {}
+        for field_name, env_name in _SECURITY_POLICY_ENV_MAP.items():
+            if os.getenv(env_name) is None:
+                continue
+            value = getattr(env_settings, field_name)
+            if value is None and field_name not in _OPTIONAL_SECURITY_FIELDS:
+                continue
+            overrides[field_name] = value
         preset_name = overrides.pop("redaction_preset", None)
 
         base = cls()
@@ -248,7 +275,11 @@ class _SecurityPolicySettings(BaseSettings):
     def _parse_tuple_values(
         cls, value: object, info: ValidationInfo
     ) -> tuple[str, ...] | None:
-        _ = info
+        field_name = info.field_name
+        if field_name == "redacted_fields":
+            return parse_csv_tuple(value, DEFAULT_REDACTED_FIELDS)
+        if field_name == "redacted_headers":
+            return parse_csv_tuple(value, DEFAULT_REDACTED_HEADERS)
         return _parse_optional_csv_tuple(value)
 
 
@@ -287,6 +318,8 @@ def _parse_optional_csv_tuple(value: object) -> tuple[str, ...] | None:
     if value is None:
         return None
     if isinstance(value, str):
+        if value.strip().lower() in _NULLISH_VALUES:
+            return None
         return tuple(part.strip() for part in value.split(",") if part.strip())
     if isinstance(value, tuple):
         return tuple(str(item).strip() for item in value if str(item).strip())
