@@ -58,7 +58,7 @@ def mount_control_plane(app: FastAPI, settings: RuntimeControlSettings) -> None:
 
     normalized_path = settings.path
     mounted_paths: set[str] = getattr(
-        app.state, "_observabilityfastapi_control_paths", set()
+        app.state, "_fastapiobserver_control_paths", set()
     )
     if normalized_path in mounted_paths:
         return
@@ -93,7 +93,7 @@ def mount_control_plane(app: FastAPI, settings: RuntimeControlSettings) -> None:
 
     app.include_router(router)
     mounted_paths.add(normalized_path)
-    app.state._observabilityfastapi_control_paths = mounted_paths
+    app.state._fastapiobserver_control_paths = mounted_paths
 
 
 def _current_runtime_settings() -> dict[str, object]:

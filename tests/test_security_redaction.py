@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from observabilityfastapi.security import SecurityPolicy, sanitize_event
+from fastapiobserver.security import SecurityPolicy, sanitize_event
 
 
 def test_sanitize_event_masks_default_sensitive_fields() -> None:

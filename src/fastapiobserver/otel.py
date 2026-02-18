@@ -126,7 +126,7 @@ def install_otel(
 ) -> None:
     if not otel_settings.enabled:
         return
-    if getattr(app.state, "_observabilityfastapi_otel_installed", False):
+    if getattr(app.state, "_fastapiobserver_otel_installed", False):
         return
 
     trace_api = _import_otel_module("opentelemetry.trace")
@@ -192,7 +192,7 @@ def install_otel(
         # Logging instrumentation is best-effort for compatibility.
         pass
 
-    app.state._observabilityfastapi_otel_installed = True
+    app.state._fastapiobserver_otel_installed = True
 
 
 def _build_span_exporter(otel_settings: OTelSettings) -> Any:

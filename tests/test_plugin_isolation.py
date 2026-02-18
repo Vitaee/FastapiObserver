@@ -3,7 +3,7 @@ from __future__ import annotations
 from starlette.requests import Request
 from starlette.responses import Response
 
-from observabilityfastapi.plugins import (
+from fastapiobserver.plugins import (
     apply_log_enrichers,
     emit_metric_hooks,
     register_log_enricher,

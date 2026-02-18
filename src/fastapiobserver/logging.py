@@ -47,7 +47,7 @@ class StructuredJsonFormatter(logging.Formatter):
             "environment": self.settings.environment,
             "version": self.settings.version,
             "log_schema_version": LOG_SCHEMA_VERSION,
-            "library": "observabilityfastapi",
+            "library": "fastapiobserver",
             "library_version": __version__,
         }
 
@@ -123,7 +123,7 @@ def setup_logging(
         managed_handlers = [
             handler
             for handler in root_logger.handlers
-            if getattr(handler, "_observabilityfastapi_managed", False)
+            if getattr(handler, "_fastapiobserver_managed", False)
         ]
 
         if managed_handlers and not force:
@@ -169,7 +169,7 @@ def _configure_handler(
     handler.setFormatter(formatter)
     handler.addFilter(RequestIdFilter())
     handler.addFilter(TraceContextFilter())
-    setattr(handler, "_observabilityfastapi_managed", True)
+    setattr(handler, "_fastapiobserver_managed", True)
 
 
 def _json_dumps(payload: dict[str, Any]) -> str:

@@ -1,4 +1,4 @@
-from observabilityfastapi import (
+from fastapiobserver import (
     ObservabilitySettings,
     SecurityPolicy,
     TrustedProxyPolicy,

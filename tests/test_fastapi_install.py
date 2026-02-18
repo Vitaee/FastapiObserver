@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from fastapi import FastAPI
 
-from observabilityfastapi import ObservabilitySettings, install_observability
-from observabilityfastapi.middleware import RequestLoggingMiddleware
+from fastapiobserver import ObservabilitySettings, install_observability
+from fastapiobserver.middleware import RequestLoggingMiddleware
 
 
 def test_install_observability_adds_request_logging_middleware_once() -> None:

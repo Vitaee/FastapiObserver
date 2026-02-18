@@ -6,7 +6,7 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 - Explicit log schema version (`log_schema_version`) and package version metadata in every JSON log.
-- Public package version export (`observabilityfastapi.__version__`).
+- Public package version export (`fastapiobserver.__version__`).
 - Prometheus metric labels now include `service` and `environment` for better cross-instance aggregation.
 - Gunicorn helper `mark_prometheus_process_dead()` to support Prometheus multiprocess cleanup.
 - Prometheus multiprocess directory validation when `PROMETHEUS_MULTIPROC_DIR` is enabled.
@@ -24,7 +24,7 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 - Project version bumped to `0.2.0.dev0` for next development cycle.
-- Distribution name changed from `observabilityfastapi` to `fastapi-observer` (import path remains `observabilityfastapi`).
+- Distribution name changed from `fastapiobserver` to `fastapi-observer` (import path remains `fastapiobserver`).
 - Dependency minimums refreshed to currently tested releases (FastAPI/Starlette/OTel/Prometheus/tooling).
 - Python compatibility range changed to `>=3.10,<3.15`.
 - CI matrix expanded to run tests on Python `3.10` through `3.14`.

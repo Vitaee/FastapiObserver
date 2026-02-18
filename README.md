@@ -39,14 +39,14 @@ pip install "fastapi-observer[all]"
 Import path remains:
 
 ```python
-import observabilityfastapi
+import fastapiobserver
 ```
 
 ## Quick Start
 
 ```python
 from fastapi import FastAPI
-from observabilityfastapi import (
+from fastapiobserver import (
     ObservabilitySettings,
     SecurityPolicy,
     TrustedProxyPolicy,
@@ -87,7 +87,7 @@ export OBSERVABILITY_CONTROL_TOKEN="replace-me"
 ```
 
 ```python
-from observabilityfastapi import RuntimeControlSettings, mount_control_plane
+from fastapiobserver import RuntimeControlSettings, mount_control_plane
 
 mount_control_plane(app, RuntimeControlSettings(enabled=True))
 ```
@@ -122,7 +122,7 @@ mkdir -p "$PROMETHEUS_MULTIPROC_DIR"
 In `gunicorn.conf.py`:
 
 ```python
-from observabilityfastapi import mark_prometheus_process_dead
+from fastapiobserver import mark_prometheus_process_dead
 
 def child_exit(server, worker):
     mark_prometheus_process_dead(worker.pid)
@@ -200,7 +200,7 @@ Typical commands:
 
 ```bash
 git add .
-git commit -m "feat: implement observabilityfastapi library"
+git commit -m "feat: implement fastapiobserver library"
 git push -u origin main
 ```
 

@@ -1,12 +1,12 @@
 from fastapi import FastAPI
 
-from observabilityfastapi import (
+from fastapiobserver import (
     ObservabilitySettings,
     SecurityPolicy,
     TrustedProxyPolicy,
     install_observability,
 )
-from observabilityfastapi.request_context import get_request_id
+from fastapiobserver.request_context import get_request_id
 
 app = FastAPI(title="ObservabilityFastAPI Example")
 

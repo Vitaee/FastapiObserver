@@ -3,10 +3,10 @@ from __future__ import annotations
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from observabilityfastapi import ObservabilitySettings, install_observability
-from observabilityfastapi.middleware import _resolve_request_id
-from observabilityfastapi.request_context import get_request_id
-from observabilityfastapi.security import TrustedProxyPolicy
+from fastapiobserver import ObservabilitySettings, install_observability
+from fastapiobserver.middleware import _resolve_request_id
+from fastapiobserver.request_context import get_request_id
+from fastapiobserver.security import TrustedProxyPolicy
 
 
 def _build_app(trusted_proxy_policy: TrustedProxyPolicy) -> FastAPI:

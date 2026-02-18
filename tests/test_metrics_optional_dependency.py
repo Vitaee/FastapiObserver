@@ -3,8 +3,8 @@ from __future__ import annotations
 import os
 import tempfile
 
-import observabilityfastapi.metrics as metrics_module
-from observabilityfastapi.metrics import (
+import fastapiobserver.metrics as metrics_module
+from fastapiobserver.metrics import (
     NoopMetricsBackend,
     PrometheusMetricsBackend,
     build_metrics_backend,

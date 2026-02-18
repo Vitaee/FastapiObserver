@@ -51,7 +51,7 @@ class RequestLoggingMiddleware:
         self.security_policy = security_policy or SecurityPolicy()
         self.trusted_proxy_policy = trusted_proxy_policy or TrustedProxyPolicy()
         self.metrics_backend = metrics_backend or NoopMetricsBackend()
-        self.logger = logging.getLogger("observabilityfastapi.middleware")
+        self.logger = logging.getLogger("fastapiobserver.middleware")
         self.ip_resolver = _IpResolver(self.trusted_proxy_policy)
         self.context_manager = _RequestContextManager(self.settings)
         self.event_builder = _RequestEventBuilder(self.security_policy)

@@ -5,7 +5,7 @@ import logging
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from observabilityfastapi.control_plane import RuntimeControlSettings, mount_control_plane
+from fastapiobserver.control_plane import RuntimeControlSettings, mount_control_plane
 
 
 def test_control_plane_requires_token_auth(monkeypatch) -> None:

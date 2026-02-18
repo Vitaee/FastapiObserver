@@ -3,14 +3,14 @@ from __future__ import annotations
 from fastapi import FastAPI
 import pytest
 
-from observabilityfastapi.config import ObservabilitySettings
-from observabilityfastapi.otel import (
+from fastapiobserver.config import ObservabilitySettings
+from fastapiobserver.otel import (
     OTelSettings,
     create_otel_resource,
     install_otel,
     set_trace_sampling_ratio,
 )
-import observabilityfastapi.otel as otel_module
+import fastapiobserver.otel as otel_module
 
 
 def test_install_otel_missing_dependency_raises(monkeypatch: pytest.MonkeyPatch) -> None:

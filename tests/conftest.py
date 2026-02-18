@@ -4,8 +4,8 @@ import logging
 
 import pytest
 
-from observabilityfastapi.plugins import clear_plugins
-from observabilityfastapi.request_context import (
+from fastapiobserver.plugins import clear_plugins
+from fastapiobserver.request_context import (
     clear_request_id,
     clear_span_id,
     clear_trace_id,

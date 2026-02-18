@@ -3,10 +3,10 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from observabilityfastapi.config import ObservabilitySettings
-from observabilityfastapi.control_plane import RuntimeControlSettings
-from observabilityfastapi.otel import OTelSettings
-from observabilityfastapi.security import SecurityPolicy, TrustedProxyPolicy
+from fastapiobserver.config import ObservabilitySettings
+from fastapiobserver.control_plane import RuntimeControlSettings
+from fastapiobserver.otel import OTelSettings
+from fastapiobserver.security import SecurityPolicy, TrustedProxyPolicy
 
 
 def test_observability_settings_normalize_values() -> None:

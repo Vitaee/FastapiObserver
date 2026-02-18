@@ -7,7 +7,7 @@ from typing import Callable, Mapping
 from starlette.requests import Request
 from starlette.responses import Response
 
-logger = logging.getLogger("observabilityfastapi.plugins")
+logger = logging.getLogger("fastapiobserver.plugins")
 
 LogEnricher = Callable[[dict[str, object]], dict[str, object]]
 MetricHook = Callable[[Request, Response, float], None]
