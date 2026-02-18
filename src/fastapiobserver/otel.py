@@ -308,7 +308,15 @@ def _normalize_otlp_endpoint(
     normalized_endpoint = endpoint.strip()
     if not normalized_endpoint:
         return None
-    if protocol != "http/protobuf":
+    if protocol == "grpc":
+        parsed = urlparse(normalized_endpoint)
+        grpc_path = parsed.path.rstrip("/")
+        if grpc_path.endswith("/v1/traces"):
+            raise ValueError(
+                "gRPC OTLP endpoint must not include '/v1/traces'. "
+                "Use protocol='http/protobuf' for '/v1/traces' endpoints, "
+                "or remove the path for gRPC."
+            )
         return normalized_endpoint
 
     parsed = urlparse(normalized_endpoint)

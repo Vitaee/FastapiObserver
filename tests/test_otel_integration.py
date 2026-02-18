@@ -105,3 +105,19 @@ def test_normalize_http_otlp_endpoint_keeps_explicit_path() -> None:
         "http/protobuf",
     )
     assert normalized == "http://127.0.0.1:4318/custom/path"
+
+
+def test_normalize_grpc_otlp_endpoint_rejects_http_trace_path() -> None:
+    with pytest.raises(ValueError, match=r"must not include '/v1/traces'"):
+        otel_module._normalize_otlp_endpoint(  # type: ignore[attr-defined]
+            "http://127.0.0.1:4317/v1/traces",
+            "grpc",
+        )
+
+
+def test_normalize_grpc_otlp_endpoint_keeps_valid_endpoint() -> None:
+    normalized = otel_module._normalize_otlp_endpoint(  # type: ignore[attr-defined]
+        "http://127.0.0.1:4317",
+        "grpc",
+    )
+    assert normalized == "http://127.0.0.1:4317"
