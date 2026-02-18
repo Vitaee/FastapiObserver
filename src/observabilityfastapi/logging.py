@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from ._version import __version__
 from .config import ObservabilitySettings
 from .plugins import apply_log_enrichers
 from .request_context import get_request_id, get_span_id, get_trace_id, get_user_context
@@ -22,6 +23,7 @@ except ModuleNotFoundError:  # pragma: no cover - fallback for environments with
     orjson = None
 
 _LOGGING_LOCK = threading.Lock()
+LOG_SCHEMA_VERSION = "1.0.0"
 
 
 class StructuredJsonFormatter(logging.Formatter):
@@ -44,6 +46,9 @@ class StructuredJsonFormatter(logging.Formatter):
             "service": self.settings.service,
             "environment": self.settings.environment,
             "version": self.settings.version,
+            "log_schema_version": LOG_SCHEMA_VERSION,
+            "library": "observabilityfastapi",
+            "library_version": __version__,
         }
 
         request_id = getattr(record, "request_id", None) or get_request_id()

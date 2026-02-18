@@ -1,7 +1,8 @@
+from ._version import __version__
 from .config import ObservabilitySettings
 from .control_plane import RuntimeControlSettings, mount_control_plane
 from .fastapi import install_observability
-from .logging import RequestIdFilter, StructuredJsonFormatter, setup_logging
+from .logging import LOG_SCHEMA_VERSION, RequestIdFilter, StructuredJsonFormatter, setup_logging
 from .otel import OTelSettings, create_otel_resource, install_otel
 from .plugins import register_log_enricher, register_metric_hook
 from .request_context import (
@@ -28,6 +29,8 @@ __all__ = [
     "SecurityPolicy",
     "StructuredJsonFormatter",
     "TrustedProxyPolicy",
+    "LOG_SCHEMA_VERSION",
+    "__version__",
     "clear_request_id",
     "clear_span_id",
     "clear_trace_id",

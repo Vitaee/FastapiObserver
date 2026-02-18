@@ -3,7 +3,8 @@ from __future__ import annotations
 import json
 import logging
 
-from observabilityfastapi import ObservabilitySettings, SecurityPolicy
+from observabilityfastapi import LOG_SCHEMA_VERSION, ObservabilitySettings, SecurityPolicy
+from observabilityfastapi import __version__ as package_version
 from observabilityfastapi.logging import StructuredJsonFormatter, setup_logging
 from observabilityfastapi.request_context import (
     clear_request_id,
@@ -47,10 +48,16 @@ def test_structured_log_schema_contract() -> None:
         "service",
         "environment",
         "version",
+        "log_schema_version",
+        "library",
+        "library_version",
         "request_id",
     ):
         assert required_key in payload
 
+    assert payload["log_schema_version"] == LOG_SCHEMA_VERSION
+    assert payload["library"] == "observabilityfastapi"
+    assert payload["library_version"] == package_version
     assert payload["request_id"] == "req-123"
     assert payload["event"]["headers"]["authorization"] == "***"
     assert payload["user_context"]["password"] == "***"

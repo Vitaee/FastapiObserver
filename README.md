@@ -107,6 +107,10 @@ uvicorn examples.basic_app:app --reload
 - `0.2.x`: OpenTelemetry-native interoperability
 - `1.0.0`: dynamic runtime controls and plugin stability
 
+Current development version:
+
+- `0.2.0.dev0` (post-`v0.1.0` hardening and compatibility work)
+
 ## Changelog Policy
 
 Any breaking change must be called out under a `Breaking Changes` section.
@@ -159,3 +163,7 @@ git add .
 git commit -m "feat: implement observabilityfastapi library"
 git push -u origin main
 ```
+
+## Roadmap Tracking
+
+See `/Users/canilgu/Desktop/ObservabilityFastapi/NEXT_STEPS.md` for the active `0.2.0` roadmap and release checklist.

@@ -12,12 +12,36 @@ from pydantic import BaseModel, Field
 from .otel import get_trace_sampling_ratio, set_trace_sampling_ratio
 
 
+def _env_bool(name: str, default: bool) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
 @dataclass(frozen=True)
 class RuntimeControlSettings:
     enabled: bool = False
     path: str = "/_observability/control"
     auth_mode: Literal["token"] = "token"
     token_env_var: str = "OBSERVABILITY_CONTROL_TOKEN"
+
+    def __post_init__(self) -> None:
+        normalized_path = _normalize_path(self.path)
+        if not self.token_env_var.strip():
+            raise ValueError("token_env_var cannot be empty")
+        object.__setattr__(self, "path", normalized_path)
+
+    @classmethod
+    def from_env(cls) -> "RuntimeControlSettings":
+        return cls(
+            enabled=_env_bool("OBS_RUNTIME_CONTROL_ENABLED", False),
+            path=os.getenv("OBS_RUNTIME_CONTROL_PATH", "/_observability/control"),
+            auth_mode="token",
+            token_env_var=os.getenv(
+                "OBS_RUNTIME_CONTROL_TOKEN_ENV_VAR", "OBSERVABILITY_CONTROL_TOKEN"
+            ),
+        )
 
 
 class ControlPlanePayload(BaseModel):

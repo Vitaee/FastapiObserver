@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import importlib
+import os
 import threading
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 from fastapi import FastAPI
 
@@ -11,6 +12,14 @@ from .config import ObservabilitySettings
 
 _RUNTIME_LOCK = threading.RLock()
 _RUNTIME_TRACE_SAMPLING_RATIO = 1.0
+OTEL_PROTOCOLS = {"grpc", "http/protobuf"}
+
+
+def _env_bool(name: str, default: bool) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
 @dataclass(frozen=True)
@@ -22,6 +31,44 @@ class OTelSettings:
     otlp_endpoint: str | None = None
     protocol: Literal["grpc", "http/protobuf"] = "grpc"
     trace_sampling_ratio: float = 1.0
+
+    def __post_init__(self) -> None:
+        normalized_protocol = self.protocol.strip().lower()
+        if normalized_protocol not in OTEL_PROTOCOLS:
+            raise ValueError(f"Invalid OTel protocol: {self.protocol}")
+        if not (0.0 <= self.trace_sampling_ratio <= 1.0):
+            raise ValueError("trace_sampling_ratio must be between 0.0 and 1.0")
+        object.__setattr__(self, "protocol", normalized_protocol)
+
+    @classmethod
+    def from_env(
+        cls,
+        settings: ObservabilitySettings | None = None,
+    ) -> "OTelSettings":
+        default_service_name = settings.service if settings else "api"
+        default_service_version = settings.version if settings else "0.0.0"
+        default_environment = settings.environment if settings else "development"
+
+        trace_sampling_ratio_env = os.getenv("OTEL_TRACE_SAMPLING_RATIO", "1.0")
+        try:
+            trace_sampling_ratio = float(trace_sampling_ratio_env)
+        except ValueError:
+            trace_sampling_ratio = 1.0
+
+        raw_protocol = os.getenv("OTEL_EXPORTER_OTLP_PROTOCOL", "grpc").strip().lower()
+        if raw_protocol not in OTEL_PROTOCOLS:
+            raw_protocol = "grpc"
+        protocol = cast(Literal["grpc", "http/protobuf"], raw_protocol)
+
+        return cls(
+            enabled=_env_bool("OTEL_ENABLED", False),
+            service_name=os.getenv("OTEL_SERVICE_NAME", default_service_name),
+            service_version=os.getenv("OTEL_SERVICE_VERSION", default_service_version),
+            environment=os.getenv("OTEL_ENVIRONMENT", default_environment),
+            otlp_endpoint=os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT"),
+            protocol=protocol,
+            trace_sampling_ratio=trace_sampling_ratio,
+        )
 
 
 def get_trace_sampling_ratio() -> float:

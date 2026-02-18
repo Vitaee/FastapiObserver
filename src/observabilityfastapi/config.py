@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import logging
 import os
+import re
 from dataclasses import dataclass
+
+_HEADER_NAME_RE = re.compile(r"^[A-Za-z0-9-]+$")
 
 
 def _env_bool(name: str, default: bool) -> bool:
@@ -39,6 +43,30 @@ class ObservabilitySettings:
         "/openapi.json",
     )
 
+    def __post_init__(self) -> None:
+        normalized_log_level = self.log_level.upper().strip()
+        valid_levels = set(logging.getLevelNamesMapping())
+        if normalized_log_level not in valid_levels:
+            raise ValueError(f"Invalid log_level: {self.log_level}")
+        object.__setattr__(self, "log_level", normalized_log_level)
+
+        request_header = self.request_id_header.strip().lower()
+        response_header = self.response_request_id_header.strip().lower()
+        if not _HEADER_NAME_RE.fullmatch(request_header):
+            raise ValueError(f"Invalid request_id_header: {self.request_id_header}")
+        if not _HEADER_NAME_RE.fullmatch(response_header):
+            raise ValueError(
+                f"Invalid response_request_id_header: {self.response_request_id_header}"
+            )
+        object.__setattr__(self, "request_id_header", request_header)
+        object.__setattr__(self, "response_request_id_header", response_header)
+
+        object.__setattr__(self, "metrics_path", _normalize_path(self.metrics_path))
+        normalized_exclude_paths = tuple(
+            _normalize_path(path) for path in self.metrics_exclude_paths
+        )
+        object.__setattr__(self, "metrics_exclude_paths", normalized_exclude_paths)
+
     @classmethod
     def from_env(cls) -> "ObservabilitySettings":
         return cls(
@@ -59,3 +87,12 @@ class ObservabilitySettings:
                 ("/metrics", "/health", "/healthz", "/docs", "/openapi.json"),
             ),
         )
+
+
+def _normalize_path(path: str) -> str:
+    candidate = path.strip() or "/"
+    if not candidate.startswith("/"):
+        candidate = f"/{candidate}"
+    if len(candidate) > 1:
+        candidate = candidate.rstrip("/")
+    return candidate
