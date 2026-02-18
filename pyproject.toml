@@ -1,0 +1,78 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "observabilityfastapi"
+version = "0.1.0"
+description = "Secure-by-default observability toolkit for FastAPI"
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [
+    { name = "Vitaee", email = "opensource@vitaee.dev" },
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Framework :: FastAPI",
+    "Topic :: System :: Logging",
+    "Topic :: System :: Monitoring",
+]
+keywords = ["fastapi", "observability", "logging", "metrics", "opentelemetry"]
+license = "MIT"
+license-files = ["LICENSE"]
+dependencies = [
+    "fastapi>=0.110.0",
+    "orjson>=3.9.0",
+    "starlette>=0.36.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/Vitaee/FastapiObserver"
+Documentation = "https://github.com/Vitaee/FastapiObserver#readme"
+Repository = "https://github.com/Vitaee/FastapiObserver.git"
+Issues = "https://github.com/Vitaee/FastapiObserver/issues"
+
+[project.optional-dependencies]
+prometheus = [
+    "prometheus-client>=0.17.0",
+]
+otel = [
+    "opentelemetry-api>=1.24.0",
+    "opentelemetry-sdk>=1.24.0",
+    "opentelemetry-exporter-otlp>=1.24.0",
+    "opentelemetry-instrumentation-fastapi>=0.45b0",
+    "opentelemetry-instrumentation-logging>=0.45b0",
+]
+all = [
+    "prometheus-client>=0.17.0",
+    "opentelemetry-api>=1.24.0",
+    "opentelemetry-sdk>=1.24.0",
+    "opentelemetry-exporter-otlp>=1.24.0",
+    "opentelemetry-instrumentation-fastapi>=0.45b0",
+    "opentelemetry-instrumentation-logging>=0.45b0",
+]
+dev = [
+    "httpx>=0.27.0",
+    "mypy>=1.10.0",
+    "pip-audit>=2.7.0",
+    "pytest>=8.2.0",
+    "ruff>=0.4.0",
+    "cyclonedx-bom>=4.0.0",
+]
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
