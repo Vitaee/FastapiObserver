@@ -23,7 +23,7 @@ def test_install_otel_missing_dependency_raises(monkeypatch: pytest.MonkeyPatch)
 
     monkeypatch.setattr(otel_module.importlib, "import_module", fake_import)
 
-    with pytest.raises(RuntimeError, match=r"pip install observabilityfastapi\[otel\]"):
+    with pytest.raises(RuntimeError, match=r"pip install fastapi-observer\[otel\]"):
         install_otel(
             FastAPI(),
             ObservabilitySettings(),

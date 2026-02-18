@@ -86,7 +86,7 @@ def _import_prometheus_client() -> Any:
         return importlib.import_module("prometheus_client")
     except ModuleNotFoundError as exc:
         raise RuntimeError(
-            "Prometheus support requires `pip install observabilityfastapi[prometheus]`"
+            "Prometheus support requires `pip install fastapi-observer[prometheus]`"
         ) from exc
 
 
@@ -151,4 +151,3 @@ def _validate_prometheus_multiprocess_dir() -> None:
         raise RuntimeError("PROMETHEUS_MULTIPROC_DIR must point to a directory.")
     if not os.access(path, os.W_OK):
         raise RuntimeError("PROMETHEUS_MULTIPROC_DIR must be writable.")
-

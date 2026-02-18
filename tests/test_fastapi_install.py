@@ -29,7 +29,7 @@ def test_install_observability_with_metrics_enabled_requires_extra() -> None:
     try:
         install_observability(app, settings)
     except RuntimeError as exc:
-        assert "observabilityfastapi[prometheus]" in str(exc)
+        assert "fastapi-observer[prometheus]" in str(exc)
     else:
         route_paths = [getattr(route, "path", None) for route in app.routes]
         assert settings.metrics_path in route_paths

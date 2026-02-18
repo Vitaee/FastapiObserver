@@ -215,5 +215,5 @@ def _import_otel_module(name: str) -> Any:
         return importlib.import_module(name)
     except ModuleNotFoundError as exc:
         raise RuntimeError(
-            "OpenTelemetry support requires `pip install observabilityfastapi[otel]`"
+            "OpenTelemetry support requires `pip install fastapi-observer[otel]`"
         ) from exc

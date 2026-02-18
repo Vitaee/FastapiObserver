@@ -29,7 +29,7 @@ def test_metrics_backend_missing_dependency_raises() -> None:
     metrics_module.importlib.import_module = fake_import
     try:
         with pytest.raises(
-            RuntimeError, match=r"pip install observabilityfastapi\[prometheus\]"
+            RuntimeError, match=r"pip install fastapi-observer\[prometheus\]"
         ):
             build_metrics_backend(True)
     finally:

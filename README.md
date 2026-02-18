@@ -1,4 +1,4 @@
-# observabilityfastapi
+# fastapi-observer
 
 Secure-by-default observability toolkit for FastAPI apps:
 - Structured JSON logs
@@ -15,25 +15,31 @@ Supported Python versions: `3.10` to `3.14`.
 Core:
 
 ```bash
-pip install observabilityfastapi
+pip install fastapi-observer
 ```
 
 With Prometheus support:
 
 ```bash
-pip install "observabilityfastapi[prometheus]"
+pip install "fastapi-observer[prometheus]"
 ```
 
 With OpenTelemetry support:
 
 ```bash
-pip install "observabilityfastapi[otel]"
+pip install "fastapi-observer[otel]"
 ```
 
 Everything:
 
 ```bash
-pip install "observabilityfastapi[all]"
+pip install "fastapi-observer[all]"
+```
+
+Import path remains:
+
+```python
+import observabilityfastapi
 ```
 
 ## Quick Start
@@ -160,8 +166,8 @@ python -m build
 
 This creates:
 
-- `dist/observabilityfastapi-<version>.tar.gz`
-- `dist/observabilityfastapi-<version>-py3-none-any.whl`
+- `dist/fastapi_observer-<version>.tar.gz`
+- `dist/fastapi_observer-<version>-py3-none-any.whl`
 
 ### 2) Upload to TestPyPI first
 
@@ -173,7 +179,7 @@ python -m twine upload --repository testpypi dist/*
 ### 3) Validate install from TestPyPI
 
 ```bash
-python -m pip install --index-url https://test.pypi.org/simple/ --no-deps observabilityfastapi
+python -m pip install --index-url https://test.pypi.org/simple/ --no-deps fastapi-observer
 ```
 
 ### 4) Upload to production PyPI
