@@ -39,6 +39,51 @@ DEFAULT_TRUSTED_CIDRS = (
     "::1/128",
 )
 
+STRICT_HEADER_ALLOWLIST = (
+    "x-request-id",
+    "traceparent",
+    "user-agent",
+    "content-type",
+)
+PCI_REDACTED_FIELDS = (
+    "card-number",
+    "cvv",
+    "expiry",
+    "pan",
+    "track-data",
+)
+GDPR_REDACTED_FIELDS = (
+    "email",
+    "phone",
+    "address",
+    "date-of-birth",
+    "ssn",
+    "ip-address",
+    "first-name",
+    "last-name",
+    "full-name",
+)
+SECURITY_POLICY_PRESETS: dict[str, dict[str, Any]] = {
+    "strict": {
+        "redaction_mode": "drop",
+        "log_request_body": False,
+        "log_response_body": False,
+        "header_allowlist": STRICT_HEADER_ALLOWLIST,
+    },
+    "pci": {
+        "redaction_mode": "mask",
+        "redacted_fields": DEFAULT_REDACTED_FIELDS + PCI_REDACTED_FIELDS,
+        "log_request_body": False,
+        "log_response_body": False,
+    },
+    "gdpr": {
+        "redaction_mode": "hash",
+        "redacted_fields": DEFAULT_REDACTED_FIELDS + GDPR_REDACTED_FIELDS,
+        "log_request_body": False,
+        "log_response_body": False,
+    },
+}
+
 _DROP = object()
 RedactionMode = Literal["mask", "hash", "drop"]
 
@@ -53,10 +98,80 @@ class SecurityPolicy(BaseModel):
     log_request_body: bool = False
     log_response_body: bool = False
     max_body_length: int = Field(default=256, gt=0)
+    header_allowlist: tuple[str, ...] | None = None
+    event_key_allowlist: tuple[str, ...] | None = None
+    body_capture_media_types: tuple[str, ...] | None = None
+
+    @field_validator(
+        "redacted_fields",
+        "redacted_headers",
+        "header_allowlist",
+        "event_key_allowlist",
+        mode="before",
+    )
+    @classmethod
+    def _parse_key_tuples(
+        cls, value: object, info: ValidationInfo
+    ) -> tuple[str, ...] | None:
+        defaults = {
+            "redacted_fields": DEFAULT_REDACTED_FIELDS,
+            "redacted_headers": DEFAULT_REDACTED_HEADERS,
+        }
+        field_name = info.field_name
+        if field_name in defaults:
+            return parse_csv_tuple(value, defaults[field_name])
+        return _parse_optional_csv_tuple(value)
+
+    @field_validator("body_capture_media_types", mode="before")
+    @classmethod
+    def _parse_media_types(cls, value: object) -> tuple[str, ...] | None:
+        return _parse_optional_csv_tuple(value)
+
+    @field_validator(
+        "redacted_fields",
+        "redacted_headers",
+        "header_allowlist",
+        "event_key_allowlist",
+        mode="after",
+    )
+    @classmethod
+    def _normalize_key_tuples(
+        cls, value: tuple[str, ...] | None
+    ) -> tuple[str, ...] | None:
+        if value is None:
+            return None
+        return tuple(_normalize_key(item) for item in value)
+
+    @field_validator("body_capture_media_types", mode="after")
+    @classmethod
+    def _normalize_media_type_tuples(
+        cls, value: tuple[str, ...] | None
+    ) -> tuple[str, ...] | None:
+        if value is None:
+            return None
+        return tuple(_normalize_media_type(item) for item in value)
+
+    @classmethod
+    def from_preset(cls, name: str) -> "SecurityPolicy":
+        normalized_name = name.strip().lower()
+        if normalized_name not in SECURITY_POLICY_PRESETS:
+            available = ", ".join(sorted(SECURITY_POLICY_PRESETS))
+            raise ValueError(f"Unknown security preset '{name}'. Expected one of: {available}")
+        return cls(**SECURITY_POLICY_PRESETS[normalized_name])
 
     @classmethod
     def from_env(cls) -> "SecurityPolicy":
-        return cls(**_SecurityPolicySettings().model_dump())
+        env_settings = _SecurityPolicySettings()
+        overrides = env_settings.model_dump(exclude_none=True)
+        preset_name = overrides.pop("redaction_preset", None)
+
+        base = cls()
+        if preset_name:
+            base = cls.from_preset(preset_name)
+
+        if not overrides:
+            return base
+        return base.model_copy(update=overrides)
 
 
 class TrustedProxyPolicy(BaseModel):
@@ -78,38 +193,63 @@ class _SecurityPolicySettings(BaseSettings):
         populate_by_name=True,
     )
 
-    redacted_fields: str | tuple[str, ...] = Field(
-        default=DEFAULT_REDACTED_FIELDS,
+    redaction_preset: str | None = Field(
+        default=None,
+        validation_alias="OBS_REDACTION_PRESET",
+    )
+    redacted_fields: str | tuple[str, ...] | None = Field(
+        default=None,
         validation_alias="OBS_REDACTED_FIELDS",
     )
-    redacted_headers: str | tuple[str, ...] = Field(
-        default=DEFAULT_REDACTED_HEADERS,
+    redacted_headers: str | tuple[str, ...] | None = Field(
+        default=None,
         validation_alias="OBS_REDACTED_HEADERS",
     )
-    redaction_mode: RedactionMode = Field(
-        default="mask",
+    redaction_mode: RedactionMode | None = Field(
+        default=None,
         validation_alias="OBS_REDACTION_MODE",
     )
-    mask_text: str = Field(default="***", validation_alias="OBS_MASK_TEXT")
-    log_request_body: bool = Field(
-        default=False,
+    mask_text: str | None = Field(default=None, validation_alias="OBS_MASK_TEXT")
+    log_request_body: bool | None = Field(
+        default=None,
         validation_alias="OBS_LOG_REQUEST_BODY",
     )
-    log_response_body: bool = Field(
-        default=False,
+    log_response_body: bool | None = Field(
+        default=None,
         validation_alias="OBS_LOG_RESPONSE_BODY",
     )
-    max_body_length: int = Field(default=256, gt=0, validation_alias="OBS_MAX_BODY_LENGTH")
+    max_body_length: int | None = Field(
+        default=None,
+        gt=0,
+        validation_alias="OBS_MAX_BODY_LENGTH",
+    )
+    header_allowlist: str | tuple[str, ...] | None = Field(
+        default=None,
+        validation_alias="OBS_HEADER_ALLOWLIST",
+    )
+    event_key_allowlist: str | tuple[str, ...] | None = Field(
+        default=None,
+        validation_alias="OBS_EVENT_KEY_ALLOWLIST",
+    )
+    body_capture_media_types: str | tuple[str, ...] | None = Field(
+        default=None,
+        validation_alias="OBS_BODY_CAPTURE_MEDIA_TYPES",
+    )
 
-    @field_validator("redacted_fields", "redacted_headers", mode="before")
+    @field_validator(
+        "redacted_fields",
+        "redacted_headers",
+        "header_allowlist",
+        "event_key_allowlist",
+        "body_capture_media_types",
+        mode="before",
+    )
     @classmethod
-    def _parse_tuple_values(cls, value: object, info: ValidationInfo) -> tuple[str, ...]:
-        defaults = {
-            "redacted_fields": DEFAULT_REDACTED_FIELDS,
-            "redacted_headers": DEFAULT_REDACTED_HEADERS,
-        }
-        field_name = info.field_name or "redacted_fields"
-        return parse_csv_tuple(value, defaults[field_name])
+    def _parse_tuple_values(
+        cls, value: object, info: ValidationInfo
+    ) -> tuple[str, ...] | None:
+        _ = info
+        return _parse_optional_csv_tuple(value)
 
 
 class _TrustedProxyPolicySettings(BaseSettings):
@@ -139,6 +279,22 @@ def _normalize_key(key: str) -> str:
     return key.strip().lower().replace("_", "-")
 
 
+def _normalize_media_type(value: str) -> str:
+    return value.split(";", 1)[0].strip().lower()
+
+
+def _parse_optional_csv_tuple(value: object) -> tuple[str, ...] | None:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return tuple(part.strip() for part in value.split(",") if part.strip())
+    if isinstance(value, tuple):
+        return tuple(str(item).strip() for item in value if str(item).strip())
+    if isinstance(value, list):
+        return tuple(str(item).strip() for item in value if str(item).strip())
+    return None
+
+
 def _redact_value(value: Any, policy: SecurityPolicy) -> Any:
     if policy.redaction_mode == "drop":
         return _DROP
@@ -151,7 +307,26 @@ def _redact_value(value: Any, policy: SecurityPolicy) -> Any:
 def sanitize_event(data: dict[str, Any], policy: SecurityPolicy) -> dict[str, Any]:
     sensitive_fields = {_normalize_key(item) for item in policy.redacted_fields}
     sensitive_headers = {_normalize_key(item) for item in policy.redacted_headers}
-    return _sanitize_mapping(data, policy, sensitive_fields, sensitive_headers, False)
+    header_allowlist = (
+        {_normalize_key(item) for item in policy.header_allowlist}
+        if policy.header_allowlist is not None
+        else None
+    )
+    event_key_allowlist = (
+        {_normalize_key(item) for item in policy.event_key_allowlist}
+        if policy.event_key_allowlist is not None
+        else None
+    )
+    return _sanitize_mapping(
+        data,
+        policy,
+        sensitive_fields,
+        sensitive_headers,
+        parent_is_headers=False,
+        depth=0,
+        header_allowlist=header_allowlist,
+        event_key_allowlist=event_key_allowlist,
+    )
 
 
 def _sanitize_mapping(
@@ -160,10 +335,21 @@ def _sanitize_mapping(
     sensitive_fields: set[str],
     sensitive_headers: set[str],
     parent_is_headers: bool,
+    depth: int,
+    header_allowlist: set[str] | None,
+    event_key_allowlist: set[str] | None,
 ) -> dict[str, Any]:
     out: dict[str, Any] = {}
     for key, value in data.items():
         normalized_key = _normalize_key(str(key))
+
+        if parent_is_headers and header_allowlist is not None:
+            if normalized_key not in header_allowlist:
+                continue
+        if depth == 0 and event_key_allowlist is not None:
+            if normalized_key not in event_key_allowlist:
+                continue
+
         should_redact = normalized_key in sensitive_fields or (
             parent_is_headers and normalized_key in sensitive_headers
         )
@@ -180,6 +366,9 @@ def _sanitize_mapping(
             sensitive_fields,
             sensitive_headers,
             parent_is_headers=normalized_key == "headers",
+            depth=depth + 1,
+            header_allowlist=header_allowlist,
+            event_key_allowlist=event_key_allowlist,
         )
     return out
 
@@ -190,6 +379,9 @@ def _sanitize_value(
     sensitive_fields: set[str],
     sensitive_headers: set[str],
     parent_is_headers: bool,
+    depth: int,
+    header_allowlist: set[str] | None,
+    event_key_allowlist: set[str] | None,
 ) -> Any:
     if isinstance(value, Mapping):
         string_mapping = {str(k): v for k, v in value.items()}
@@ -199,6 +391,9 @@ def _sanitize_value(
             sensitive_fields,
             sensitive_headers,
             parent_is_headers,
+            depth,
+            header_allowlist,
+            event_key_allowlist,
         )
     if isinstance(value, list):
         return [
@@ -208,6 +403,9 @@ def _sanitize_value(
                 sensitive_fields,
                 sensitive_headers,
                 parent_is_headers=False,
+                depth=depth + 1,
+                header_allowlist=header_allowlist,
+                event_key_allowlist=event_key_allowlist,
             )
             for item in value
         ]
@@ -219,10 +417,25 @@ def _sanitize_value(
                 sensitive_fields,
                 sensitive_headers,
                 parent_is_headers=False,
+                depth=depth + 1,
+                header_allowlist=header_allowlist,
+                event_key_allowlist=event_key_allowlist,
             )
             for item in value
         )
     return value
+
+
+def is_body_capturable(content_type: str | None, policy: SecurityPolicy) -> bool:
+    if policy.body_capture_media_types is None:
+        return True
+    if not content_type:
+        return False
+    normalized_content_type = _normalize_media_type(content_type)
+    for media_type in policy.body_capture_media_types:
+        if normalized_content_type.startswith(media_type):
+            return True
+    return False
 
 
 def is_trusted_client_ip(client_ip: str | None, policy: TrustedProxyPolicy) -> bool:

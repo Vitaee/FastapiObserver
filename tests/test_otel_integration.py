@@ -52,3 +52,40 @@ def test_create_otel_resource_when_dependency_available() -> None:
 
     assert resource.attributes["service.name"] == "orders-api"
     assert resource.attributes["service.version"] == "2.0.0"
+
+
+def test_create_otel_resource_merges_extra_attributes() -> None:
+    pytest.importorskip("opentelemetry.sdk.resources")
+
+    resource = create_otel_resource(
+        ObservabilitySettings(app_name="orders", service="orders", version="2.0.0"),
+        OTelSettings(
+            enabled=True,
+            service_name="orders-api",
+            service_version="2.0.0",
+            environment="production",
+            extra_resource_attributes={
+                "k8s.namespace": "prod",
+                "service.namespace": "platform",
+            },
+        ),
+    )
+
+    assert resource.attributes["k8s.namespace"] == "prod"
+    assert resource.attributes["service.namespace"] == "platform"
+
+
+def test_otel_settings_parse_extra_resource_attributes_from_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(
+        "OTEL_EXTRA_RESOURCE_ATTRIBUTES",
+        "k8s.namespace=prod,custom.team=platform",
+    )
+
+    settings = OTelSettings.from_env()
+
+    assert settings.extra_resource_attributes == {
+        "k8s.namespace": "prod",
+        "custom.team": "platform",
+    }

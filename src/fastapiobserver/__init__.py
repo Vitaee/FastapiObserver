@@ -20,7 +20,7 @@ from .request_context import (
     set_trace_id,
     set_user_context,
 )
-from .security import SecurityPolicy, TrustedProxyPolicy, sanitize_event
+from .security import SecurityPolicy, TrustedProxyPolicy, is_body_capturable, sanitize_event
 
 __all__ = [
     "OTelSettings",
@@ -47,6 +47,7 @@ __all__ = [
     "mount_control_plane",
     "register_log_enricher",
     "register_metric_hook",
+    "is_body_capturable",
     "sanitize_event",
     "set_request_id",
     "set_span_id",

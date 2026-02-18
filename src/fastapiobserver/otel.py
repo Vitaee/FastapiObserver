@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import importlib
+import logging
 import threading
-from typing import Any, Literal
+from typing import Any, Literal, Mapping
 
 from fastapi import FastAPI
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -13,6 +14,7 @@ from .config import ObservabilitySettings
 _RUNTIME_LOCK = threading.RLock()
 _RUNTIME_TRACE_SAMPLING_RATIO = 1.0
 OTEL_PROTOCOLS = {"grpc", "http/protobuf"}
+_LOGGER = logging.getLogger("fastapiobserver.otel")
 
 
 class OTelSettings(BaseModel):
@@ -25,6 +27,7 @@ class OTelSettings(BaseModel):
     otlp_endpoint: str | None = None
     protocol: Literal["grpc", "http/protobuf"] = "grpc"
     trace_sampling_ratio: float = Field(default=1.0, ge=0.0, le=1.0)
+    extra_resource_attributes: dict[str, str] = Field(default_factory=dict)
 
     @field_validator("protocol", mode="before")
     @classmethod
@@ -33,6 +36,11 @@ class OTelSettings(BaseModel):
         if normalized_protocol not in OTEL_PROTOCOLS:
             raise ValueError(f"Invalid OTel protocol: {value}")
         return normalized_protocol
+
+    @field_validator("extra_resource_attributes", mode="before")
+    @classmethod
+    def _parse_resource_attributes(cls, value: object) -> dict[str, str]:
+        return _parse_resource_attributes(value)
 
     @classmethod
     def from_env(
@@ -52,6 +60,9 @@ class OTelSettings(BaseModel):
             otlp_endpoint=env_settings.otlp_endpoint,
             protocol=env_settings.protocol,
             trace_sampling_ratio=env_settings.trace_sampling_ratio,
+            extra_resource_attributes=_parse_resource_attributes(
+                env_settings.extra_resource_attributes
+            ),
         )
 
 
@@ -82,6 +93,10 @@ class _OTelEnvSettings(BaseSettings):
         ge=0.0,
         le=1.0,
         validation_alias="OTEL_TRACE_SAMPLING_RATIO",
+    )
+    extra_resource_attributes: str | None = Field(
+        default=None,
+        validation_alias="OTEL_EXTRA_RESOURCE_ATTRIBUTES",
     )
 
     @field_validator("protocol", mode="before")
@@ -116,6 +131,7 @@ def create_otel_resource(settings: ObservabilitySettings, otel_settings: OTelSet
         "deployment.environment.name": otel_settings.environment or settings.environment,
         "service.namespace": settings.app_name,
     }
+    resource_attrs.update(otel_settings.extra_resource_attributes)
     return resources_module.Resource.create(resource_attrs)
 
 
@@ -141,6 +157,8 @@ def install_otel(
     )
 
     set_trace_sampling_ratio(otel_settings.trace_sampling_ratio)
+    current_provider = trace_api.get_tracer_provider()
+    has_external_provider = _has_configured_tracer_provider(trace_api, current_provider)
 
     class DynamicTraceIdRatioSampler:
         def should_sample(
@@ -167,18 +185,39 @@ def install_otel(
         def get_description(self) -> str:
             return "DynamicTraceIdRatioSampler"
 
-    sampler = sampling.ParentBased(DynamicTraceIdRatioSampler())
-    resource = create_otel_resource(settings, otel_settings)
-    tracer_provider = trace_sdk.TracerProvider(resource=resource, sampler=sampler)
+    tracer_provider = current_provider
+    if not has_external_provider:
+        sampler = sampling.ParentBased(DynamicTraceIdRatioSampler())
+        resource = create_otel_resource(settings, otel_settings)
+        tracer_provider = trace_sdk.TracerProvider(resource=resource, sampler=sampler)
 
-    exporter = _build_span_exporter(otel_settings)
-    tracer_provider.add_span_processor(trace_export.BatchSpanProcessor(exporter))
+        exporter = _build_span_exporter(otel_settings)
+        tracer_provider.add_span_processor(trace_export.BatchSpanProcessor(exporter))
 
-    try:
-        trace_api.set_tracer_provider(tracer_provider)
-    except Exception:
-        # The process may already have a global provider set by the host app.
-        pass
+        try:
+            trace_api.set_tracer_provider(tracer_provider)
+        except Exception:
+            tracer_provider = trace_api.get_tracer_provider()
+            _LOGGER.warning(
+                "otel.tracer_provider.already_configured",
+                extra={
+                    "event": {
+                        "provider_class": tracer_provider.__class__.__name__,
+                    },
+                    "_skip_enrichers": True,
+                },
+            )
+    elif otel_settings.otlp_endpoint:
+        _LOGGER.warning(
+            "otel.external_provider.detected",
+            extra={
+                "event": {
+                    "provider_class": tracer_provider.__class__.__name__,
+                    "otlp_endpoint": otel_settings.otlp_endpoint,
+                },
+                "_skip_enrichers": True,
+            },
+        )
 
     fastapi_instrumentor_module.FastAPIInstrumentor.instrument_app(
         app, tracer_provider=tracer_provider
@@ -217,3 +256,38 @@ def _import_otel_module(name: str) -> Any:
         raise RuntimeError(
             "OpenTelemetry support requires `pip install fastapi-observer[otel]`"
         ) from exc
+
+
+def _has_configured_tracer_provider(trace_api: Any, provider: Any) -> bool:
+    proxy_provider = getattr(trace_api, "ProxyTracerProvider", None)
+    if proxy_provider is not None and isinstance(provider, proxy_provider):
+        return False
+    if provider.__class__.__name__ in {"ProxyTracerProvider", "NoOpTracerProvider"}:
+        return False
+    return hasattr(provider, "add_span_processor")
+
+
+def _parse_resource_attributes(value: object) -> dict[str, str]:
+    if value is None:
+        return {}
+    if isinstance(value, Mapping):
+        return {str(key).strip(): str(val).strip() for key, val in value.items() if str(key).strip()}
+    if isinstance(value, str):
+        attributes: dict[str, str] = {}
+        for item in value.split(","):
+            candidate = item.strip()
+            if not candidate:
+                continue
+            if "=" not in candidate:
+                raise ValueError(
+                    "Invalid OTEL extra resource attribute format; expected key=value"
+                )
+            key, raw_value = candidate.split("=", 1)
+            normalized_key = key.strip()
+            if not normalized_key:
+                raise ValueError(
+                    "Invalid OTEL extra resource attribute format; key cannot be empty"
+                )
+            attributes[normalized_key] = raw_value.strip()
+        return attributes
+    raise ValueError("extra_resource_attributes must be a mapping or key=value CSV string")

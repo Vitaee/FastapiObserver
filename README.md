@@ -77,6 +77,12 @@ install_observability(
 - Sensitive keys and headers are masked by default.
 - Inbound request IDs accepted only from trusted CIDRs when trust-boundary mode is enabled.
 - Query strings are excluded from request path logging.
+- Body capture can be restricted with `body_capture_media_types` allowlist.
+- Allowlist-only sanitization is supported with `header_allowlist` and `event_key_allowlist`.
+
+## Middleware Ordering (Body Capture)
+
+When request/response body capture is enabled, install observability middleware as the outermost middleware so it can observe the raw ASGI stream before other middleware consumes it.
 
 ## Runtime Control Plane
 
@@ -149,7 +155,7 @@ Prometheus target labels (`job`, `instance`) plus this package's metric labels (
 
 Current development version:
 
-- `0.2.0.dev0` (post-`v0.1.0` hardening and compatibility work)
+- `0.2.0.dev1` (security and async logging hardening)
 
 ## Changelog Policy
 
@@ -179,6 +185,15 @@ python -m twine upload --repository testpypi dist/*
 ### 3) Validate install from TestPyPI
 
 ```bash
+python -m pip install \
+  --extra-index-url https://test.pypi.org/simple/ \
+  fastapi-observer
+```
+
+If you want strict control during test installs:
+
+```bash
+python -m pip install fastapi starlette orjson pydantic-settings
 python -m pip install --index-url https://test.pypi.org/simple/ --no-deps fastapi-observer
 ```
 

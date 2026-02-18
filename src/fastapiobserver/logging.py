@@ -4,6 +4,7 @@ import json
 import logging
 import logging.handlers
 import os
+import queue
 import sys
 import threading
 from datetime import datetime, timezone
@@ -23,6 +24,8 @@ except ModuleNotFoundError:  # pragma: no cover - fallback for environments with
     orjson = None
 
 _LOGGING_LOCK = threading.Lock()
+_QUEUE_LISTENER: logging.handlers.QueueListener | None = None
+_MANAGED_OUTPUT_HANDLERS: list[logging.Handler] = []
 LOG_SCHEMA_VERSION = "1.0.0"
 
 
@@ -118,6 +121,9 @@ def setup_logging(
     force: bool = True,
     security_policy: SecurityPolicy | None = None,
 ) -> None:
+    global _QUEUE_LISTENER
+    global _MANAGED_OUTPUT_HANDLERS
+
     with _LOGGING_LOCK:
         root_logger = logging.getLogger()
         managed_handlers = [
@@ -133,27 +139,33 @@ def setup_logging(
             root_logger.removeHandler(handler)
             handler.close()
 
+        if _QUEUE_LISTENER is not None:
+            _QUEUE_LISTENER.stop()
+            _QUEUE_LISTENER = None
+
+        for output_handler in _MANAGED_OUTPUT_HANDLERS:
+            output_handler.close()
+        _MANAGED_OUTPUT_HANDLERS = []
+
         formatter = StructuredJsonFormatter(
             settings=settings, security_policy=security_policy
         )
         root_logger.setLevel(settings.log_level.upper())
 
-        stream_handler = logging.StreamHandler(sys.stdout)
-        _configure_handler(stream_handler, formatter)
-        root_logger.addHandler(stream_handler)
+        output_handlers = _build_output_handlers(settings, formatter)
+        log_queue: queue.SimpleQueue[logging.LogRecord] = queue.SimpleQueue()
+        queue_handler = logging.handlers.QueueHandler(log_queue)
+        _configure_queue_handler(queue_handler)
+        root_logger.addHandler(queue_handler)
 
-        if settings.log_dir:
-            log_dir = Path(settings.log_dir)
-            log_dir.mkdir(parents=True, exist_ok=True)
-            file_name = f"{settings.service or settings.app_name}.log"
-            file_handler = logging.handlers.RotatingFileHandler(
-                os.fspath(log_dir / file_name),
-                maxBytes=10 * 1024 * 1024,
-                backupCount=5,
-                encoding="utf-8",
-            )
-            _configure_handler(file_handler, formatter)
-            root_logger.addHandler(file_handler)
+        listener = logging.handlers.QueueListener(
+            log_queue,
+            *output_handlers,
+            respect_handler_level=True,
+        )
+        listener.start()
+        _QUEUE_LISTENER = listener
+        _MANAGED_OUTPUT_HANDLERS = output_handlers
 
         for name in ("uvicorn", "uvicorn.error", "uvicorn.access"):
             uvicorn_logger = logging.getLogger(name)
@@ -162,11 +174,39 @@ def setup_logging(
             uvicorn_logger.setLevel(settings.log_level.upper())
 
 
-def _configure_handler(
+def _build_output_handlers(
+    settings: ObservabilitySettings,
+    formatter: logging.Formatter,
+) -> list[logging.Handler]:
+    handlers: list[logging.Handler] = []
+    stream_handler = logging.StreamHandler(sys.stdout)
+    _configure_output_handler(stream_handler, formatter)
+    handlers.append(stream_handler)
+
+    if settings.log_dir:
+        log_dir = Path(settings.log_dir)
+        log_dir.mkdir(parents=True, exist_ok=True)
+        file_name = f"{settings.service or settings.app_name}.log"
+        file_handler = logging.handlers.RotatingFileHandler(
+            os.fspath(log_dir / file_name),
+            maxBytes=10 * 1024 * 1024,
+            backupCount=5,
+            encoding="utf-8",
+        )
+        _configure_output_handler(file_handler, formatter)
+        handlers.append(file_handler)
+    return handlers
+
+
+def _configure_output_handler(
     handler: logging.Handler,
     formatter: logging.Formatter,
 ) -> None:
     handler.setFormatter(formatter)
+    handler.setLevel(logging.NOTSET)
+
+
+def _configure_queue_handler(handler: logging.Handler) -> None:
     handler.addFilter(RequestIdFilter())
     handler.addFilter(TraceContextFilter())
     setattr(handler, "_fastapiobserver_managed", True)

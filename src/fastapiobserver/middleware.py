@@ -6,6 +6,7 @@ import time
 import uuid
 from typing import Any
 
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.requests import Request
 from starlette.responses import Response
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
@@ -25,6 +26,7 @@ from .request_context import (
 from .security import (
     SecurityPolicy,
     TrustedProxyPolicy,
+    is_body_capturable,
     is_trusted_client_ip,
     resolve_client_ip,
     sanitize_event,
@@ -74,8 +76,14 @@ class RequestLoggingMiddleware:
         path = scope.get("path", "")
         method = scope.get("method", "UNKNOWN")
         status_code = 500
+        captured_error: Exception | None = None
+        request_content_type = headers.get("content-type")
+        request_body_enabled = self.security_policy.log_request_body and is_body_capturable(
+            request_content_type,
+            self.security_policy,
+        )
         request_body_capture = _BodyCapture(
-            enabled=self.security_policy.log_request_body,
+            enabled=request_body_enabled,
             max_length=self.security_policy.max_body_length,
         )
         response_body_capture = _BodyCapture(
@@ -93,6 +101,15 @@ class RequestLoggingMiddleware:
             nonlocal status_code
             if message["type"] == "http.response.start":
                 status_code = int(message.get("status", 500))
+                response_headers = _decode_headers(message.get("headers", []))
+                if (
+                    self.security_policy.log_response_body
+                    and self.security_policy.body_capture_media_types is not None
+                ):
+                    response_content_type = response_headers.get("content-type")
+                    response_body_capture.set_enabled(
+                        is_body_capturable(response_content_type, self.security_policy)
+                    )
                 updated_headers = _upsert_header(
                     message.get("headers", []),
                     self.settings.response_request_id_header,
@@ -106,12 +123,14 @@ class RequestLoggingMiddleware:
 
         try:
             await self.app(scope, receive_wrapper, send_wrapper)
-        except Exception:
+        except Exception as exc:
             had_error = True
+            captured_error = exc
             status_code = 500
             raise
         finally:
             duration_seconds = max(0.0, time.perf_counter() - start)
+            error_type = _classify_error(status_code, captured_error)
             safe_event = self.event_builder.build(
                 method=method,
                 path=path,
@@ -120,9 +139,19 @@ class RequestLoggingMiddleware:
                 client_ip=client_ip,
                 request_body=request_body_capture.value,
                 response_body=response_body_capture.value,
+                error_type=error_type,
+                exception_class=(
+                    captured_error.__class__.__name__
+                    if captured_error is not None
+                    else None
+                ),
             )
             if had_error:
                 self.logger.exception("request.failed", extra={"event": safe_event})
+            elif status_code >= 500:
+                self.logger.error("request.server_error", extra={"event": safe_event})
+            elif status_code >= 400:
+                self.logger.warning("request.client_error", extra={"event": safe_event})
             else:
                 self.logger.info("request.completed", extra={"event": safe_event})
 
@@ -167,6 +196,9 @@ class _BodyCapture:
         if remaining <= 0:
             return
         self._buffer.extend(chunk[:remaining])
+
+    def set_enabled(self, enabled: bool) -> None:
+        self.enabled = enabled
 
 
 class _IpResolver:
@@ -224,6 +256,8 @@ class _RequestEventBuilder:
         client_ip: str | None,
         request_body: str | None,
         response_body: str | None,
+        error_type: str,
+        exception_class: str | None,
     ) -> dict[str, Any]:
         event: dict[str, Any] = {
             "method": method,
@@ -231,11 +265,14 @@ class _RequestEventBuilder:
             "status_code": status_code,
             "duration_ms": round(duration_seconds * 1000, 3),
             "client_ip": client_ip,
+            "error_type": error_type,
         }
         if request_body is not None:
             event["request_body"] = request_body
         if response_body is not None:
             event["response_body"] = response_body
+        if exception_class:
+            event["exception_class"] = exception_class
         return sanitize_event(event, self.policy)
 
 
@@ -332,6 +369,21 @@ def _decode_headers(headers: list[tuple[bytes, bytes]]) -> dict[str, str]:
         key.decode("latin1").lower(): value.decode("latin1")
         for key, value in headers
     }
+
+
+def _classify_error(status_code: int, error: Exception | None) -> str:
+    if error is not None:
+        if isinstance(error, StarletteHTTPException):
+            if error.status_code >= 500:
+                return "server_error_exception"
+            if error.status_code >= 400:
+                return "client_error_exception"
+        return "unhandled_exception"
+    if status_code >= 500:
+        return "server_error"
+    if status_code >= 400:
+        return "client_error"
+    return "ok"
 
 
 __all__ = ["RequestLoggingMiddleware"]

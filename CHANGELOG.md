@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.2.0.dev0] - Unreleased
+## [0.2.0.dev1] - Unreleased
 
 ### Added
 - Explicit log schema version (`log_schema_version`) and package version metadata in every JSON log.
@@ -21,14 +21,21 @@ All notable changes to this project will be documented in this file.
   - OTel protocol and sampling validation
   - security redaction mode and body length checks
 - New tests for configuration and environment loading.
+- Security policy presets: `strict`, `pci`, and `gdpr`.
+- Allowlist-only sanitization options (`header_allowlist`, `event_key_allowlist`).
+- Body capture media type allowlist support (`body_capture_media_types`).
+- OTel custom resource attribute support (`extra_resource_attributes` and `OTEL_EXTRA_RESOURCE_ATTRIBUTES`).
+- Middleware error classification fields (`error_type`, `exception_class`).
 
 ### Changed
-- Project version bumped to `0.2.0.dev0` for next development cycle.
+- Project version bumped to `0.2.0.dev1` for next development cycle.
 - Distribution name changed from `fastapiobserver` to `fastapi-observer` (import path remains `fastapiobserver`).
 - Dependency minimums refreshed to currently tested releases (FastAPI/Starlette/OTel/Prometheus/tooling).
 - Python compatibility range changed to `>=3.10,<3.15`.
 - CI matrix expanded to run tests on Python `3.10` through `3.14`.
 - Removed deprecated license classifier to comply with modern setuptools/PEP 639 validation.
+- OTel installation now coexists safely with host applications that already configured a global tracer provider.
+- Logging pipeline moved to queue-based handlers to reduce request-path blocking from synchronous I/O.
 
 ## [0.1.0] - 2026-02-18
 

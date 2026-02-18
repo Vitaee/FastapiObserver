@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+
 from fastapi import FastAPI
 
 from .config import ObservabilitySettings
@@ -9,6 +11,8 @@ from .metrics import PrometheusMetricsBackend, build_metrics_backend, mount_metr
 from .middleware import RequestLoggingMiddleware
 from .otel import OTelSettings, install_otel
 from .security import SecurityPolicy, TrustedProxyPolicy
+
+_LOGGER = logging.getLogger("fastapiobserver.fastapi")
 
 
 def install_observability(
@@ -38,6 +42,26 @@ def install_observability(
 
     if otel_settings and otel_settings.enabled:
         install_otel(app, settings, otel_settings)
+
+    if (
+        security_policy.log_request_body or security_policy.log_response_body
+    ) and app.user_middleware:
+        _LOGGER.warning(
+            "observability.body_capture.middleware_order",
+            extra={
+                "event": {
+                    "message": (
+                        "Body capture works best when observability middleware is the "
+                        "outermost middleware."
+                    ),
+                    "existing_middleware": [
+                        getattr(middleware.cls, "__name__", str(middleware.cls))
+                        for middleware in app.user_middleware
+                    ],
+                },
+                "_skip_enrichers": True,
+            },
+        )
 
     if not _has_request_logging_middleware(app):
         app.add_middleware(
