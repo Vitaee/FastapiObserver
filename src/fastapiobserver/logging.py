@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib
 import json
 import logging
 import logging.handlers
@@ -17,7 +18,7 @@ from .sinks import build_sink_handlers
 
 orjson: Any
 try:
-    import orjson  # type: ignore[no-redef]
+    orjson = importlib.import_module("orjson")
 except ModuleNotFoundError:  # pragma: no cover - fallback for environments without orjson
     orjson = None
 

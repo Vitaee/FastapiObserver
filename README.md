@@ -630,6 +630,21 @@ The repository also includes GitHub Actions workflows for CI, SBOM generation, a
 
 ---
 
+## Local Git Hook (Recommended)
+
+To block pushes when quality checks fail, enable the repo-managed pre-push hook:
+
+```bash
+git config core.hooksPath .githooks
+```
+
+The hook runs:
+- `uv run ruff check`
+- `uv run mypy src`
+- `uv run pytest -q`
+
+---
+
 ## Roadmap Tracking
 
 See [NEXT_STEPS.md](NEXT_STEPS.md) for the active `0.2.0` roadmap and release checklist.

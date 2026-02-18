@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+echo "[pre-push] Running Ruff"
+uv run ruff check
+
+echo "[pre-push] Running mypy"
+uv run mypy src
+
+echo "[pre-push] Running pytest"
+uv run pytest -q
+
+echo "[pre-push] All checks passed."

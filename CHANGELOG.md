@@ -79,6 +79,10 @@ All notable changes to this project will be documented in this file.
 - OTLP-only mode now fails fast when no OTLP log handler can be created, preventing silent log loss.
 - Accept header parsing now handles quoted quality factors (for example `q="0"`).
 - Prometheus negotiation tests now assert content-type behavior for both positive and negative cases.
+- Optional `orjson` import now uses `importlib.import_module` fallback to avoid mypy `import-not-found` CI failures.
+
+### Developer Experience
+- Added repo-managed pre-push hook (`.githooks/pre-push`) to run `ruff`, `mypy`, and `pytest` before push.
 
 ## [0.1.0] - 2026-02-18
 
