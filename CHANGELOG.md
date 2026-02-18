@@ -21,6 +21,10 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 - Project version bumped to `0.2.0.dev0` for next development cycle.
+- Dependency minimums refreshed to currently tested releases (FastAPI/Starlette/OTel/Prometheus/tooling).
+- Python compatibility range changed to `>=3.10,<3.15`.
+- CI matrix expanded to run tests on Python `3.10` through `3.14`.
+- Removed deprecated license classifier to comply with modern setuptools/PEP 639 validation.
 
 ## [0.1.0] - 2026-02-18
 

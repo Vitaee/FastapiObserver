@@ -8,6 +8,8 @@ Secure-by-default observability toolkit for FastAPI apps:
 - Runtime control plane with token auth
 - Plugin hooks for custom enrichers and metric hooks
 
+Supported Python versions: `3.10` to `3.14`.
+
 ## Install
 
 Core:

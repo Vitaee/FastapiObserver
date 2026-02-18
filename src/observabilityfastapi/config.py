@@ -45,8 +45,8 @@ class ObservabilitySettings:
 
     def __post_init__(self) -> None:
         normalized_log_level = self.log_level.upper().strip()
-        valid_levels = set(logging.getLevelNamesMapping())
-        if normalized_log_level not in valid_levels:
+        level = logging.getLevelName(normalized_log_level)
+        if not isinstance(level, int):
             raise ValueError(f"Invalid log_level: {self.log_level}")
         object.__setattr__(self, "log_level", normalized_log_level)
 
