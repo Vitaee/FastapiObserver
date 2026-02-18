@@ -15,6 +15,7 @@ from fastapiobserver import (
     StructuredJsonFormatter,
     install_observability,
 )
+import fastapiobserver.otel as otel_module
 from fastapiobserver.logging import TraceContextFilter
 
 
@@ -37,13 +38,16 @@ def _span_pairs(spans: list[Any]) -> set[tuple[str, str]]:
     return pairs
 
 
-def test_trace_and_span_ids_are_correlated_in_logs() -> None:
+def test_trace_and_span_ids_are_correlated_in_logs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     pytest.importorskip("opentelemetry.trace")
-    trace_export = pytest.importorskip("opentelemetry.sdk.trace.export")
     in_memory_export = pytest.importorskip(
         "opentelemetry.sdk.trace.export.in_memory_span_exporter"
     )
     trace_api = pytest.importorskip("opentelemetry.trace")
+    exporter = in_memory_export.InMemorySpanExporter()
+    monkeypatch.setattr(otel_module, "_build_span_exporter", lambda _: exporter)
 
     app = FastAPI()
 
@@ -71,9 +75,6 @@ def test_trace_and_span_ids_are_correlated_in_logs() -> None:
     provider = trace_api.get_tracer_provider()
     if not hasattr(provider, "add_span_processor"):
         pytest.skip("Active tracer provider does not support span processors")
-
-    exporter = in_memory_export.InMemorySpanExporter()
-    provider.add_span_processor(trace_export.SimpleSpanProcessor(exporter))
 
     handler = _CollectingHandler()
     handler.setFormatter(StructuredJsonFormatter(settings))

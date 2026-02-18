@@ -14,10 +14,7 @@ from tests.conftest_otlp import OtlpCollector
 def test_spans_are_exported_to_otlp_collector(otlp_collector: OtlpCollector) -> None:
     pytest.importorskip("opentelemetry.trace")
     trace_api = pytest.importorskip("opentelemetry.trace")
-    trace_export = pytest.importorskip("opentelemetry.sdk.trace.export")
-    otlp_http_exporter = pytest.importorskip(
-        "opentelemetry.exporter.otlp.proto.http.trace_exporter"
-    )
+    pytest.importorskip("opentelemetry.exporter.otlp.proto.http.trace_exporter")
 
     app = FastAPI()
 
@@ -42,9 +39,6 @@ def test_spans_are_exported_to_otlp_collector(otlp_collector: OtlpCollector) -> 
     provider = trace_api.get_tracer_provider()
     if not hasattr(provider, "add_span_processor"):
         pytest.skip("Active tracer provider does not support span processors")
-
-    exporter = otlp_http_exporter.OTLPSpanExporter(endpoint=otlp_collector.endpoint)
-    provider.add_span_processor(trace_export.SimpleSpanProcessor(exporter))
 
     response = TestClient(app).get("/ping")
     assert response.status_code == 200

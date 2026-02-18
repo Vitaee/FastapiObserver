@@ -65,6 +65,7 @@ dev = [
     "mypy>=1.19.1",
     "pip-audit>=2.10.0",
     "pytest>=9.0.2",
+    "pytest-randomly>=3.16.0",
     "ruff>=0.15.1",
     "cyclonedx-bom>=7.2.1",
 ]

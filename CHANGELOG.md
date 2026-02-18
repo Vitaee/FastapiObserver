@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [0.2.0.dev1] - Unreleased
 
+### Sprint A: Baseline Hardening
+
 ### Added
 - Explicit log schema version (`log_schema_version`) and package version metadata in every JSON log.
 - Public package version export (`fastapiobserver.__version__`).
@@ -21,11 +23,6 @@ All notable changes to this project will be documented in this file.
   - OTel protocol and sampling validation
   - security redaction mode and body length checks
 - New tests for configuration and environment loading.
-- Security policy presets: `strict`, `pci`, and `gdpr`.
-- Allowlist-only sanitization options (`header_allowlist`, `event_key_allowlist`).
-- Body capture media type allowlist support (`body_capture_media_types`).
-- OTel custom resource attribute support (`extra_resource_attributes` and `OTEL_EXTRA_RESOURCE_ATTRIBUTES`).
-- Middleware error classification fields (`error_type`, `exception_class`).
 
 ### Changed
 - Project version bumped to `0.2.0.dev1` for next development cycle.
@@ -36,6 +33,23 @@ All notable changes to this project will be documented in this file.
 - Removed deprecated license classifier to comply with modern setuptools/PEP 639 validation.
 - OTel installation now coexists safely with host applications that already configured a global tracer provider.
 - Logging pipeline moved to queue-based handlers to reduce request-path blocking from synchronous I/O.
+
+### Sprint B: OTel & Security Test Depth
+
+### Added
+- Security policy presets: `strict`, `pci`, and `gdpr`.
+- Allowlist-only sanitization options (`header_allowlist`, `event_key_allowlist`).
+- Body capture media type allowlist support (`body_capture_media_types`).
+- OTel custom resource attribute support (`extra_resource_attributes` and `OTEL_EXTRA_RESOURCE_ATTRIBUTES`).
+- Middleware error classification fields (`error_type`, `exception_class`).
+- OTel log-correlation integration test (`tests/test_otel_log_correlation.py`).
+- OTLP collector fixture and OTLP export integration test (`tests/conftest_otlp.py`, `tests/test_otlp_export_integration.py`).
+- Public exports for security preset constants (`SECURITY_POLICY_PRESETS`, `PCI_REDACTED_FIELDS`, `GDPR_REDACTED_FIELDS`, `STRICT_HEADER_ALLOWLIST`).
+
+### Changed
+- Security env override behavior now checks actual env var presence before applying overrides.
+- Optional preset fields can be explicitly unset via `none|null|unset` values.
+- OTel integration tests reset global tracer provider state between tests to avoid cross-test exporter leakage.
 
 ## [0.1.0] - 2026-02-18
 

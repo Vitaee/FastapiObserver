@@ -275,6 +275,7 @@ class _SecurityPolicySettings(BaseSettings):
     def _parse_tuple_values(
         cls, value: object, info: ValidationInfo
     ) -> tuple[str, ...] | None:
+        # Settings parsing must normalize raw env strings before SecurityPolicy model validation.
         field_name = info.field_name
         if field_name == "redacted_fields":
             return parse_csv_tuple(value, DEFAULT_REDACTED_FIELDS)
