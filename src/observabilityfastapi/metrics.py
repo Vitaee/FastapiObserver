@@ -9,6 +9,8 @@ from typing import Any, Protocol
 
 from fastapi import FastAPI
 
+from .utils import normalize_path as normalize_route_path
+
 _UUID_RE = re.compile(
     r"/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}"
 )
@@ -101,7 +103,7 @@ def build_metrics_backend(
 
 
 def mount_metrics_endpoint(app: FastAPI, path: str = "/metrics") -> None:
-    path = _normalize_route_path(path)
+    path = normalize_route_path(path, default="/metrics")
     for route in app.routes:
         if getattr(route, "path", None) == path:
             return
@@ -150,11 +152,3 @@ def _validate_prometheus_multiprocess_dir() -> None:
     if not os.access(path, os.W_OK):
         raise RuntimeError("PROMETHEUS_MULTIPROC_DIR must be writable.")
 
-
-def _normalize_route_path(path: str) -> str:
-    candidate = path.strip() or "/metrics"
-    if not candidate.startswith("/"):
-        candidate = f"/{candidate}"
-    if len(candidate) > 1:
-        candidate = candidate.rstrip("/")
-    return candidate

@@ -1,98 +1,86 @@
 from __future__ import annotations
 
 import logging
-import os
 import re
-from dataclasses import dataclass
+
+from pydantic import Field, field_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+from .utils import normalize_path, parse_csv_tuple
 
 _HEADER_NAME_RE = re.compile(r"^[A-Za-z0-9-]+$")
+DEFAULT_METRICS_EXCLUDE_PATHS = (
+    "/metrics",
+    "/health",
+    "/healthz",
+    "/docs",
+    "/openapi.json",
+)
 
 
-def _env_bool(name: str, default: bool) -> bool:
-    value = os.getenv(name)
-    if value is None:
-        return default
-    return value.strip().lower() in {"1", "true", "yes", "on"}
-
-
-def _env_tuple(name: str, default: tuple[str, ...]) -> tuple[str, ...]:
-    value = os.getenv(name)
-    if value is None:
-        return default
-    items = tuple(item.strip() for item in value.split(",") if item.strip())
-    return items or default
-
-
-@dataclass(frozen=True)
-class ObservabilitySettings:
-    app_name: str = "app"
-    service: str = "api"
-    environment: str = "development"
-    version: str = "0.0.0"
-    log_level: str = "INFO"
-    log_dir: str | None = None
-    request_id_header: str = "x-request-id"
-    response_request_id_header: str = "x-request-id"
-    metrics_enabled: bool = False
-    metrics_path: str = "/metrics"
-    metrics_exclude_paths: tuple[str, ...] = (
-        "/metrics",
-        "/health",
-        "/healthz",
-        "/docs",
-        "/openapi.json",
+class ObservabilitySettings(BaseSettings):
+    model_config = SettingsConfigDict(
+        extra="ignore",
+        case_sensitive=False,
+        populate_by_name=True,
     )
 
-    def __post_init__(self) -> None:
-        normalized_log_level = self.log_level.upper().strip()
+    app_name: str = Field(default="app", validation_alias="APP_NAME")
+    service: str = Field(default="api", validation_alias="SERVICE_NAME")
+    environment: str = Field(default="development", validation_alias="ENVIRONMENT")
+    version: str = Field(default="0.0.0", validation_alias="APP_VERSION")
+    log_level: str = Field(default="INFO", validation_alias="LOG_LEVEL")
+    log_dir: str | None = Field(default=None, validation_alias="LOG_DIR")
+    request_id_header: str = Field(
+        default="x-request-id", validation_alias="REQUEST_ID_HEADER"
+    )
+    response_request_id_header: str = Field(
+        default="x-request-id", validation_alias="RESPONSE_REQUEST_ID_HEADER"
+    )
+    metrics_enabled: bool = Field(default=False, validation_alias="METRICS_ENABLED")
+    metrics_path: str = Field(default="/metrics", validation_alias="METRICS_PATH")
+    metrics_exclude_paths: tuple[str, ...] = Field(
+        default=DEFAULT_METRICS_EXCLUDE_PATHS,
+        validation_alias="METRICS_EXCLUDE_PATHS",
+    )
+
+    @field_validator("log_level")
+    @classmethod
+    def _validate_log_level(cls, value: str) -> str:
+        normalized_log_level = value.upper().strip()
         level = logging.getLevelName(normalized_log_level)
         if not isinstance(level, int):
-            raise ValueError(f"Invalid log_level: {self.log_level}")
-        object.__setattr__(self, "log_level", normalized_log_level)
+            raise ValueError(f"Invalid log_level: {value}")
+        return normalized_log_level
 
-        request_header = self.request_id_header.strip().lower()
-        response_header = self.response_request_id_header.strip().lower()
-        if not _HEADER_NAME_RE.fullmatch(request_header):
-            raise ValueError(f"Invalid request_id_header: {self.request_id_header}")
-        if not _HEADER_NAME_RE.fullmatch(response_header):
-            raise ValueError(
-                f"Invalid response_request_id_header: {self.response_request_id_header}"
-            )
-        object.__setattr__(self, "request_id_header", request_header)
-        object.__setattr__(self, "response_request_id_header", response_header)
+    @field_validator("request_id_header", "response_request_id_header")
+    @classmethod
+    def _normalize_header_name(cls, value: str) -> str:
+        normalized = value.strip().lower()
+        if not _HEADER_NAME_RE.fullmatch(normalized):
+            raise ValueError(f"Invalid header value: {value}")
+        return normalized
 
-        object.__setattr__(self, "metrics_path", _normalize_path(self.metrics_path))
-        normalized_exclude_paths = tuple(
-            _normalize_path(path) for path in self.metrics_exclude_paths
-        )
-        object.__setattr__(self, "metrics_exclude_paths", normalized_exclude_paths)
+    @field_validator("metrics_path")
+    @classmethod
+    def _normalize_metrics_path(cls, value: str) -> str:
+        return normalize_path(value, default="/metrics")
+
+    @field_validator("metrics_exclude_paths", mode="before")
+    @classmethod
+    def _parse_metrics_exclude_paths(cls, value: object) -> tuple[str, ...]:
+        return parse_csv_tuple(value, DEFAULT_METRICS_EXCLUDE_PATHS)
+
+    @field_validator("metrics_exclude_paths")
+    @classmethod
+    def _normalize_metrics_exclude_paths(
+        cls, value: tuple[str, ...]
+    ) -> tuple[str, ...]:
+        return tuple(normalize_path(path, default="/") for path in value)
 
     @classmethod
     def from_env(cls) -> "ObservabilitySettings":
-        return cls(
-            app_name=os.getenv("APP_NAME", "app"),
-            service=os.getenv("SERVICE_NAME", "api"),
-            environment=os.getenv("ENVIRONMENT", "development"),
-            version=os.getenv("APP_VERSION", "0.0.0"),
-            log_level=os.getenv("LOG_LEVEL", "INFO"),
-            log_dir=os.getenv("LOG_DIR"),
-            request_id_header=os.getenv("REQUEST_ID_HEADER", "x-request-id"),
-            response_request_id_header=os.getenv(
-                "RESPONSE_REQUEST_ID_HEADER", "x-request-id"
-            ),
-            metrics_enabled=_env_bool("METRICS_ENABLED", False),
-            metrics_path=os.getenv("METRICS_PATH", "/metrics"),
-            metrics_exclude_paths=_env_tuple(
-                "METRICS_EXCLUDE_PATHS",
-                ("/metrics", "/health", "/healthz", "/docs", "/openapi.json"),
-            ),
-        )
+        return cls()
 
 
-def _normalize_path(path: str) -> str:
-    candidate = path.strip() or "/"
-    if not candidate.startswith("/"):
-        candidate = f"/{candidate}"
-    if len(candidate) > 1:
-        candidate = candidate.rstrip("/")
-    return candidate
+__all__ = ["ObservabilitySettings", "DEFAULT_METRICS_EXCLUDE_PATHS"]

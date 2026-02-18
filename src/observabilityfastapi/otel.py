@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 import importlib
-import os
 import threading
-from dataclasses import dataclass
-from typing import Any, Literal, cast
+from typing import Any, Literal
 
 from fastapi import FastAPI
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from .config import ObservabilitySettings
 
@@ -15,30 +15,24 @@ _RUNTIME_TRACE_SAMPLING_RATIO = 1.0
 OTEL_PROTOCOLS = {"grpc", "http/protobuf"}
 
 
-def _env_bool(name: str, default: bool) -> bool:
-    value = os.getenv(name)
-    if value is None:
-        return default
-    return value.strip().lower() in {"1", "true", "yes", "on"}
+class OTelSettings(BaseModel):
+    model_config = ConfigDict(frozen=True)
 
-
-@dataclass(frozen=True)
-class OTelSettings:
     enabled: bool = False
     service_name: str = "api"
     service_version: str = "0.0.0"
     environment: str = "development"
     otlp_endpoint: str | None = None
     protocol: Literal["grpc", "http/protobuf"] = "grpc"
-    trace_sampling_ratio: float = 1.0
+    trace_sampling_ratio: float = Field(default=1.0, ge=0.0, le=1.0)
 
-    def __post_init__(self) -> None:
-        normalized_protocol = self.protocol.strip().lower()
+    @field_validator("protocol", mode="before")
+    @classmethod
+    def _normalize_protocol(cls, value: object) -> str:
+        normalized_protocol = str(value).strip().lower()
         if normalized_protocol not in OTEL_PROTOCOLS:
-            raise ValueError(f"Invalid OTel protocol: {self.protocol}")
-        if not (0.0 <= self.trace_sampling_ratio <= 1.0):
-            raise ValueError("trace_sampling_ratio must be between 0.0 and 1.0")
-        object.__setattr__(self, "protocol", normalized_protocol)
+            raise ValueError(f"Invalid OTel protocol: {value}")
+        return normalized_protocol
 
     @classmethod
     def from_env(
@@ -48,27 +42,57 @@ class OTelSettings:
         default_service_name = settings.service if settings else "api"
         default_service_version = settings.version if settings else "0.0.0"
         default_environment = settings.environment if settings else "development"
-
-        trace_sampling_ratio_env = os.getenv("OTEL_TRACE_SAMPLING_RATIO", "1.0")
-        try:
-            trace_sampling_ratio = float(trace_sampling_ratio_env)
-        except ValueError:
-            trace_sampling_ratio = 1.0
-
-        raw_protocol = os.getenv("OTEL_EXPORTER_OTLP_PROTOCOL", "grpc").strip().lower()
-        if raw_protocol not in OTEL_PROTOCOLS:
-            raw_protocol = "grpc"
-        protocol = cast(Literal["grpc", "http/protobuf"], raw_protocol)
+        env_settings = _OTelEnvSettings()
 
         return cls(
-            enabled=_env_bool("OTEL_ENABLED", False),
-            service_name=os.getenv("OTEL_SERVICE_NAME", default_service_name),
-            service_version=os.getenv("OTEL_SERVICE_VERSION", default_service_version),
-            environment=os.getenv("OTEL_ENVIRONMENT", default_environment),
-            otlp_endpoint=os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT"),
-            protocol=protocol,
-            trace_sampling_ratio=trace_sampling_ratio,
+            enabled=env_settings.enabled,
+            service_name=env_settings.service_name or default_service_name,
+            service_version=env_settings.service_version or default_service_version,
+            environment=env_settings.environment or default_environment,
+            otlp_endpoint=env_settings.otlp_endpoint,
+            protocol=env_settings.protocol,
+            trace_sampling_ratio=env_settings.trace_sampling_ratio,
         )
+
+
+class _OTelEnvSettings(BaseSettings):
+    model_config = SettingsConfigDict(
+        extra="ignore",
+        case_sensitive=False,
+        populate_by_name=True,
+    )
+
+    enabled: bool = Field(default=False, validation_alias="OTEL_ENABLED")
+    service_name: str | None = Field(default=None, validation_alias="OTEL_SERVICE_NAME")
+    service_version: str | None = Field(
+        default=None,
+        validation_alias="OTEL_SERVICE_VERSION",
+    )
+    environment: str | None = Field(default=None, validation_alias="OTEL_ENVIRONMENT")
+    otlp_endpoint: str | None = Field(
+        default=None,
+        validation_alias="OTEL_EXPORTER_OTLP_ENDPOINT",
+    )
+    protocol: Literal["grpc", "http/protobuf"] = Field(
+        default="grpc",
+        validation_alias="OTEL_EXPORTER_OTLP_PROTOCOL",
+    )
+    trace_sampling_ratio: float = Field(
+        default=1.0,
+        ge=0.0,
+        le=1.0,
+        validation_alias="OTEL_TRACE_SAMPLING_RATIO",
+    )
+
+    @field_validator("protocol", mode="before")
+    @classmethod
+    def _normalize_protocol_env(cls, value: object) -> str:
+        if value is None:
+            return "grpc"
+        normalized = str(value).strip().lower()
+        if normalized not in OTEL_PROTOCOLS:
+            return "grpc"
+        return normalized
 
 
 def get_trace_sampling_ratio() -> float:

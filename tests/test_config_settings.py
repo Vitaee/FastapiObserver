@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pytest
+from pydantic import ValidationError
 
 from observabilityfastapi.config import ObservabilitySettings
 from observabilityfastapi.control_plane import RuntimeControlSettings
@@ -25,7 +26,7 @@ def test_observability_settings_normalize_values() -> None:
 
 
 def test_observability_settings_reject_invalid_header() -> None:
-    with pytest.raises(ValueError, match="Invalid request_id_header"):
+    with pytest.raises(ValidationError, match="Invalid header value"):
         ObservabilitySettings(request_id_header="invalid header")
 
 
@@ -42,7 +43,7 @@ def test_security_policy_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_security_policy_rejects_invalid_max_body_length() -> None:
-    with pytest.raises(ValueError, match="max_body_length"):
+    with pytest.raises(ValidationError, match="max_body_length"):
         SecurityPolicy(max_body_length=0)
 
 
@@ -73,7 +74,7 @@ def test_otel_settings_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_otel_settings_reject_invalid_protocol() -> None:
-    with pytest.raises(ValueError, match="Invalid OTel protocol"):
+    with pytest.raises(ValidationError, match="Invalid OTel protocol"):
         OTelSettings(enabled=True, protocol="udp")  # type: ignore[arg-type]
 
 

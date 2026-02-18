@@ -3,45 +3,40 @@ from __future__ import annotations
 import logging
 import os
 import secrets
-from dataclasses import dataclass
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, FastAPI, Header, HTTPException, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from .otel import get_trace_sampling_ratio, set_trace_sampling_ratio
+from .utils import normalize_path
 
 
-def _env_bool(name: str, default: bool) -> bool:
-    value = os.getenv(name)
-    if value is None:
-        return default
-    return value.strip().lower() in {"1", "true", "yes", "on"}
+class RuntimeControlSettings(BaseModel):
+    model_config = ConfigDict(frozen=True)
 
-
-@dataclass(frozen=True)
-class RuntimeControlSettings:
     enabled: bool = False
     path: str = "/_observability/control"
     auth_mode: Literal["token"] = "token"
     token_env_var: str = "OBSERVABILITY_CONTROL_TOKEN"
 
-    def __post_init__(self) -> None:
-        normalized_path = _normalize_path(self.path)
-        if not self.token_env_var.strip():
+    @field_validator("path")
+    @classmethod
+    def _normalize_control_path(cls, value: str) -> str:
+        return normalize_path(value, default="/_observability/control")
+
+    @field_validator("token_env_var")
+    @classmethod
+    def _validate_token_env_var(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
             raise ValueError("token_env_var cannot be empty")
-        object.__setattr__(self, "path", normalized_path)
+        return normalized
 
     @classmethod
     def from_env(cls) -> "RuntimeControlSettings":
-        return cls(
-            enabled=_env_bool("OBS_RUNTIME_CONTROL_ENABLED", False),
-            path=os.getenv("OBS_RUNTIME_CONTROL_PATH", "/_observability/control"),
-            auth_mode="token",
-            token_env_var=os.getenv(
-                "OBS_RUNTIME_CONTROL_TOKEN_ENV_VAR", "OBSERVABILITY_CONTROL_TOKEN"
-            ),
-        )
+        return cls(**_RuntimeControlEnvSettings().model_dump())
 
 
 class ControlPlanePayload(BaseModel):
@@ -61,7 +56,7 @@ def mount_control_plane(app: FastAPI, settings: RuntimeControlSettings) -> None:
             f"Runtime control plane requires `{settings.token_env_var}` to be set"
         )
 
-    normalized_path = _normalize_path(settings.path)
+    normalized_path = settings.path
     mounted_paths: set[str] = getattr(
         app.state, "_observabilityfastapi_control_paths", set()
     )
@@ -122,10 +117,23 @@ def _set_log_level(value: str) -> None:
         logging.getLogger(logger_name).setLevel(level)
 
 
-def _normalize_path(path: str) -> str:
-    candidate = path.strip() or "/_observability/control"
-    if not candidate.startswith("/"):
-        candidate = f"/{candidate}"
-    if len(candidate) > 1:
-        candidate = candidate.rstrip("/")
-    return candidate
+class _RuntimeControlEnvSettings(BaseSettings):
+    model_config = SettingsConfigDict(
+        extra="ignore",
+        case_sensitive=False,
+        populate_by_name=True,
+    )
+
+    enabled: bool = Field(
+        default=False,
+        validation_alias="OBS_RUNTIME_CONTROL_ENABLED",
+    )
+    path: str = Field(
+        default="/_observability/control",
+        validation_alias="OBS_RUNTIME_CONTROL_PATH",
+    )
+    auth_mode: Literal["token"] = "token"
+    token_env_var: str = Field(
+        default="OBSERVABILITY_CONTROL_TOKEN",
+        validation_alias="OBS_RUNTIME_CONTROL_TOKEN_ENV_VAR",
+    )
