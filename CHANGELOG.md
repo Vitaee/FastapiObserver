@@ -84,6 +84,28 @@ All notable changes to this project will be documented in this file.
 ### Developer Experience
 - Added repo-managed pre-push hook (`.githooks/pre-push`) to run `ruff`, `mypy`, and `pytest` before push.
 
+## [0.1.2] - 2026-02-19
+
+### Added
+- Bounded core logging queue controls:
+  - `LOG_QUEUE_MAX_SIZE`
+  - `LOG_QUEUE_OVERFLOW_POLICY` (`drop_oldest`, `drop_newest`, `block`)
+  - `LOG_QUEUE_BLOCK_TIMEOUT_SECONDS`
+- Queue pressure observability via `get_log_queue_stats()`.
+- Prometheus queue pressure metrics:
+  - `fastapiobserver_log_queue_size`
+  - `fastapiobserver_log_queue_capacity`
+  - `fastapiobserver_log_queue_overflow_policy_info`
+  - `fastapiobserver_log_queue_enqueued_total`
+  - `fastapiobserver_log_queue_dropped_total{reason=...}`
+  - `fastapiobserver_log_queue_blocked_total`
+  - `fastapiobserver_log_queue_block_timeouts_total`
+- Targeted tests for queue overflow policies and queue metrics registration.
+
+### Changed
+- Structured logging pipeline now uses a bounded queue with explicit overflow behavior instead of an unbounded queue.
+- README now documents bounded queue controls and queue pressure metrics.
+
 ## [0.1.0] - 2026-02-18
 
 ### Added

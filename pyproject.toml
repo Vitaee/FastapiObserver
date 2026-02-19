@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "fastapi-observer"
-version = "0.1.1"
+version = "0.1.2"
 description = "Zero-glue FastAPI observability with security presets and runtime controls"
 readme = "README.md"
 requires-python = ">=3.10,<3.15"

@@ -66,3 +66,19 @@ def test_mark_process_dead_noop_without_multiprocess(
 ) -> None:
     monkeypatch.delenv("PROMETHEUS_MULTIPROC_DIR", raising=False)
     mark_prometheus_process_dead(1234)
+
+
+def test_log_queue_metrics_are_registered_for_prometheus(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("PROMETHEUS_MULTIPROC_DIR", raising=False)
+    build_metrics_backend(True, service="billing", environment="prod")
+
+    prometheus_client = metrics_module.importlib.import_module("prometheus_client")
+    metrics_text = prometheus_client.generate_latest(prometheus_client.REGISTRY).decode(
+        "utf-8"
+    )
+
+    assert "fastapiobserver_log_queue_size" in metrics_text
+    assert "fastapiobserver_log_queue_capacity" in metrics_text
+    assert "fastapiobserver_log_queue_dropped_total" in metrics_text

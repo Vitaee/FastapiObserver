@@ -2,7 +2,13 @@ from ._version import __version__
 from .config import ObservabilitySettings
 from .control_plane import RuntimeControlSettings, mount_control_plane
 from .fastapi import install_observability
-from .logging import LOG_SCHEMA_VERSION, RequestIdFilter, StructuredJsonFormatter, setup_logging
+from .logging import (
+    LOG_SCHEMA_VERSION,
+    RequestIdFilter,
+    StructuredJsonFormatter,
+    get_log_queue_stats,
+    setup_logging,
+)
 from .metrics import mark_prometheus_process_dead
 from .otel import OTelLogsSettings, OTelSettings, create_otel_resource, install_otel, install_otel_logs
 from .plugins import register_log_enricher, register_metric_hook
@@ -60,6 +66,7 @@ __all__ = [
     "LOG_SCHEMA_VERSION",
     "RequestIdFilter",
     "StructuredJsonFormatter",
+    "get_log_queue_stats",
     "setup_logging",
     # Sinks
     "LogSink",
@@ -111,4 +118,3 @@ __all__ = [
     # Version
     "__version__",
 ]
-

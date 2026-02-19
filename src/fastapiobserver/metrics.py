@@ -19,6 +19,8 @@ _NUMBER_RE = re.compile(r"/\d+")
 _HEX_RE = re.compile(r"/[0-9a-fA-F]{16,}")
 
 _LOGGER = logging.getLogger("fastapiobserver.metrics")
+_LOG_QUEUE_COLLECTOR_LOCK = threading.Lock()
+_LOG_QUEUE_COLLECTOR_REGISTERED = False
 
 
 # ---------------------------------------------------------------------------
@@ -168,6 +170,69 @@ class PrometheusMetricsBackend:
             self.__class__._REQUEST_LATENCY.labels(**labels).observe(duration_seconds)
 
 
+class _LogQueueMetricsCollector:
+    """Custom collector for logging queue pressure counters."""
+
+    def collect(self) -> Any:
+        from prometheus_client.core import CounterMetricFamily, GaugeMetricFamily
+
+        from .logging import get_log_queue_stats
+
+        stats = get_log_queue_stats()
+
+        queue_size = GaugeMetricFamily(
+            "fastapiobserver_log_queue_size",
+            "Current number of log records waiting in the core queue.",
+        )
+        queue_size.add_metric([], float(stats["queue_size"]))
+        yield queue_size
+
+        queue_capacity = GaugeMetricFamily(
+            "fastapiobserver_log_queue_capacity",
+            "Configured capacity of the core logging queue.",
+        )
+        queue_capacity.add_metric([], float(stats["queue_capacity"]))
+        yield queue_capacity
+
+        queue_policy = GaugeMetricFamily(
+            "fastapiobserver_log_queue_overflow_policy_info",
+            "Current overflow policy for the core logging queue.",
+            labels=["policy"],
+        )
+        queue_policy.add_metric([str(stats["overflow_policy"])], 1.0)
+        yield queue_policy
+
+        enqueued_total = CounterMetricFamily(
+            "fastapiobserver_log_queue_enqueued_total",
+            "Total log records accepted into the core queue.",
+        )
+        enqueued_total.add_metric([], float(stats["enqueued_total"]))
+        yield enqueued_total
+
+        dropped_total = CounterMetricFamily(
+            "fastapiobserver_log_queue_dropped_total",
+            "Total log records dropped due to queue pressure.",
+            labels=["reason"],
+        )
+        dropped_total.add_metric(["drop_oldest"], float(stats["dropped_oldest_total"]))
+        dropped_total.add_metric(["drop_newest"], float(stats["dropped_newest_total"]))
+        yield dropped_total
+
+        blocked_total = CounterMetricFamily(
+            "fastapiobserver_log_queue_blocked_total",
+            "Total times producers entered blocking mode while queue was full.",
+        )
+        blocked_total.add_metric([], float(stats["blocked_total"]))
+        yield blocked_total
+
+        block_timeouts_total = CounterMetricFamily(
+            "fastapiobserver_log_queue_block_timeouts_total",
+            "Total blocking enqueue attempts that timed out and dropped the newest record.",
+        )
+        block_timeouts_total.add_metric([], float(stats["block_timeout_total"]))
+        yield block_timeouts_total
+
+
 # ---------------------------------------------------------------------------
 # Builder — Open/Closed: add new backends without modifying existing code
 # ---------------------------------------------------------------------------
@@ -184,11 +249,13 @@ def build_metrics_backend(
     if not enabled:
         return NoopMetricsBackend()
     _validate_prometheus_multiprocess_dir()
-    return PrometheusMetricsBackend(
+    backend = PrometheusMetricsBackend(
         service=service,
         environment=environment,
         exemplars_enabled=exemplars_enabled,
     )
+    _register_log_queue_metrics_collector()
+    return backend
 
 
 # ---------------------------------------------------------------------------
@@ -414,3 +481,22 @@ def _import_prometheus_client() -> Any:
         raise RuntimeError(
             "Prometheus support requires `pip install fastapi-observer[prometheus]`"
         ) from exc
+
+
+def _register_log_queue_metrics_collector() -> None:
+    global _LOG_QUEUE_COLLECTOR_REGISTERED
+
+    if _is_prometheus_multiprocess_enabled():
+        return
+
+    with _LOG_QUEUE_COLLECTOR_LOCK:
+        if _LOG_QUEUE_COLLECTOR_REGISTERED:
+            return
+        prometheus_client = _import_prometheus_client()
+        collector = _LogQueueMetricsCollector()
+        try:
+            prometheus_client.REGISTRY.register(collector)
+        except ValueError:
+            # Collector already registered by another backend init in-process.
+            pass
+        _LOG_QUEUE_COLLECTOR_REGISTERED = True

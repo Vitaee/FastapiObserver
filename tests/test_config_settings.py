@@ -12,6 +12,7 @@ from fastapiobserver.security import SecurityPolicy, TrustedProxyPolicy
 def test_observability_settings_normalize_values() -> None:
     settings = ObservabilitySettings(
         log_level="debug",
+        log_queue_overflow_policy="DROP_NEWEST",
         request_id_header="X-Request-ID",
         response_request_id_header="X-Request-ID",
         metrics_path="metrics/",
@@ -19,6 +20,7 @@ def test_observability_settings_normalize_values() -> None:
     )
 
     assert settings.log_level == "DEBUG"
+    assert settings.log_queue_overflow_policy == "drop_newest"
     assert settings.request_id_header == "x-request-id"
     assert settings.response_request_id_header == "x-request-id"
     assert settings.metrics_path == "/metrics"
@@ -28,6 +30,11 @@ def test_observability_settings_normalize_values() -> None:
 def test_observability_settings_reject_invalid_header() -> None:
     with pytest.raises(ValidationError, match="Invalid header value"):
         ObservabilitySettings(request_id_header="invalid header")
+
+
+def test_observability_settings_reject_invalid_log_queue_policy() -> None:
+    with pytest.raises(ValidationError, match="log_queue_overflow_policy"):
+        ObservabilitySettings(log_queue_overflow_policy="evict_random")
 
 
 def test_security_policy_from_env(monkeypatch: pytest.MonkeyPatch) -> None:

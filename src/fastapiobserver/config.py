@@ -19,6 +19,7 @@ DEFAULT_METRICS_EXCLUDE_PATHS = (
 )
 
 MetricsFormat = Literal["prometheus", "openmetrics", "negotiate"]
+LogQueueOverflowPolicy = Literal["drop_oldest", "drop_newest", "block"]
 
 
 class ObservabilitySettings(BaseSettings):
@@ -37,6 +38,16 @@ class ObservabilitySettings(BaseSettings):
     # --- logging ---
     log_level: str = Field(default="INFO", validation_alias="LOG_LEVEL")
     log_dir: str | None = Field(default=None, validation_alias="LOG_DIR")
+    log_queue_max_size: int = Field(default=10_000, gt=0, validation_alias="LOG_QUEUE_MAX_SIZE")
+    log_queue_overflow_policy: LogQueueOverflowPolicy = Field(
+        default="drop_oldest",
+        validation_alias="LOG_QUEUE_OVERFLOW_POLICY",
+    )
+    log_queue_block_timeout_seconds: float = Field(
+        default=1.0,
+        ge=0.0,
+        validation_alias="LOG_QUEUE_BLOCK_TIMEOUT_SECONDS",
+    )
 
     # --- request ---
     request_id_header: str = Field(
@@ -88,6 +99,13 @@ class ObservabilitySettings(BaseSettings):
             raise ValueError(f"Invalid log_level: {value}")
         return normalized_log_level
 
+    @field_validator("log_queue_overflow_policy", mode="before")
+    @classmethod
+    def _normalize_log_queue_policy(cls, value: object) -> object:
+        if isinstance(value, str):
+            return value.strip().lower()
+        return value
+
     @field_validator("request_id_header", "response_request_id_header")
     @classmethod
     def _normalize_header_name(cls, value: str) -> str:
@@ -133,4 +151,9 @@ class ObservabilitySettings(BaseSettings):
         return cls()
 
 
-__all__ = ["ObservabilitySettings", "DEFAULT_METRICS_EXCLUDE_PATHS", "MetricsFormat"]
+__all__ = [
+    "ObservabilitySettings",
+    "DEFAULT_METRICS_EXCLUDE_PATHS",
+    "MetricsFormat",
+    "LogQueueOverflowPolicy",
+]

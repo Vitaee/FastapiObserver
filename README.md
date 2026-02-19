@@ -251,7 +251,7 @@ Design details:
 
 ## What `install_observability()` Wires Up
 
-1. Structured logging pipeline (JSON formatter + async queue handler).
+1. Structured logging pipeline (JSON formatter + bounded async queue handler).
 2. Metrics backend and `/metrics` endpoint when metrics are enabled.
 3. OTel tracing setup when OTel is enabled.
 4. Request logging middleware with sanitization and context cleanup.
@@ -484,6 +484,9 @@ The library supports configuration from code and env vars. Below are the most re
 | `APP_VERSION` | `0.0.0` | Service version |
 | `LOG_LEVEL` | `INFO` | Root log level |
 | `LOG_DIR` | - | Optional file log directory |
+| `LOG_QUEUE_MAX_SIZE` | `10000` | Max in-memory records in core log queue |
+| `LOG_QUEUE_OVERFLOW_POLICY` | `drop_oldest` | Queue overflow behavior: `drop_oldest`, `drop_newest`, `block` |
+| `LOG_QUEUE_BLOCK_TIMEOUT_SECONDS` | `1.0` | Timeout used by `block` policy before dropping newest |
 | `REQUEST_ID_HEADER` | `x-request-id` | Incoming request ID header |
 | `RESPONSE_REQUEST_ID_HEADER` | `x-request-id` | Response request ID header |
 
@@ -589,6 +592,29 @@ def child_exit(server, worker):
     mark_prometheus_process_dead(worker.pid)
 ```
 
+### Bounded queue and overflow policy
+
+Use queue controls to define behavior under sustained log pressure:
+
+```python
+settings = ObservabilitySettings(
+    app_name="orders-api",
+    service="orders",
+    environment="production",
+    log_queue_max_size=20000,
+    log_queue_overflow_policy="drop_oldest",  # or "drop_newest" / "block"
+    log_queue_block_timeout_seconds=0.5,
+)
+```
+
+Queue pressure metrics exposed on `/metrics` (Prometheus mode):
+- `fastapiobserver_log_queue_size`
+- `fastapiobserver_log_queue_capacity`
+- `fastapiobserver_log_queue_enqueued_total`
+- `fastapiobserver_log_queue_dropped_total{reason="drop_oldest|drop_newest"}`
+- `fastapiobserver_log_queue_blocked_total`
+- `fastapiobserver_log_queue_block_timeouts_total`
+
 ---
 
 ## Plugin Hooks
@@ -631,7 +657,7 @@ Repository integration tests include:
 - `0.2.x`: OTel interoperability, security presets, allowlists
 - `1.0.0`: dynamic runtime controls and plugin stability
 
-Current release version: `0.1.1`
+Current release version: `0.1.2`
 
 ## Changelog Policy
 
