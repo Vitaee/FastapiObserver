@@ -4,7 +4,14 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
-## [0.3.0] - 2026-02-20
+## [0.3.1] - 2026-02-19
+
+### Fixed
+- CI compatibility for async tests on Python 3.14+ by removing reliance on `pytest-asyncio` markers in test files.
+- Converted async-marked tests to synchronous wrappers using `asyncio.run(...)` so test execution no longer depends on optional pytest async plugins.
+- Removed `asyncio_mode` from `pyproject.toml` pytest config to avoid plugin-specific warnings in environments without `pytest-asyncio`.
+
+## [0.3.0] - 2026-02-19
 
 ### Added
 - **AST Error Fingerprinting**: Exception pipelines now sanitize transient data (memory addresses like `0x10a2b...` and exact line numbers) to generate a stable `error.fingerprint` hash. This allows zero-dependency grouping of identical server errors directly in external dashboards.

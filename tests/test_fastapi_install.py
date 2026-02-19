@@ -1,7 +1,9 @@
 from __future__ import annotations
 
-from fastapi import FastAPI
+import asyncio
+
 import pytest
+from fastapi import FastAPI
 
 import fastapiobserver.fastapi as fastapi_module
 from fastapiobserver import (
@@ -135,8 +137,7 @@ def test_install_observability_installs_otel_metrics_when_enabled(
     assert calls["otel_settings"] is None
 
 
-@pytest.mark.asyncio
-async def test_install_observability_registers_logging_shutdown_hook_once(
+def test_install_observability_registers_logging_shutdown_hook_once(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     app = FastAPI()
@@ -155,7 +156,10 @@ async def test_install_observability_registers_logging_shutdown_hook_once(
     assert app in fastapi_module._REGISTERED_APPS
     
     # Verify the shutdown hook actively works when application teardown runs
-    async with app.router.lifespan_context(app):
-        pass
+    async def _run_lifespan() -> None:
+        async with app.router.lifespan_context(app):
+            pass
+
+    asyncio.run(_run_lifespan())
         
     assert len(mock_calls) == 1
