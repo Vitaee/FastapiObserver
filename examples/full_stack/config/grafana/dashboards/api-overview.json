@@ -1,0 +1,357 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "links": [],
+  "panels": [
+    {
+      "title": "Request Duration Heatmap",
+      "description": "Distribution of HTTP request durations across histogram buckets. Darker cells = more requests at that latency.",
+      "type": "heatmap",
+      "gridPos": { "h": 9, "w": 12, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        {
+          "expr": "sum(rate(http_request_duration_seconds_bucket{service=\"$service\", environment=\"$environment\", path!~\"/metrics|/docs|/openapi.json|/health\"}[$__rate_interval])) by (le)",
+          "format": "heatmap",
+          "legendFormat": "{{le}}",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "calculate": false,
+        "cellGap": 1,
+        "color": {
+          "exponent": 0.5,
+          "fill": "dark-orange",
+          "mode": "scheme",
+          "reverse": false,
+          "scale": "exponential",
+          "scheme": "Oranges",
+          "steps": 64
+        },
+        "yAxis": { "axisPlacement": "left", "unit": "s" },
+        "tooltip": { "show": true, "yHistogram": true },
+        "showValue": "never"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "scaleDistribution": { "type": "log", "log": 2 } }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "title": "API Request Count by Route",
+      "description": "Rate of incoming HTTP requests per second, broken down by route.",
+      "type": "timeseries",
+      "gridPos": { "h": 9, "w": 12, "x": 12, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        {
+          "expr": "sum(rate(http_requests_total{service=\"$service\", environment=\"$environment\", path!~\"/metrics|/docs|/openapi.json|/health\"}[$__rate_interval])) by (path)",
+          "legendFormat": "{{path}}",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["mean", "max"] },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 80,
+            "stacking": { "mode": "normal" },
+            "barAlignment": 0,
+            "showPoints": "never",
+            "lineWidth": 0
+          },
+          "unit": "reqps"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "title": "Error Rate per Route",
+      "description": "Rate of 4xx client errors and 5xx server errors per second, by status code and route.",
+      "type": "timeseries",
+      "gridPos": { "h": 9, "w": 12, "x": 0, "y": 9 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        {
+          "expr": "sum(rate(http_requests_total{service=\"$service\", environment=\"$environment\", status_code=~\"5..\"}[$__rate_interval])) by (path, status_code)",
+          "legendFormat": "{{status_code}} {{path}}",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(rate(http_requests_total{service=\"$service\", environment=\"$environment\", status_code=~\"4..\"}[$__rate_interval])) by (path, status_code)",
+          "legendFormat": "{{status_code}} {{path}}",
+          "refId": "B"
+        }
+      ],
+      "options": {
+        "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["mean", "max", "sum"] },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 20,
+            "lineWidth": 2,
+            "showPoints": "never",
+            "spanNulls": false
+          },
+          "unit": "reqps",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "value": null, "color": "green" },
+              { "value": 0.01, "color": "orange" },
+              { "value": 0.1, "color": "red" }
+            ]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byRegexp", "options": "^5\\d{2}" },
+            "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } }]
+          },
+          {
+            "matcher": { "id": "byRegexp", "options": "^4\\d{2}" },
+            "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "orange" } }]
+          }
+        ]
+      }
+    },
+    {
+      "title": "CPU & Memory Usage",
+      "description": "Python process CPU usage (cores) and resident memory (MiB).",
+      "type": "timeseries",
+      "gridPos": { "h": 9, "w": 12, "x": 12, "y": 9 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        {
+          "expr": "rate(process_cpu_seconds_total{job=\"$service\"}[$__rate_interval])",
+          "legendFormat": "CPU (cores)",
+          "refId": "A"
+        },
+        {
+          "expr": "process_resident_memory_bytes{job=\"$service\"} / 1024 / 1024",
+          "legendFormat": "Memory (MiB)",
+          "refId": "B"
+        }
+      ],
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom" },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 2,
+            "showPoints": "never",
+            "spanNulls": false,
+            "axisBorderShow": false
+          }
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "CPU (cores)" },
+            "properties": [
+              { "id": "custom.axisPlacement", "value": "left" },
+              { "id": "unit", "value": "short" },
+              { "id": "custom.axisLabel", "value": "CPU (cores)" }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "Memory (MiB)" },
+            "properties": [
+              { "id": "custom.axisPlacement", "value": "right" },
+              { "id": "unit", "value": "decmbytes" },
+              { "id": "custom.axisLabel", "value": "Memory" }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "title": "Request Duration P50 / P95 / P99",
+      "description": "50th, 95th, and 99th percentile request durations over time.",
+      "type": "timeseries",
+      "gridPos": { "h": 9, "w": 12, "x": 0, "y": 18 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, sum(rate(http_request_duration_seconds_bucket{service=\"$service\", environment=\"$environment\", path!~\"/metrics|/docs|/openapi.json|/health\"}[$__rate_interval])) by (le))",
+          "legendFormat": "P50",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket{service=\"$service\", environment=\"$environment\", path!~\"/metrics|/docs|/openapi.json|/health\"}[$__rate_interval])) by (le))",
+          "legendFormat": "P95",
+          "refId": "B"
+        },
+        {
+          "expr": "histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{service=\"$service\", environment=\"$environment\", path!~\"/metrics|/docs|/openapi.json|/health\"}[$__rate_interval])) by (le))",
+          "legendFormat": "P99",
+          "refId": "C"
+        }
+      ],
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom" },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 2,
+            "showPoints": "never",
+            "spanNulls": false
+          },
+          "unit": "s"
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "P99" },
+            "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "P95" },
+            "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "orange" } }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "P50" },
+            "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "green" } }]
+          }
+        ]
+      }
+    },
+    {
+      "title": "Request Rate (req/s)",
+      "description": "Current request rate across all routes for the selected service.",
+      "type": "stat",
+      "gridPos": { "h": 9, "w": 12, "x": 12, "y": 18 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        {
+          "expr": "sum(rate(http_requests_total{service=\"$service\", environment=\"$environment\"}[$__rate_interval]))",
+          "legendFormat": "req/s",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "textMode": "value_and_name",
+        "colorMode": "background",
+        "graphMode": "area",
+        "justifyMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "value": null, "color": "green" },
+              { "value": 10, "color": "yellow" },
+              { "value": 50, "color": "red" }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "title": "API Logs",
+      "description": "Live structured JSON logs from Loki.",
+      "type": "logs",
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 27 },
+      "datasource": { "type": "loki", "uid": "loki" },
+      "targets": [
+        {
+          "expr": "{service_name=\"$service\"}",
+          "maxLines": 100,
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "showTime": true,
+        "showLabels": false,
+        "showCommonLabels": false,
+        "wrapLogMessage": true,
+        "prettifyLogMessage": true,
+        "enableLogDetails": true,
+        "sortOrder": "Descending",
+        "dedupStrategy": "none"
+      }
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "tags": ["api", "monitoring", "fastapi", "prometheus", "loki", "tempo"],
+  "templating": {
+    "list": [
+      {
+        "name": "DS_PROMETHEUS",
+        "type": "datasource",
+        "query": "prometheus",
+        "current": { "selected": false, "text": "Prometheus", "value": "Prometheus" },
+        "hide": 0,
+        "includeAll": false,
+        "multi": false,
+        "options": [],
+        "refresh": 1,
+        "regex": "",
+        "skipUrlSync": false
+      },
+      {
+        "name": "service",
+        "type": "query",
+        "label": "Service",
+        "hide": 0,
+        "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+        "refresh": 2,
+        "query": { "query": "label_values(http_requests_total, service)", "refId": "StandardVariableQuery" },
+        "definition": "label_values(http_requests_total, service)",
+        "sort": 1,
+        "multi": false,
+        "includeAll": false,
+        "options": [],
+        "current": { "selected": true, "text": "app-a", "value": "app-a" }
+      },
+      {
+        "name": "environment",
+        "type": "query",
+        "label": "Environment",
+        "hide": 0,
+        "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+        "refresh": 2,
+        "query": { "query": "label_values(http_requests_total, environment)", "refId": "StandardVariableQuery" },
+        "definition": "label_values(http_requests_total, environment)",
+        "sort": 1,
+        "multi": false,
+        "includeAll": false,
+        "options": [],
+        "current": { "selected": true, "text": "local", "value": "local" }
+      }
+    ]
+  },
+  "time": { "from": "now-15m", "to": "now" },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "FastAPI Observer — API Overview",
+  "uid": "fastapi-observer-overview",
+  "version": 1
+}

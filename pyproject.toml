@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "fastapi-observer"
-version = "0.2.0.dev1"
-description = "Secure-by-default observability toolkit for FastAPI"
+version = "0.1.0"
+description = "Zero-glue FastAPI observability with security presets and runtime controls"
 readme = "README.md"
 requires-python = ">=3.10,<3.15"
 authors = [
@@ -86,6 +86,13 @@ package-dir = { "" = "src" }
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.mypy]
+ignore_missing_imports = false
+
+[[tool.mypy.overrides]]
+module = ["orjson", "orjson.*"]
+ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]

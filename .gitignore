@@ -13,3 +13,6 @@ wheels/
 
 # Virtual environments
 .venv
+
+# macOS metadata
+.DS_Store
