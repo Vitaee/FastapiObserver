@@ -1,5 +1,7 @@
 # fastapi-observer
 
+[![Sponsor](https://img.shields.io/badge/Sponsor-Buy%20me%20a%20coffee-FFDD00?logo=buymeacoffee&logoColor=000000)](https://buymeacoffee.com/FYbPCSu)
+
 **Zero-glue observability for FastAPI.**
 
 `fastapi-observer` gives you structured JSON logs, request correlation, Prometheus metrics, OpenTelemetry tracing, security redaction presets, and runtime controls in one install step and one function call.
@@ -24,19 +26,11 @@ Teams usually implement this as custom glue code in every service. That costs en
 
 ---
 
-## Read This by Role
+## Sponsor
 
-If you are a new graduate or new to observability:
-1. Start with [Install](#install)
-2. Run [5-Minute Quick Start](#5-minute-quick-start)
-3. Read [Security Defaults and Presets](#security-defaults-and-presets)
-4. Copy an app from [Examples](#examples)
+If this library saves you engineering time, you can support maintenance here:
 
-If you are a senior engineer, architect, or CTO:
-1. Read [What You Get Immediately](#what-you-get-immediately)
-2. Review [Runtime Control Plane (No Restart)](#runtime-control-plane-no-restart)
-3. Review [OpenTelemetry (Traces + Optional OTLP Logs)](#opentelemetry-traces--optional-otlp-logs)
-4. Use [Production Deployment Pattern](#production-deployment-pattern)
+[buymeacoffee.com/FYbPCSu](https://buymeacoffee.com/FYbPCSu)
 
 ---
 

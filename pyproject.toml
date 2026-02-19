@@ -39,6 +39,7 @@ Homepage = "https://github.com/Vitaee/FastapiObserver"
 Documentation = "https://github.com/Vitaee/FastapiObserver#readme"
 Repository = "https://github.com/Vitaee/FastapiObserver.git"
 Issues = "https://github.com/Vitaee/FastapiObserver/issues"
+Funding = "https://buymeacoffee.com/FYbPCSu"
 
 [project.optional-dependencies]
 fast-json = [
