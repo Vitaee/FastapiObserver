@@ -7,7 +7,7 @@ from typing import Literal
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from .utils import normalize_path, parse_csv_tuple
+from .utils import normalize_path, parse_csv
 
 _HEADER_NAME_RE = re.compile(r"^[A-Za-z0-9-]+$")
 DEFAULT_METRICS_EXCLUDE_PATHS = (
@@ -48,6 +48,20 @@ class ObservabilitySettings(BaseSettings):
         ge=0.0,
         validation_alias="LOG_QUEUE_BLOCK_TIMEOUT_SECONDS",
     )
+    sink_circuit_breaker_enabled: bool = Field(
+        default=True,
+        validation_alias="LOG_SINK_CIRCUIT_BREAKER_ENABLED",
+    )
+    sink_circuit_breaker_failure_threshold: int = Field(
+        default=5,
+        gt=0,
+        validation_alias="LOG_SINK_CIRCUIT_BREAKER_FAILURE_THRESHOLD",
+    )
+    sink_circuit_breaker_recovery_timeout_seconds: float = Field(
+        default=30.0,
+        gt=0.0,
+        validation_alias="LOG_SINK_CIRCUIT_BREAKER_RECOVERY_TIMEOUT_SECONDS",
+    )
 
     # --- request ---
     request_id_header: str = Field(
@@ -59,6 +73,7 @@ class ObservabilitySettings(BaseSettings):
 
     # --- metrics ---
     metrics_enabled: bool = Field(default=False, validation_alias="METRICS_ENABLED")
+    metrics_backend: str = Field(default="prometheus", validation_alias="METRICS_BACKEND")
     metrics_path: str = Field(default="/metrics", validation_alias="METRICS_PATH")
     metrics_exclude_paths: tuple[str, ...] = Field(
         default=DEFAULT_METRICS_EXCLUDE_PATHS,
@@ -119,10 +134,25 @@ class ObservabilitySettings(BaseSettings):
     def _normalize_metrics_path(cls, value: str) -> str:
         return normalize_path(value, default="/metrics")
 
+    @field_validator("metrics_backend")
+    @classmethod
+    def _normalize_metrics_backend(cls, value: str) -> str:
+        normalized = value.strip().lower()
+        if not normalized:
+            raise ValueError("metrics_backend cannot be empty")
+        return normalized
+
     @field_validator("metrics_exclude_paths", mode="before")
     @classmethod
     def _parse_metrics_exclude_paths(cls, value: object) -> tuple[str, ...]:
-        return parse_csv_tuple(value, DEFAULT_METRICS_EXCLUDE_PATHS)
+        parsed = parse_csv(
+            value,
+            default=DEFAULT_METRICS_EXCLUDE_PATHS,
+            optional=False,
+        )
+        if isinstance(parsed, tuple):
+            return parsed
+        return DEFAULT_METRICS_EXCLUDE_PATHS
 
     @field_validator("metrics_exclude_paths")
     @classmethod
@@ -134,17 +164,13 @@ class ObservabilitySettings(BaseSettings):
     @field_validator("otel_excluded_urls", mode="before")
     @classmethod
     def _parse_otel_excluded_urls(cls, value: object) -> tuple[str, ...] | None:
-        if value is None:
-            return None
-        if isinstance(value, str):
-            if not value.strip():
-                return ()  # explicit empty → no exclusions
-            items = tuple(p.strip() for p in value.split(",") if p.strip())
-            return items or None
-        if isinstance(value, (tuple, list)):
-            items = tuple(str(v).strip() for v in value if str(v).strip())
-            return items if value is not None else None
-        return None
+        # Preserve previous semantics: empty string means explicit empty tuple,
+        # while None means "use package defaults".
+        return parse_csv(
+            value,
+            optional=True,
+            nullish_values=frozenset(),
+        )
 
     @classmethod
     def from_env(cls) -> "ObservabilitySettings":

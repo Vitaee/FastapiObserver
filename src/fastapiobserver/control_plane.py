@@ -10,10 +10,10 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from .otel import get_trace_sampling_ratio, set_trace_sampling_ratio
-from .utils import normalize_path
+from .utils import EnvLoadable, normalize_path
 
 
-class RuntimeControlSettings(BaseModel):
+class RuntimeControlSettings(EnvLoadable, BaseModel):
     model_config = ConfigDict(frozen=True)
 
     enabled: bool = False
@@ -35,8 +35,8 @@ class RuntimeControlSettings(BaseModel):
         return normalized
 
     @classmethod
-    def from_env(cls) -> "RuntimeControlSettings":
-        return cls(**_RuntimeControlEnvSettings().model_dump())
+    def _env_settings_class(cls) -> type[BaseSettings]:
+        return _RuntimeControlEnvSettings
 
 
 class ControlPlanePayload(BaseModel):

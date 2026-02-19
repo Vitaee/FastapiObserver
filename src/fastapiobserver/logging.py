@@ -1,32 +1,36 @@
 from __future__ import annotations
 
-import importlib
 import json
 import logging
 import logging.handlers
 import queue
 import threading
+import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Literal, cast
+from typing import Any, Callable, Literal, Mapping, cast
 
 from ._version import __version__
 from .config import LogQueueOverflowPolicy, ObservabilitySettings
-from .plugins import apply_log_enrichers
+from .plugins import apply_log_enrichers, apply_log_filters
 from .request_context import get_request_id, get_span_id, get_trace_id, get_user_context
 from .security import SecurityPolicy, sanitize_event
 from .sinks import build_sink_handlers
+from .utils import lazy_import
 
 orjson: Any
 try:
-    orjson = importlib.import_module("orjson")
+    orjson = lazy_import("orjson")
 except ModuleNotFoundError:  # pragma: no cover - fallback for environments without orjson
     orjson = None
 
 _LOGGING_LOCK = threading.Lock()
 _QUEUE_LISTENER: logging.handlers.QueueListener | None = None
 _MANAGED_OUTPUT_HANDLERS: list[logging.Handler] = []
+_SINK_CIRCUIT_BREAKERS: list["SinkCircuitBreakerHandler"] = []
 LOG_SCHEMA_VERSION = "1.0.0"
+
+CircuitBreakerState = Literal["closed", "open", "half_open"]
 
 
 # ---------------------------------------------------------------------------
@@ -143,6 +147,153 @@ class LogQueueTelemetry:
 _LOG_QUEUE_TELEMETRY = LogQueueTelemetry()
 
 
+@dataclass(frozen=True)
+class SinkCircuitBreakerSnapshot:
+    sink_name: str
+    state: CircuitBreakerState
+    failure_threshold: int
+    recovery_timeout_seconds: float
+    consecutive_failures: int
+    handled_total: int
+    failures_total: int
+    skipped_total: int
+    opens_total: int
+    half_open_total: int
+    closes_total: int
+
+    def as_dict(self) -> dict[str, int | float | str]:
+        return {
+            "sink_name": self.sink_name,
+            "state": self.state,
+            "failure_threshold": self.failure_threshold,
+            "recovery_timeout_seconds": self.recovery_timeout_seconds,
+            "consecutive_failures": self.consecutive_failures,
+            "handled_total": self.handled_total,
+            "failures_total": self.failures_total,
+            "skipped_total": self.skipped_total,
+            "opens_total": self.opens_total,
+            "half_open_total": self.half_open_total,
+            "closes_total": self.closes_total,
+        }
+
+
+class SinkCircuitBreakerHandler(logging.Handler):
+    """Protect sink handlers with a basic open/half-open/closed breaker."""
+
+    def __init__(
+        self,
+        *,
+        sink_name: str,
+        delegate: logging.Handler,
+        failure_threshold: int,
+        recovery_timeout_seconds: float,
+        clock: Callable[[], float] | None = None,
+    ) -> None:
+        super().__init__(level=delegate.level)
+        self.sink_name = sink_name
+        self._delegate = delegate
+        self._failure_threshold = max(1, int(failure_threshold))
+        self._recovery_timeout_seconds = max(0.001, float(recovery_timeout_seconds))
+        self._clock = clock or time.monotonic
+        self._lock = threading.Lock()
+
+        self._state: CircuitBreakerState = "closed"
+        self._opened_until = 0.0
+        self._consecutive_failures = 0
+        self._handled_total = 0
+        self._failures_total = 0
+        self._skipped_total = 0
+        self._opens_total = 0
+        self._half_open_total = 0
+        self._closes_total = 0
+
+    def emit(self, record: logging.LogRecord) -> None:
+        if self._should_skip():
+            return
+
+        try:
+            self._delegate.handle(record)
+        except Exception:
+            self._record_failure()
+            self.handleError(record)
+            return
+
+        self._record_success()
+
+    def setFormatter(self, fmt: logging.Formatter | None) -> None:  # noqa: N802
+        super().setFormatter(fmt)
+        self._delegate.setFormatter(fmt)
+
+    def flush(self) -> None:
+        self._delegate.flush()
+
+    def close(self) -> None:
+        try:
+            self._delegate.close()
+        finally:
+            super().close()
+
+    def snapshot(self) -> SinkCircuitBreakerSnapshot:
+        with self._lock:
+            return SinkCircuitBreakerSnapshot(
+                sink_name=self.sink_name,
+                state=self._state,
+                failure_threshold=self._failure_threshold,
+                recovery_timeout_seconds=self._recovery_timeout_seconds,
+                consecutive_failures=self._consecutive_failures,
+                handled_total=self._handled_total,
+                failures_total=self._failures_total,
+                skipped_total=self._skipped_total,
+                opens_total=self._opens_total,
+                half_open_total=self._half_open_total,
+                closes_total=self._closes_total,
+            )
+
+    def _should_skip(self) -> bool:
+        with self._lock:
+            now = self._clock()
+            if self._state != "open":
+                return False
+            if now >= self._opened_until:
+                self._state = "half_open"
+                self._half_open_total += 1
+                return False
+            self._skipped_total += 1
+            return True
+
+    def _record_failure(self) -> None:
+        with self._lock:
+            now = self._clock()
+            self._failures_total += 1
+            self._consecutive_failures += 1
+
+            should_open = (
+                self._state == "half_open"
+                or self._consecutive_failures >= self._failure_threshold
+            )
+            if should_open:
+                self._state = "open"
+                self._opens_total += 1
+                self._opened_until = now + self._recovery_timeout_seconds
+                self._consecutive_failures = 0
+
+    def _record_success(self) -> None:
+        with self._lock:
+            self._handled_total += 1
+            self._consecutive_failures = 0
+            if self._state == "half_open":
+                self._state = "closed"
+                self._closes_total += 1
+                self._opened_until = 0.0
+
+
+def get_sink_circuit_breaker_stats() -> dict[str, dict[str, int | float | str]]:
+    """Return per-sink circuit-breaker snapshots."""
+    with _LOGGING_LOCK:
+        breakers = list(_SINK_CIRCUIT_BREAKERS)
+    return {breaker.sink_name: breaker.snapshot().as_dict() for breaker in breakers}
+
+
 class OverflowPolicyQueueHandler(logging.handlers.QueueHandler):
     """Queue handler with explicit overflow policy and queue telemetry."""
 
@@ -229,10 +380,20 @@ class StructuredJsonFormatter(logging.Formatter):
         self,
         settings: ObservabilitySettings,
         security_policy: SecurityPolicy | None = None,
+        *,
+        enrich_event: (
+            Callable[[dict[str, object]], Mapping[str, object] | dict[str, object]] | None
+        ) = None,
+        sanitize_payload: (
+            Callable[[dict[str, Any], SecurityPolicy], Mapping[str, Any] | dict[str, Any]]
+            | None
+        ) = None,
     ) -> None:
         super().__init__()
         self.settings = settings
         self.security_policy = security_policy or SecurityPolicy()
+        self._enrich_event = enrich_event or apply_log_enrichers
+        self._sanitize_payload = sanitize_payload or sanitize_event
 
     def format(self, record: logging.LogRecord) -> str:
         payload: dict[str, Any] = {
@@ -275,8 +436,16 @@ class StructuredJsonFormatter(logging.Formatter):
         if getattr(record, "_skip_enrichers", False):
             enriched_payload = payload
         else:
-            enriched_payload = apply_log_enrichers(payload)
-        sanitized_payload = sanitize_event(enriched_payload, self.security_policy)
+            candidate_payload = self._enrich_event(dict(payload))
+            if isinstance(candidate_payload, Mapping):
+                enriched_payload = dict(candidate_payload)
+            else:
+                enriched_payload = payload
+        sanitized_candidate = self._sanitize_payload(enriched_payload, self.security_policy)
+        if isinstance(sanitized_candidate, Mapping):
+            sanitized_payload = dict(sanitized_candidate)
+        else:
+            sanitized_payload = enriched_payload
         return _json_dumps(sanitized_payload)
 
 
@@ -319,6 +488,13 @@ class TraceContextFilter(logging.Filter):
         return True
 
 
+class PluginLogFilter(logging.Filter):
+    """Apply user-registered log filters with fault isolation."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        return apply_log_filters(record)
+
+
 # ---------------------------------------------------------------------------
 # Setup — orchestrates formatter, queue-based pipeline, and sink handlers
 # ---------------------------------------------------------------------------
@@ -349,6 +525,7 @@ def setup_logging(
     """
     global _QUEUE_LISTENER
     global _MANAGED_OUTPUT_HANDLERS
+    global _SINK_CIRCUIT_BREAKERS
 
     with _LOGGING_LOCK:
         root_logger = logging.getLogger()
@@ -372,6 +549,7 @@ def setup_logging(
         for output_handler in _MANAGED_OUTPUT_HANDLERS:
             output_handler.close()
         _MANAGED_OUTPUT_HANDLERS = []
+        _SINK_CIRCUIT_BREAKERS = []
         _LOG_QUEUE_TELEMETRY.reset(
             log_queue=None,
             queue_capacity=settings.log_queue_max_size,
@@ -398,6 +576,14 @@ def setup_logging(
             if output_handler.formatter is None:
                 output_handler.setFormatter(formatter)
 
+        managed_output_handlers, sink_breakers = _wrap_sink_handlers(
+            output_handlers,
+            failure_threshold=settings.sink_circuit_breaker_failure_threshold,
+            recovery_timeout_seconds=settings.sink_circuit_breaker_recovery_timeout_seconds,
+            enabled=settings.sink_circuit_breaker_enabled,
+        )
+        _SINK_CIRCUIT_BREAKERS = sink_breakers
+
         log_queue: queue.Queue[logging.LogRecord] = queue.Queue(
             maxsize=settings.log_queue_max_size
         )
@@ -417,12 +603,12 @@ def setup_logging(
 
         listener = logging.handlers.QueueListener(
             log_queue,
-            *output_handlers,
+            *managed_output_handlers,
             respect_handler_level=True,
         )
         listener.start()
         _QUEUE_LISTENER = listener
-        _MANAGED_OUTPUT_HANDLERS = output_handlers
+        _MANAGED_OUTPUT_HANDLERS = managed_output_handlers
 
         for name in ("uvicorn", "uvicorn.error", "uvicorn.access"):
             uvicorn_logger = logging.getLogger(name)
@@ -439,6 +625,7 @@ def setup_logging(
 def _configure_queue_handler(handler: logging.Handler) -> None:
     handler.addFilter(RequestIdFilter())
     handler.addFilter(TraceContextFilter())
+    handler.addFilter(PluginLogFilter())
     setattr(handler, "_fastapiobserver_managed", True)
 
 
@@ -455,3 +642,44 @@ def _json_dumps(payload: dict[str, Any]) -> str:
     if orjson is not None:
         return orjson.dumps(payload).decode("utf-8")
     return json.dumps(payload, ensure_ascii=True, default=str)
+
+
+def _wrap_sink_handlers(
+    handlers: list[logging.Handler],
+    *,
+    failure_threshold: int,
+    recovery_timeout_seconds: float,
+    enabled: bool,
+) -> tuple[list[logging.Handler], list[SinkCircuitBreakerHandler]]:
+    if not enabled:
+        return handlers, []
+
+    wrapped_handlers: list[logging.Handler] = []
+    breakers: list[SinkCircuitBreakerHandler] = []
+    name_counts: dict[str, int] = {}
+    for handler in handlers:
+        sink_name = _resolve_sink_name(handler, name_counts)
+        breaker = SinkCircuitBreakerHandler(
+            sink_name=sink_name,
+            delegate=handler,
+            failure_threshold=failure_threshold,
+            recovery_timeout_seconds=recovery_timeout_seconds,
+        )
+        wrapped_handlers.append(breaker)
+        breakers.append(breaker)
+    return wrapped_handlers, breakers
+
+
+def _resolve_sink_name(
+    handler: logging.Handler,
+    name_counts: dict[str, int],
+) -> str:
+    base_name = getattr(handler, "_fastapiobserver_sink_name", None)
+    if not isinstance(base_name, str) or not base_name.strip():
+        base_name = handler.__class__.__name__.strip().lower()
+    normalized_name = base_name
+    count = name_counts.get(normalized_name, 0) + 1
+    name_counts[normalized_name] = count
+    if count == 1:
+        return normalized_name
+    return f"{normalized_name}_{count}"

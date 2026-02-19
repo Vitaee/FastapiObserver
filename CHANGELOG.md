@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.2.0.dev1] - Unreleased
+## [0.2.0] - 2026-02-19
 
 ### Sprint A: Baseline Hardening
 
@@ -25,7 +25,7 @@ All notable changes to this project will be documented in this file.
 - New tests for configuration and environment loading.
 
 ### Changed
-- Project version bumped to `0.2.0.dev1` for next development cycle.
+- Project version advanced to the `0.2.x` line.
 - Distribution name changed from `fastapiobserver` to `fastapi-observer` (import path remains `fastapiobserver`).
 - Dependency minimums refreshed to currently tested releases (FastAPI/Starlette/OTel/Prometheus/tooling).
 - Python compatibility range changed to `>=3.10,<3.15`.
@@ -83,6 +83,45 @@ All notable changes to this project will be documented in this file.
 
 ### Developer Experience
 - Added repo-managed pre-push hook (`.githooks/pre-push`) to run `ruff`, `mypy`, and `pytest` before push.
+
+### Sprint D: Sink Reliability + DRY Utilities
+
+### Added
+- Sink circuit-breaker wrapper for all configured output handlers with open/half-open/closed state transitions.
+- Prometheus circuit-breaker metrics per sink:
+  - `fastapiobserver_sink_circuit_breaker_state_info`
+  - `fastapiobserver_sink_circuit_breaker_failures_total`
+  - `fastapiobserver_sink_circuit_breaker_skipped_total`
+  - `fastapiobserver_sink_circuit_breaker_opens_total`
+  - `fastapiobserver_sink_circuit_breaker_half_open_total`
+  - `fastapiobserver_sink_circuit_breaker_closes_total`
+- Shared utility helpers:
+  - `EnvLoadable` mixin for `from_env` boilerplate reduction
+  - `parse_csv(...)` for CSV tuple parsing
+  - `normalize_protocol(...)` for protocol normalization
+  - `lazy_import(...)` for optional dependency guards
+
+### Changed
+- `RuntimeControlSettings`, `TrustedProxyPolicy`, and `OTelLogsSettings` now use shared env-loading mixin flow.
+- OTel and metrics optional dependency loading now routes through a shared lazy import helper.
+- Sink handlers are tagged with stable sink names for metrics and circuit-breaker visibility.
+
+### Sprint E: SOLID Extensibility
+
+### Added
+- Log filtering extension point with `LogFilter` protocol plus `register_log_filter()` / `unregister_log_filter()`.
+- Metrics backend registry APIs:
+  - `register_metrics_backend()`
+  - `unregister_metrics_backend()`
+  - `get_registered_metrics_backends()`
+  - `mount_backend_metrics_endpoint()`
+- `METRICS_BACKEND` setting to choose registered backends through `install_observability()`.
+- New tests for log filter isolation, custom metrics backend registration, and backend mounting.
+
+### Changed
+- Logging queue pipeline now applies a plugin filter stage (`PluginLogFilter`) after request/trace context filters.
+- `StructuredJsonFormatter` now supports dependency injection for enrichment and sanitization callables while keeping defaults unchanged.
+- `install_observability()` now mounts metrics endpoints through backend capability checks instead of concrete Prometheus type checks.
 
 ## [0.1.2] - 2026-02-19
 

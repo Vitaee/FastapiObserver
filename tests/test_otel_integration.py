@@ -14,14 +14,19 @@ import fastapiobserver.otel as otel_module
 
 
 def test_install_otel_missing_dependency_raises(monkeypatch: pytest.MonkeyPatch) -> None:
-    original_import = otel_module.importlib.import_module
+    original_lazy_import = otel_module.lazy_import
 
-    def fake_import(name: str):
-        if name.startswith("opentelemetry"):
-            raise ModuleNotFoundError(name)
-        return original_import(name)
+    def fake_lazy_import(
+        module_path: str,
+        attr: str | None = None,
+        *,
+        package_hint: str | None = None,
+    ):
+        if module_path.startswith("opentelemetry"):
+            raise RuntimeError("missing dependency")
+        return original_lazy_import(module_path, attr=attr, package_hint=package_hint)
 
-    monkeypatch.setattr(otel_module.importlib, "import_module", fake_import)
+    monkeypatch.setattr(otel_module, "lazy_import", fake_lazy_import)
 
     with pytest.raises(RuntimeError, match=r"pip install fastapi-observer\[otel\]"):
         install_otel(

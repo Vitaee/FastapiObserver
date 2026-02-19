@@ -487,6 +487,9 @@ The library supports configuration from code and env vars. Below are the most re
 | `LOG_QUEUE_MAX_SIZE` | `10000` | Max in-memory records in core log queue |
 | `LOG_QUEUE_OVERFLOW_POLICY` | `drop_oldest` | Queue overflow behavior: `drop_oldest`, `drop_newest`, `block` |
 | `LOG_QUEUE_BLOCK_TIMEOUT_SECONDS` | `1.0` | Timeout used by `block` policy before dropping newest |
+| `LOG_SINK_CIRCUIT_BREAKER_ENABLED` | `true` | Enable sink circuit-breaker protection |
+| `LOG_SINK_CIRCUIT_BREAKER_FAILURE_THRESHOLD` | `5` | Consecutive sink failures before opening circuit |
+| `LOG_SINK_CIRCUIT_BREAKER_RECOVERY_TIMEOUT_SECONDS` | `30.0` | Open-state cooldown before half-open probe |
 | `REQUEST_ID_HEADER` | `x-request-id` | Incoming request ID header |
 | `RESPONSE_REQUEST_ID_HEADER` | `x-request-id` | Response request ID header |
 
@@ -495,6 +498,7 @@ The library supports configuration from code and env vars. Below are the most re
 | Variable | Default | Description |
 |---|---|---|
 | `METRICS_ENABLED` | `false` | Enable metrics backend |
+| `METRICS_BACKEND` | `prometheus` | Registered backend name used by `install_observability()` |
 | `METRICS_PATH` | `/metrics` | Metrics endpoint path |
 | `METRICS_EXCLUDE_PATHS` | `/metrics,/health,/healthz,/docs,/openapi.json` | Skip metrics for noisy endpoints |
 | `METRICS_EXEMPLARS_ENABLED` | `false` | Enable exemplars where supported |
@@ -615,6 +619,33 @@ Queue pressure metrics exposed on `/metrics` (Prometheus mode):
 - `fastapiobserver_log_queue_blocked_total`
 - `fastapiobserver_log_queue_block_timeouts_total`
 
+### Sink circuit breaker
+
+Every output sink is wrapped with a circuit breaker so a failing sink does not
+degrade request-path logging. This includes custom sinks registered via the
+`LogSink` protocol.
+The core package stays intentionally lean; provider-specific sinks can be added
+as optional packages without changing `install_observability()`.
+
+```python
+settings = ObservabilitySettings(
+    app_name="orders-api",
+    service="orders",
+    environment="production",
+    sink_circuit_breaker_enabled=True,
+    sink_circuit_breaker_failure_threshold=5,
+    sink_circuit_breaker_recovery_timeout_seconds=30.0,
+)
+```
+
+Breaker metrics exposed on `/metrics`:
+- `fastapiobserver_sink_circuit_breaker_state_info{sink,state}`
+- `fastapiobserver_sink_circuit_breaker_failures_total{sink}`
+- `fastapiobserver_sink_circuit_breaker_skipped_total{sink}`
+- `fastapiobserver_sink_circuit_breaker_opens_total{sink}`
+- `fastapiobserver_sink_circuit_breaker_half_open_total{sink}`
+- `fastapiobserver_sink_circuit_breaker_closes_total{sink}`
+
 ---
 
 ## Plugin Hooks
@@ -622,12 +653,20 @@ Queue pressure metrics exposed on `/metrics` (Prometheus mode):
 Extend behavior without editing package internals:
 
 ```python
-from fastapiobserver import register_log_enricher, register_metric_hook
+from fastapiobserver import (
+    register_log_enricher,
+    register_log_filter,
+    register_metric_hook,
+)
 
 
 def add_git_sha(payload: dict) -> dict:
     payload["git_sha"] = "abc123"
     return payload
+
+
+def drop_health_probe(record) -> bool:
+    return "health" not in record.getMessage().lower()
 
 
 def track_slow_requests(request, response, duration):
@@ -636,10 +675,49 @@ def track_slow_requests(request, response, duration):
 
 
 register_log_enricher("git_sha", add_git_sha)
+register_log_filter("drop_health_probe", drop_health_probe)
 register_metric_hook("slow_requests", track_slow_requests)
 ```
 
 Plugin failures are isolated and do not crash request handling.
+
+### Custom Metrics Backend Registry
+
+Use `register_metrics_backend()` to plug in non-Prometheus backends without
+modifying core code:
+
+```python
+from fastapiobserver import register_metrics_backend
+
+
+class MyBackend:
+    def observe(self, method, path, status_code, duration_seconds):
+        ...
+
+    def mount_endpoint(self, app, *, path="/metrics", metrics_format="negotiate"):
+        # Optional: mount a backend-specific endpoint
+        ...
+
+
+def build_my_backend(*, service: str, environment: str, exemplars_enabled: bool):
+    return MyBackend()
+
+
+register_metrics_backend("my_backend", build_my_backend)
+```
+
+### Formatter Dependency Injection
+
+`StructuredJsonFormatter` accepts injectable callables for enrichment and
+sanitization, keeping defaults unchanged while improving testability:
+
+```python
+formatter = StructuredJsonFormatter(
+    settings,
+    enrich_event=my_enricher,
+    sanitize_payload=my_sanitizer,
+)
+```
 
 ---
 
@@ -657,7 +735,7 @@ Repository integration tests include:
 - `0.2.x`: OTel interoperability, security presets, allowlists
 - `1.0.0`: dynamic runtime controls and plugin stability
 
-Current release version: `0.1.2`
+Current release version: `0.2.0`
 
 ## Changelog Policy
 

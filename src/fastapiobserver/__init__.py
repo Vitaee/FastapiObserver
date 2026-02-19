@@ -4,14 +4,30 @@ from .control_plane import RuntimeControlSettings, mount_control_plane
 from .fastapi import install_observability
 from .logging import (
     LOG_SCHEMA_VERSION,
+    PluginLogFilter,
     RequestIdFilter,
     StructuredJsonFormatter,
+    TraceContextFilter,
     get_log_queue_stats,
+    get_sink_circuit_breaker_stats,
     setup_logging,
 )
-from .metrics import mark_prometheus_process_dead
+from .metrics import (
+    build_metrics_backend,
+    get_registered_metrics_backends,
+    mark_prometheus_process_dead,
+    register_metrics_backend,
+    unregister_metrics_backend,
+)
 from .otel import OTelLogsSettings, OTelSettings, create_otel_resource, install_otel, install_otel_logs
-from .plugins import register_log_enricher, register_metric_hook
+from .plugins import (
+    LogFilter,
+    apply_log_filters,
+    register_log_enricher,
+    register_log_filter,
+    register_metric_hook,
+    unregister_log_filter,
+)
 from .propagation import (
     inject_trace_headers,
     instrument_httpx_client,
@@ -64,9 +80,12 @@ __all__ = [
     "TrustedProxyPolicy",
     # Logging
     "LOG_SCHEMA_VERSION",
+    "PluginLogFilter",
     "RequestIdFilter",
     "StructuredJsonFormatter",
+    "TraceContextFilter",
     "get_log_queue_stats",
+    "get_sink_circuit_breaker_stats",
     "setup_logging",
     # Sinks
     "LogSink",
@@ -76,7 +95,11 @@ __all__ = [
     "register_sink",
     "unregister_sink",
     # Metrics
+    "build_metrics_backend",
+    "get_registered_metrics_backends",
     "mark_prometheus_process_dead",
+    "register_metrics_backend",
+    "unregister_metrics_backend",
     # OTel
     "create_otel_resource",
     "install_observability",
@@ -100,8 +123,12 @@ __all__ = [
     "is_body_capturable",
     "sanitize_event",
     # Plugins
+    "LogFilter",
+    "apply_log_filters",
     "register_log_enricher",
+    "register_log_filter",
     "register_metric_hook",
+    "unregister_log_filter",
     # Request context
     "clear_request_id",
     "clear_span_id",

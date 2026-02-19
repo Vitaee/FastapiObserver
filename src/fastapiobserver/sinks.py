@@ -370,29 +370,35 @@ def build_sink_handlers(
     handlers: list[logging.Handler] = []
 
     # Always add stdout
-    handlers.append(StdoutSink().create_handler(formatter))
+    handlers.append(_tag_sink_handler(StdoutSink().create_handler(formatter), "stdout"))
 
     # Add rotating file if configured
     if settings.log_dir:
         handlers.append(
-            RotatingFileSink(log_dir=settings.log_dir).create_handler(formatter)
+            _tag_sink_handler(
+                RotatingFileSink(log_dir=settings.log_dir).create_handler(formatter),
+                "rotating_file",
+            )
         )
 
     # Add Logtail if configured
     if settings.logtail_enabled and settings.logtail_source_token:
         handlers.append(
-            LogtailSink(
-                source_token=settings.logtail_source_token,
-                batch_size=settings.logtail_batch_size,
-                flush_interval=settings.logtail_flush_interval,
-            ).create_handler(formatter)
+            _tag_sink_handler(
+                LogtailSink(
+                    source_token=settings.logtail_source_token,
+                    batch_size=settings.logtail_batch_size,
+                    flush_interval=settings.logtail_flush_interval,
+                ).create_handler(formatter),
+                "logtail",
+            )
         )
 
     # Add entry-point discovered sinks
     discover_entry_point_sinks()
     for sink in _SINK_REGISTRY.values():
         try:
-            handlers.append(sink.create_handler(formatter))
+            handlers.append(_tag_sink_handler(sink.create_handler(formatter), sink.name))
         except Exception:
             _LOGGER.warning(
                 "sinks.create_handler.failed",
@@ -404,6 +410,11 @@ def build_sink_handlers(
             )
 
     return handlers
+
+
+def _tag_sink_handler(handler: logging.Handler, sink_name: str) -> logging.Handler:
+    setattr(handler, "_fastapiobserver_sink_name", sink_name.strip().lower())
+    return handler
 
 
 __all__ = [

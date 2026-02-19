@@ -1,12 +1,16 @@
 from __future__ import annotations
 
+import logging
+
 from starlette.requests import Request
 from starlette.responses import Response
 
 from fastapiobserver.plugins import (
+    apply_log_filters,
     apply_log_enrichers,
     emit_metric_hooks,
     register_log_enricher,
+    register_log_filter,
     register_metric_hook,
 )
 
@@ -59,3 +63,23 @@ def test_metric_hook_failures_are_isolated() -> None:
     emit_metric_hooks(_request(), Response(status_code=200), 0.12)
 
     assert called
+
+
+def test_log_filters_can_drop_records() -> None:
+    register_log_filter("drop_debug", lambda record: record.levelno >= logging.INFO)
+
+    debug_record = logging.makeLogRecord({"levelno": logging.DEBUG, "msg": "ignore"})
+    info_record = logging.makeLogRecord({"levelno": logging.INFO, "msg": "keep"})
+
+    assert apply_log_filters(debug_record) is False
+    assert apply_log_filters(info_record) is True
+
+
+def test_log_filter_failures_are_isolated() -> None:
+    def bad_filter(_record: logging.LogRecord) -> bool:
+        raise RuntimeError("boom")
+
+    register_log_filter("bad", bad_filter)
+
+    record = logging.makeLogRecord({"levelno": logging.INFO, "msg": "ok"})
+    assert apply_log_filters(record) is True

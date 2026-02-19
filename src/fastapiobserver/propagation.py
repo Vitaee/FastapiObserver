@@ -21,9 +21,10 @@ Or for automatic instrumentation::
 
 from __future__ import annotations
 
-import importlib
 import logging
 from typing import Any
+
+from .utils import lazy_import
 
 _LOGGER = logging.getLogger("fastapiobserver.propagation")
 
@@ -80,8 +81,9 @@ def instrument_httpx_client(client: Any | None = None) -> None:
     Requires ``pip install fastapi-observer[otel-httpx]``.
     """
     try:
-        instrumentor_module = importlib.import_module(
-            "opentelemetry.instrumentation.httpx"
+        instrumentor_module = lazy_import(
+            "opentelemetry.instrumentation.httpx",
+            package_hint="fastapi-observer[otel-httpx]",
         )
         instrumentor_cls = getattr(instrumentor_module, "HTTPXClientInstrumentor")
 
@@ -89,23 +91,21 @@ def instrument_httpx_client(client: Any | None = None) -> None:
             instrumentor_cls.instrument_client(client)
         else:
             instrumentor_cls().instrument()
-    except ImportError:
+    except RuntimeError as exc:
         raise RuntimeError(
             "httpx instrumentation requires "
             "`pip install fastapi-observer[otel-httpx]`"
-        )
+        ) from exc
 
 
 def uninstrument_httpx_client() -> None:
     """Reverse global ``httpx`` instrumentation."""
     try:
-        instrumentor_module = importlib.import_module(
-            "opentelemetry.instrumentation.httpx"
-        )
+        instrumentor_module = lazy_import("opentelemetry.instrumentation.httpx")
         instrumentor_cls = getattr(instrumentor_module, "HTTPXClientInstrumentor")
 
         instrumentor_cls().uninstrument()
-    except ImportError:
+    except ModuleNotFoundError:
         pass
 
 
@@ -132,29 +132,28 @@ def instrument_requests_session(session: Any | None = None) -> None:
             "instrument all requests globally."
         )
     try:
-        instrumentor_module = importlib.import_module(
-            "opentelemetry.instrumentation.requests"
+        instrumentor_module = lazy_import(
+            "opentelemetry.instrumentation.requests",
+            package_hint="fastapi-observer[otel-requests]",
         )
         instrumentor_cls = getattr(instrumentor_module, "RequestsInstrumentor")
 
         instrumentor_cls().instrument()
-    except ImportError:
+    except RuntimeError as exc:
         raise RuntimeError(
             "requests instrumentation requires "
             "`pip install fastapi-observer[otel-requests]`"
-        )
+        ) from exc
 
 
 def uninstrument_requests_session() -> None:
     """Reverse global ``requests`` instrumentation."""
     try:
-        instrumentor_module = importlib.import_module(
-            "opentelemetry.instrumentation.requests"
-        )
+        instrumentor_module = lazy_import("opentelemetry.instrumentation.requests")
         instrumentor_cls = getattr(instrumentor_module, "RequestsInstrumentor")
 
         instrumentor_cls().uninstrument()
-    except ImportError:
+    except ModuleNotFoundError:
         pass
 
 

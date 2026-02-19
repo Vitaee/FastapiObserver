@@ -13,16 +13,24 @@ def test_observability_settings_normalize_values() -> None:
     settings = ObservabilitySettings(
         log_level="debug",
         log_queue_overflow_policy="DROP_NEWEST",
+        sink_circuit_breaker_enabled=True,
+        sink_circuit_breaker_failure_threshold=3,
+        sink_circuit_breaker_recovery_timeout_seconds=15.0,
         request_id_header="X-Request-ID",
         response_request_id_header="X-Request-ID",
+        metrics_backend=" CUSTOM_BACKEND ",
         metrics_path="metrics/",
         metrics_exclude_paths=("health", "/docs/", "/openapi.json"),
     )
 
     assert settings.log_level == "DEBUG"
     assert settings.log_queue_overflow_policy == "drop_newest"
+    assert settings.sink_circuit_breaker_enabled is True
+    assert settings.sink_circuit_breaker_failure_threshold == 3
+    assert settings.sink_circuit_breaker_recovery_timeout_seconds == 15.0
     assert settings.request_id_header == "x-request-id"
     assert settings.response_request_id_header == "x-request-id"
+    assert settings.metrics_backend == "custom_backend"
     assert settings.metrics_path == "/metrics"
     assert settings.metrics_exclude_paths == ("/health", "/docs", "/openapi.json")
 
@@ -35,6 +43,16 @@ def test_observability_settings_reject_invalid_header() -> None:
 def test_observability_settings_reject_invalid_log_queue_policy() -> None:
     with pytest.raises(ValidationError, match="log_queue_overflow_policy"):
         ObservabilitySettings(log_queue_overflow_policy="evict_random")
+
+
+def test_observability_settings_reject_empty_metrics_backend() -> None:
+    with pytest.raises(ValidationError, match="metrics_backend"):
+        ObservabilitySettings(metrics_backend="   ")
+
+
+def test_observability_settings_reject_invalid_sink_circuit_breaker_threshold() -> None:
+    with pytest.raises(ValidationError, match="sink_circuit_breaker_failure_threshold"):
+        ObservabilitySettings(sink_circuit_breaker_failure_threshold=0)
 
 
 def test_security_policy_from_env(monkeypatch: pytest.MonkeyPatch) -> None:

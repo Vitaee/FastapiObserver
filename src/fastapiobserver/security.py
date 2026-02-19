@@ -8,7 +8,7 @@ from typing import Any, Literal, Mapping
 from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from .utils import parse_csv_tuple
+from .utils import EnvLoadable, parse_csv
 
 DEFAULT_REDACTED_FIELDS = (
     "password",
@@ -97,7 +97,6 @@ _SECURITY_POLICY_ENV_MAP = {
     "event_key_allowlist": "OBS_EVENT_KEY_ALLOWLIST",
     "body_capture_media_types": "OBS_BODY_CAPTURE_MEDIA_TYPES",
 }
-_NULLISH_VALUES = {"none", "null", "unset"}
 _OPTIONAL_SECURITY_FIELDS = {
     "header_allowlist",
     "event_key_allowlist",
@@ -108,7 +107,7 @@ _DROP = object()
 RedactionMode = Literal["mask", "hash", "drop"]
 
 
-class SecurityPolicy(BaseModel):
+class SecurityPolicy(EnvLoadable, BaseModel):
     model_config = ConfigDict(frozen=True)
 
     redacted_fields: tuple[str, ...] = DEFAULT_REDACTED_FIELDS
@@ -139,13 +138,13 @@ class SecurityPolicy(BaseModel):
         }
         field_name = info.field_name
         if field_name in defaults:
-            return parse_csv_tuple(value, defaults[field_name])
-        return _parse_optional_csv_tuple(value)
+            return parse_csv(value, default=defaults[field_name], optional=False)
+        return parse_csv(value, optional=True)
 
     @field_validator("body_capture_media_types", mode="before")
     @classmethod
     def _parse_media_types(cls, value: object) -> tuple[str, ...] | None:
-        return _parse_optional_csv_tuple(value)
+        return parse_csv(value, optional=True)
 
     @field_validator(
         "redacted_fields",
@@ -181,7 +180,7 @@ class SecurityPolicy(BaseModel):
 
     @classmethod
     def from_env(cls) -> "SecurityPolicy":
-        env_settings = _SecurityPolicySettings()
+        env_settings = cls._env_settings_class()()
         overrides: dict[str, Any] = {}
         for field_name, env_name in _SECURITY_POLICY_ENV_MAP.items():
             if os.getenv(env_name) is None:
@@ -200,8 +199,12 @@ class SecurityPolicy(BaseModel):
             return base
         return base.model_copy(update=overrides)
 
+    @classmethod
+    def _env_settings_class(cls) -> type[BaseSettings]:
+        return _SecurityPolicySettings
 
-class TrustedProxyPolicy(BaseModel):
+
+class TrustedProxyPolicy(EnvLoadable, BaseModel):
     model_config = ConfigDict(frozen=True)
 
     enabled: bool = True
@@ -209,8 +212,8 @@ class TrustedProxyPolicy(BaseModel):
     honor_forwarded_headers: bool = False
 
     @classmethod
-    def from_env(cls) -> "TrustedProxyPolicy":
-        return cls(**_TrustedProxyPolicySettings().model_dump())
+    def _env_settings_class(cls) -> type[BaseSettings]:
+        return _TrustedProxyPolicySettings
 
 
 class _SecurityPolicySettings(BaseSettings):
@@ -278,10 +281,10 @@ class _SecurityPolicySettings(BaseSettings):
         # Settings parsing must normalize raw env strings before SecurityPolicy model validation.
         field_name = info.field_name
         if field_name == "redacted_fields":
-            return parse_csv_tuple(value, DEFAULT_REDACTED_FIELDS)
+            return parse_csv(value, default=DEFAULT_REDACTED_FIELDS, optional=False)
         if field_name == "redacted_headers":
-            return parse_csv_tuple(value, DEFAULT_REDACTED_HEADERS)
-        return _parse_optional_csv_tuple(value)
+            return parse_csv(value, default=DEFAULT_REDACTED_HEADERS, optional=False)
+        return parse_csv(value, optional=True)
 
 
 class _TrustedProxyPolicySettings(BaseSettings):
@@ -304,7 +307,10 @@ class _TrustedProxyPolicySettings(BaseSettings):
     @field_validator("trusted_cidrs", mode="before")
     @classmethod
     def _parse_trusted_cidrs(cls, value: object) -> tuple[str, ...]:
-        return parse_csv_tuple(value, DEFAULT_TRUSTED_CIDRS)
+        parsed = parse_csv(value, default=DEFAULT_TRUSTED_CIDRS, optional=False)
+        if isinstance(parsed, tuple):
+            return parsed
+        return DEFAULT_TRUSTED_CIDRS
 
 
 def _normalize_key(key: str) -> str:
@@ -313,20 +319,6 @@ def _normalize_key(key: str) -> str:
 
 def _normalize_media_type(value: str) -> str:
     return value.split(";", 1)[0].strip().lower()
-
-
-def _parse_optional_csv_tuple(value: object) -> tuple[str, ...] | None:
-    if value is None:
-        return None
-    if isinstance(value, str):
-        if value.strip().lower() in _NULLISH_VALUES:
-            return None
-        return tuple(part.strip() for part in value.split(",") if part.strip())
-    if isinstance(value, tuple):
-        return tuple(str(item).strip() for item in value if str(item).strip())
-    if isinstance(value, list):
-        return tuple(str(item).strip() for item in value if str(item).strip())
-    return None
 
 
 def _redact_value(value: Any, policy: SecurityPolicy) -> Any:

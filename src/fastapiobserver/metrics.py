@@ -1,16 +1,16 @@
 from __future__ import annotations
 
-import importlib
 import logging
 import os
 import re
 import threading
 from pathlib import Path
-from typing import Any, Literal, Protocol
+from typing import Any, Callable, Literal, Protocol
 
 from fastapi import FastAPI
 
 from .utils import normalize_path as normalize_route_path
+from .utils import lazy_import
 
 _UUID_RE = re.compile(
     r"/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}"
@@ -21,6 +21,7 @@ _HEX_RE = re.compile(r"/[0-9a-fA-F]{16,}")
 _LOGGER = logging.getLogger("fastapiobserver.metrics")
 _LOG_QUEUE_COLLECTOR_LOCK = threading.Lock()
 _LOG_QUEUE_COLLECTOR_REGISTERED = False
+_METRICS_BACKEND_LOCK = threading.RLock()
 
 
 # ---------------------------------------------------------------------------
@@ -38,6 +39,21 @@ class MetricsBackend(Protocol):
         status_code: int,
         duration_seconds: float,
     ) -> None: ...
+
+
+class MountableMetricsBackend(Protocol):
+    """Optional extension for backends that can mount their endpoint."""
+
+    def mount_endpoint(
+        self,
+        app: FastAPI,
+        *,
+        path: str = "/metrics",
+        metrics_format: "MetricsFormat" = "negotiate",
+    ) -> None: ...
+
+
+MetricsBackendFactory = Callable[..., MetricsBackend]
 
 
 # ---------------------------------------------------------------------------
@@ -169,6 +185,15 @@ class PrometheusMetricsBackend:
             self.__class__._REQUEST_COUNT.labels(**labels).inc()
             self.__class__._REQUEST_LATENCY.labels(**labels).observe(duration_seconds)
 
+    def mount_endpoint(
+        self,
+        app: FastAPI,
+        *,
+        path: str = "/metrics",
+        metrics_format: "MetricsFormat" = "negotiate",
+    ) -> None:
+        mount_metrics_endpoint(app, path, metrics_format=metrics_format)
+
 
 class _LogQueueMetricsCollector:
     """Custom collector for logging queue pressure counters."""
@@ -176,7 +201,7 @@ class _LogQueueMetricsCollector:
     def collect(self) -> Any:
         from prometheus_client.core import CounterMetricFamily, GaugeMetricFamily
 
-        from .logging import get_log_queue_stats
+        from .logging import get_log_queue_stats, get_sink_circuit_breaker_stats
 
         stats = get_log_queue_stats()
 
@@ -232,22 +257,91 @@ class _LogQueueMetricsCollector:
         block_timeouts_total.add_metric([], float(stats["block_timeout_total"]))
         yield block_timeouts_total
 
+        sink_stats = get_sink_circuit_breaker_stats()
+        if not sink_stats:
+            return
+
+        sink_state = GaugeMetricFamily(
+            "fastapiobserver_sink_circuit_breaker_state_info",
+            "Current sink circuit-breaker state.",
+            labels=["sink", "state"],
+        )
+        sink_failures = CounterMetricFamily(
+            "fastapiobserver_sink_circuit_breaker_failures_total",
+            "Total sink handler failures observed by circuit breakers.",
+            labels=["sink"],
+        )
+        sink_skipped = CounterMetricFamily(
+            "fastapiobserver_sink_circuit_breaker_skipped_total",
+            "Total records skipped while sink circuit breaker was open.",
+            labels=["sink"],
+        )
+        sink_opens = CounterMetricFamily(
+            "fastapiobserver_sink_circuit_breaker_opens_total",
+            "Total transitions into open state for sink circuit breakers.",
+            labels=["sink"],
+        )
+        sink_half_open = CounterMetricFamily(
+            "fastapiobserver_sink_circuit_breaker_half_open_total",
+            "Total transitions into half-open state for sink circuit breakers.",
+            labels=["sink"],
+        )
+        sink_closes = CounterMetricFamily(
+            "fastapiobserver_sink_circuit_breaker_closes_total",
+            "Total transitions back to closed state for sink circuit breakers.",
+            labels=["sink"],
+        )
+
+        for sink_name, sink in sorted(sink_stats.items()):
+            sink_state.add_metric([sink_name, str(sink["state"])], 1.0)
+            sink_failures.add_metric([sink_name], float(sink["failures_total"]))
+            sink_skipped.add_metric([sink_name], float(sink["skipped_total"]))
+            sink_opens.add_metric([sink_name], float(sink["opens_total"]))
+            sink_half_open.add_metric([sink_name], float(sink["half_open_total"]))
+            sink_closes.add_metric([sink_name], float(sink["closes_total"]))
+
+        yield sink_state
+        yield sink_failures
+        yield sink_skipped
+        yield sink_opens
+        yield sink_half_open
+        yield sink_closes
+
 
 # ---------------------------------------------------------------------------
 # Builder — Open/Closed: add new backends without modifying existing code
 # ---------------------------------------------------------------------------
 
+_METRICS_BACKEND_FACTORIES: dict[str, MetricsBackendFactory] = {}
 
-def build_metrics_backend(
-    enabled: bool,
+
+def register_metrics_backend(name: str, factory: MetricsBackendFactory) -> None:
+    normalized_name = name.strip().lower()
+    if not normalized_name:
+        raise ValueError("Metrics backend name cannot be empty")
+    with _METRICS_BACKEND_LOCK:
+        _METRICS_BACKEND_FACTORIES[normalized_name] = factory
+
+
+def unregister_metrics_backend(name: str) -> None:
+    normalized_name = name.strip().lower()
+    if not normalized_name:
+        return
+    with _METRICS_BACKEND_LOCK:
+        _METRICS_BACKEND_FACTORIES.pop(normalized_name, None)
+
+
+def get_registered_metrics_backends() -> dict[str, MetricsBackendFactory]:
+    with _METRICS_BACKEND_LOCK:
+        return dict(_METRICS_BACKEND_FACTORIES)
+
+
+def _build_prometheus_metrics_backend(
     *,
-    service: str = "api",
-    environment: str = "development",
-    exemplars_enabled: bool = False,
+    service: str,
+    environment: str,
+    exemplars_enabled: bool,
 ) -> MetricsBackend:
-    """Factory for selecting the appropriate metrics backend."""
-    if not enabled:
-        return NoopMetricsBackend()
     _validate_prometheus_multiprocess_dir()
     backend = PrometheusMetricsBackend(
         service=service,
@@ -256,6 +350,47 @@ def build_metrics_backend(
     )
     _register_log_queue_metrics_collector()
     return backend
+
+
+def build_metrics_backend(
+    enabled: bool,
+    *,
+    service: str = "api",
+    environment: str = "development",
+    exemplars_enabled: bool = False,
+    backend: str = "prometheus",
+) -> MetricsBackend:
+    """Factory for selecting the appropriate metrics backend."""
+    if not enabled:
+        return NoopMetricsBackend()
+    normalized_backend = backend.strip().lower()
+    with _METRICS_BACKEND_LOCK:
+        backend_factory = _METRICS_BACKEND_FACTORIES.get(normalized_backend)
+        available_backends = tuple(sorted(_METRICS_BACKEND_FACTORIES))
+    if backend_factory is None:
+        available_csv = ", ".join(available_backends) or "(none)"
+        raise ValueError(
+            f"Unknown metrics backend: {backend!r}. Available backends: {available_csv}"
+        )
+    return backend_factory(
+        service=service,
+        environment=environment,
+        exemplars_enabled=exemplars_enabled,
+    )
+
+
+def mount_backend_metrics_endpoint(
+    app: FastAPI,
+    backend: MetricsBackend,
+    *,
+    path: str = "/metrics",
+    metrics_format: "MetricsFormat" = "negotiate",
+) -> bool:
+    mount_endpoint = getattr(backend, "mount_endpoint", None)
+    if not callable(mount_endpoint):
+        return False
+    mount_endpoint(app, path=path, metrics_format=metrics_format)
+    return True
 
 
 # ---------------------------------------------------------------------------
@@ -476,8 +611,11 @@ def _validate_prometheus_multiprocess_dir() -> None:
 
 def _import_prometheus_client() -> Any:
     try:
-        return importlib.import_module("prometheus_client")
-    except ModuleNotFoundError as exc:
+        return lazy_import(
+            "prometheus_client",
+            package_hint="fastapi-observer[prometheus]",
+        )
+    except (RuntimeError, ModuleNotFoundError) as exc:
         raise RuntimeError(
             "Prometheus support requires `pip install fastapi-observer[prometheus]`"
         ) from exc
@@ -500,3 +638,6 @@ def _register_log_queue_metrics_collector() -> None:
             # Collector already registered by another backend init in-process.
             pass
         _LOG_QUEUE_COLLECTOR_REGISTERED = True
+
+
+register_metrics_backend("prometheus", _build_prometheus_metrics_backend)

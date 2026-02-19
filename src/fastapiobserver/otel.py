@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import importlib
 import logging
 import threading
 from typing import Any, Callable, Literal, Mapping
@@ -12,6 +11,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from .config import ObservabilitySettings
 from .security import SecurityPolicy, sanitize_event
+from .utils import EnvLoadable, lazy_import, normalize_protocol
 
 _RUNTIME_LOCK = threading.RLock()
 _RUNTIME_TRACE_SAMPLING_RATIO = 1.0
@@ -21,7 +21,7 @@ _OTLP_LOG_PROCESSOR_KEYS_ATTR = "_fastapiobserver_otlp_log_processor_keys"
 _STANDARD_LOG_RECORD_ATTRS = frozenset(logging.makeLogRecord({}).__dict__)
 
 
-class OTelSettings(BaseModel):
+class OTelSettings(EnvLoadable, BaseModel):
     model_config = ConfigDict(frozen=True)
 
     enabled: bool = False
@@ -36,10 +36,12 @@ class OTelSettings(BaseModel):
     @field_validator("protocol", mode="before")
     @classmethod
     def _normalize_protocol(cls, value: object) -> str:
-        normalized_protocol = str(value).strip().lower()
-        if normalized_protocol not in OTEL_PROTOCOLS:
-            raise ValueError(f"Invalid OTel protocol: {value}")
-        return normalized_protocol
+        return normalize_protocol(
+            value,
+            allowed=OTEL_PROTOCOLS,
+            strict=True,
+            label="OTel protocol",
+        )
 
     @field_validator("extra_resource_attributes", mode="before")
     @classmethod
@@ -54,23 +56,27 @@ class OTelSettings(BaseModel):
         default_service_name = settings.service if settings else "api"
         default_service_version = settings.version if settings else "0.0.0"
         default_environment = settings.environment if settings else "development"
-        env_settings = _OTelEnvSettings()
+        env_settings = cls._env_values()
 
         return cls(
-            enabled=env_settings.enabled,
-            service_name=env_settings.service_name or default_service_name,
-            service_version=env_settings.service_version or default_service_version,
-            environment=env_settings.environment or default_environment,
-            otlp_endpoint=env_settings.otlp_endpoint,
-            protocol=env_settings.protocol,
-            trace_sampling_ratio=env_settings.trace_sampling_ratio,
+            enabled=bool(env_settings["enabled"]),
+            service_name=env_settings["service_name"] or default_service_name,
+            service_version=env_settings["service_version"] or default_service_version,
+            environment=env_settings["environment"] or default_environment,
+            otlp_endpoint=env_settings["otlp_endpoint"],
+            protocol=env_settings["protocol"],
+            trace_sampling_ratio=float(env_settings["trace_sampling_ratio"]),
             extra_resource_attributes=_parse_resource_attributes(
-                env_settings.extra_resource_attributes
+                env_settings["extra_resource_attributes"]
             ),
         )
 
+    @classmethod
+    def _env_settings_class(cls) -> type[BaseSettings]:
+        return _OTelEnvSettings
 
-class OTelLogsSettings(BaseModel):
+
+class OTelLogsSettings(EnvLoadable, BaseModel):
     """Configuration for OTLP log export.
 
     ``logs_mode`` controls where logs are sent:
@@ -90,27 +96,17 @@ class OTelLogsSettings(BaseModel):
     @field_validator("protocol", mode="before")
     @classmethod
     def _normalize_protocol(cls, value: object) -> str:
-        normalized = str(value).strip().lower()
-        return normalized if normalized in OTEL_PROTOCOLS else "grpc"
+        return normalize_protocol(
+            value,
+            allowed=OTEL_PROTOCOLS,
+            default="grpc",
+            strict=False,
+            label="OTel protocol",
+        )
 
     @classmethod
-    def from_env(cls) -> "OTelLogsSettings":
-        """Load OTLP log settings from environment variables.
-
-        Env vars
-        --------
-        ``OTEL_LOGS_ENABLED``   — bool, default ``False``
-        ``OTEL_LOGS_MODE``      — ``local_json`` | ``otlp`` | ``both``
-        ``OTEL_LOGS_ENDPOINT``  — OTLP endpoint URL
-        ``OTEL_LOGS_PROTOCOL``  — ``grpc`` | ``http/protobuf``
-        """
-        env = _OTelLogsEnvSettings()
-        return cls(
-            enabled=env.enabled,
-            logs_mode=env.logs_mode,
-            otlp_endpoint=env.otlp_endpoint,
-            protocol=env.protocol,
-        )
+    def _env_settings_class(cls) -> type[BaseSettings]:
+        return _OTelLogsEnvSettings
 
 
 class _SanitizingOTLPLogHandler(logging.Handler):
@@ -190,12 +186,13 @@ class _OTelEnvSettings(BaseSettings):
     @field_validator("protocol", mode="before")
     @classmethod
     def _normalize_protocol_env(cls, value: object) -> str:
-        if value is None:
-            return "grpc"
-        normalized = str(value).strip().lower()
-        if normalized not in OTEL_PROTOCOLS:
-            return "grpc"
-        return normalized
+        return normalize_protocol(
+            value,
+            allowed=OTEL_PROTOCOLS,
+            default="grpc",
+            strict=False,
+            label="OTel protocol",
+        )
 
 
 class _OTelLogsEnvSettings(BaseSettings):
@@ -221,12 +218,13 @@ class _OTelLogsEnvSettings(BaseSettings):
     @field_validator("protocol", mode="before")
     @classmethod
     def _normalize_protocol_env(cls, value: object) -> str:
-        if value is None:
-            return "grpc"
-        normalized = str(value).strip().lower()
-        if normalized not in OTEL_PROTOCOLS:
-            return "grpc"
-        return normalized
+        return normalize_protocol(
+            value,
+            allowed=OTEL_PROTOCOLS,
+            default="grpc",
+            strict=False,
+            label="OTel protocol",
+        )
 
     @field_validator("logs_mode", mode="before")
     @classmethod
@@ -591,8 +589,8 @@ def _build_span_exporter(otel_settings: OTelSettings) -> Any:
 
 def _import_otel_module(name: str) -> Any:
     try:
-        return importlib.import_module(name)
-    except ModuleNotFoundError as exc:
+        return lazy_import(name, package_hint="fastapi-observer[otel]")
+    except RuntimeError as exc:
         raise RuntimeError(
             "OpenTelemetry support requires `pip install fastapi-observer[otel]`"
         ) from exc

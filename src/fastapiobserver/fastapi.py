@@ -9,9 +9,8 @@ from .config import ObservabilitySettings
 from .control_plane import RuntimeControlSettings, mount_control_plane
 from .logging import setup_logging
 from .metrics import (
-    PrometheusMetricsBackend,
     build_metrics_backend,
-    mount_metrics_endpoint,
+    mount_backend_metrics_endpoint,
 )
 from .middleware import RequestLoggingMiddleware
 from .otel import OTelLogsSettings, OTelSettings, install_otel, install_otel_logs
@@ -79,14 +78,15 @@ def install_observability(
         service=settings.service,
         environment=settings.environment,
         exemplars_enabled=settings.exemplars_enabled,
+        backend=settings.metrics_backend,
     )
 
-    if isinstance(metrics_backend, PrometheusMetricsBackend):
-        mount_metrics_endpoint(
-            app,
-            settings.metrics_path,
-            metrics_format=settings.metrics_format,
-        )
+    mount_backend_metrics_endpoint(
+        app,
+        metrics_backend,
+        path=settings.metrics_path,
+        metrics_format=settings.metrics_format,
+    )
 
     # --- 4. OTel tracing ---
     if otel_settings and otel_settings.enabled:
