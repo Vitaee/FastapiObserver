@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 import pytest
 
 from fastapiobserver import OTelSettings, ObservabilitySettings, install_observability
-import fastapiobserver.otel as otel_module
+import fastapiobserver.otel.tracing as otel_tracing_module
 
 from tests.conftest_otlp import OtlpCollector
 
@@ -19,7 +19,7 @@ def test_spans_are_exported_to_otlp_collector(
     pytest.importorskip("opentelemetry.trace")
     trace_api = pytest.importorskip("opentelemetry.trace")
     pytest.importorskip("opentelemetry.exporter.otlp.proto.http.trace_exporter")
-    monkeypatch.setattr(otel_module, "_has_configured_tracer_provider", lambda *_: False)
+    monkeypatch.setattr(otel_tracing_module, "has_configured_tracer_provider", lambda *_: False)
 
     # Force a clean provider so this test does not depend on test execution order.
     if hasattr(trace_api, "_TRACER_PROVIDER"):

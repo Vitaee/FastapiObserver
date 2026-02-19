@@ -11,10 +11,11 @@ from fastapiobserver.otel import (
     set_trace_sampling_ratio,
 )
 import fastapiobserver.otel as otel_module
+import fastapiobserver.otel.resource as otel_resource_module
 
 
 def test_install_otel_missing_dependency_raises(monkeypatch: pytest.MonkeyPatch) -> None:
-    original_lazy_import = otel_module.lazy_import
+    original_lazy_import = otel_resource_module.lazy_import
 
     def fake_lazy_import(
         module_path: str,
@@ -26,7 +27,7 @@ def test_install_otel_missing_dependency_raises(monkeypatch: pytest.MonkeyPatch)
             raise RuntimeError("missing dependency")
         return original_lazy_import(module_path, attr=attr, package_hint=package_hint)
 
-    monkeypatch.setattr(otel_module, "lazy_import", fake_lazy_import)
+    monkeypatch.setattr(otel_resource_module, "lazy_import", fake_lazy_import)
 
     with pytest.raises(RuntimeError, match=r"pip install fastapi-observer\[otel\]"):
         install_otel(

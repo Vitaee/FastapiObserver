@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.1] - 2026-02-19
+
+### Added
+- OTel package split with focused modules under `fastapiobserver/otel/`:
+  - `settings.py` (OTel settings + env wrappers + runtime sampling state)
+  - `resource.py` (resource/excluded URL/exporter helpers)
+  - `tracing.py` (`install_otel`)
+  - `logs.py` (`install_otel_logs`)
+- Backward-compatible private aliases on `fastapiobserver.otel` for pre-split internal symbols used by existing tests/integrations.
+
+### Changed
+- Replaced monolithic `src/fastapiobserver/otel.py` with `src/fastapiobserver/otel/` subpackage while preserving public imports from `fastapiobserver.otel`.
+- Updated OTel integration tests to patch the new focused submodules directly.
+
 ## [0.2.0] - 2026-02-19
 
 ### Sprint A: Baseline Hardening
