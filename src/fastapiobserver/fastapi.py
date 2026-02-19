@@ -7,7 +7,7 @@ from fastapi import FastAPI
 
 from .config import ObservabilitySettings
 from .control_plane import RuntimeControlSettings, mount_control_plane
-from .logging import setup_logging
+from .logging import setup_logging, shutdown_logging
 from .metrics import (
     build_metrics_backend,
     mount_backend_metrics_endpoint,
@@ -24,6 +24,7 @@ from .otel import (
 from .security import SecurityPolicy, TrustedProxyPolicy
 
 _LOGGER = logging.getLogger("fastapiobserver.fastapi")
+_LOGGING_SHUTDOWN_HOOK_ATTR = "_fastapiobserver_logging_shutdown_hook_registered"
 
 
 def install_observability(
@@ -77,6 +78,7 @@ def install_observability(
         logs_mode=logs_mode,
         extra_handlers=extra_handlers,
     )
+    _register_logging_shutdown_hook(app)
 
     # --- 3. Metrics backend ---
     enable_metrics = (
@@ -151,3 +153,10 @@ def _has_request_logging_middleware(app: FastAPI) -> bool:
         if middleware.cls is RequestLoggingMiddleware:
             return True
     return False
+
+
+def _register_logging_shutdown_hook(app: FastAPI) -> None:
+    if bool(getattr(app.state, _LOGGING_SHUTDOWN_HOOK_ATTR, False)):
+        return
+    app.add_event_handler("shutdown", shutdown_logging)
+    setattr(app.state, _LOGGING_SHUTDOWN_HOOK_ATTR, True)

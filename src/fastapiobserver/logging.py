@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import atexit
 import json
 import logging
 import logging.handlers
@@ -28,6 +29,7 @@ _LOGGING_LOCK = threading.Lock()
 _QUEUE_LISTENER: logging.handlers.QueueListener | None = None
 _MANAGED_OUTPUT_HANDLERS: list[logging.Handler] = []
 _SINK_CIRCUIT_BREAKERS: list["SinkCircuitBreakerHandler"] = []
+_ATEXIT_SHUTDOWN_REGISTERED = False
 _LOGGER = logging.getLogger("fastapiobserver.logging")
 LOG_SCHEMA_VERSION = "1.0.0"
 
@@ -293,6 +295,64 @@ def get_sink_circuit_breaker_stats() -> dict[str, dict[str, int | float | str]]:
     with _LOGGING_LOCK:
         breakers = list(_SINK_CIRCUIT_BREAKERS)
     return {breaker.sink_name: breaker.snapshot().as_dict() for breaker in breakers}
+
+
+def shutdown_logging() -> None:
+    """Flush and stop managed logging components.
+
+    Safe to call multiple times. Used by FastAPI shutdown hooks and ``atexit``.
+    """
+
+    global _QUEUE_LISTENER
+    global _MANAGED_OUTPUT_HANDLERS
+    global _SINK_CIRCUIT_BREAKERS
+
+    with _LOGGING_LOCK:
+        listener = _QUEUE_LISTENER
+        _QUEUE_LISTENER = None
+        if listener is not None:
+            try:
+                listener.stop()
+            except Exception:
+                _LOGGER.debug(
+                    "logging.queue_listener.stop_failed",
+                    exc_info=True,
+                    extra={"_skip_enrichers": True},
+                )
+
+        root_logger = logging.getLogger()
+        managed_handlers = [
+            handler
+            for handler in root_logger.handlers
+            if getattr(handler, "_fastapiobserver_managed", False)
+        ]
+        for handler in managed_handlers:
+            root_logger.removeHandler(handler)
+            try:
+                handler.close()
+            except Exception:
+                _LOGGER.debug(
+                    "logging.managed_handler.close_failed",
+                    exc_info=True,
+                    extra={"_skip_enrichers": True},
+                )
+
+        for output_handler in _MANAGED_OUTPUT_HANDLERS:
+            try:
+                output_handler.close()
+            except Exception:
+                _LOGGER.debug(
+                    "logging.output_handler.close_failed",
+                    exc_info=True,
+                    extra={"_skip_enrichers": True},
+                )
+        _MANAGED_OUTPUT_HANDLERS = []
+        _SINK_CIRCUIT_BREAKERS = []
+        _LOG_QUEUE_TELEMETRY.reset(
+            log_queue=None,
+            queue_capacity=0,
+            overflow_policy="drop_oldest",
+        )
 
 
 class OverflowPolicyQueueHandler(logging.handlers.QueueHandler):
@@ -617,6 +677,7 @@ def setup_logging(
         listener.start()
         _QUEUE_LISTENER = listener
         _MANAGED_OUTPUT_HANDLERS = managed_output_handlers
+        _ensure_atexit_shutdown_hook_locked()
 
         for name in ("uvicorn", "uvicorn.error", "uvicorn.access"):
             uvicorn_logger = logging.getLogger(name)
@@ -650,6 +711,14 @@ def _json_dumps(payload: dict[str, Any]) -> str:
     if orjson is not None:
         return orjson.dumps(payload).decode("utf-8")
     return json.dumps(payload, ensure_ascii=True, default=str)
+
+
+def _ensure_atexit_shutdown_hook_locked() -> None:
+    global _ATEXIT_SHUTDOWN_REGISTERED
+    if _ATEXIT_SHUTDOWN_REGISTERED:
+        return
+    atexit.register(shutdown_logging)
+    _ATEXIT_SHUTDOWN_REGISTERED = True
 
 
 def _build_structured_error(

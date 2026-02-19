@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.2.5] - 2026-02-19
+
+### Changed
+- Packaging version source now uses PEP 621 dynamic metadata from `fastapiobserver._version.__version__` to avoid dual-source drift.
+- Added explicit Ruff configuration (`target-version`, `line-length`, and selected rules) in `pyproject.toml` for consistent lint behavior across contributors/CI.
+- Logging queue listener lifecycle is now closed gracefully via both FastAPI shutdown hook registration and `atexit` fallback.
+
+### Added
+- Public `shutdown_logging()` helper for explicit logging pipeline teardown in application lifecycle hooks and tests.
+
 ## [0.2.4] - 2026-02-19
 
 ### Added

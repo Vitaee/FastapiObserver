@@ -719,6 +719,21 @@ Breaker metrics exposed on `/metrics`:
 - `fastapiobserver_sink_circuit_breaker_half_open_total{sink}`
 - `fastapiobserver_sink_circuit_breaker_closes_total{sink}`
 
+### Logging Shutdown Lifecycle
+
+`install_observability()` now registers graceful logging teardown on FastAPI
+shutdown and also uses an `atexit` fallback. This reduces lost log records
+during process termination.
+
+If you embed logging setup outside FastAPI lifecycle management, you can stop
+the queue pipeline explicitly:
+
+```python
+from fastapiobserver import shutdown_logging
+
+shutdown_logging()
+```
+
 ### Loguru Coexistence
 
 If your service already uses `loguru`, forward those logs into
@@ -831,7 +846,7 @@ Reproducible benchmark harness and methodology:
 - `0.2.x`: OTel interoperability, security presets, allowlists
 - `1.0.0`: dynamic runtime controls and plugin stability
 
-Current release version: `0.2.4`
+Current release version: `0.2.5`
 
 ## Changelog Policy
 

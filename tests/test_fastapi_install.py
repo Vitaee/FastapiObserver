@@ -133,3 +133,26 @@ def test_install_observability_installs_otel_metrics_when_enabled(
     assert calls["otel_metrics_settings"] == otel_metrics_settings
     assert calls["app"] is app
     assert calls["otel_settings"] is None
+
+
+def test_install_observability_registers_logging_shutdown_hook_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    app = FastAPI()
+    settings = ObservabilitySettings(app_name="test", service="svc", environment="test")
+    calls = {"count": 0}
+
+    def fake_shutdown_logging() -> None:
+        calls["count"] += 1
+
+    monkeypatch.setattr(fastapi_module, "shutdown_logging", fake_shutdown_logging)
+
+    install_observability(app, settings, metrics_enabled=False)
+    install_observability(app, settings, metrics_enabled=False)
+
+    shutdown_handlers = [
+        handler
+        for handler in app.router.on_shutdown
+        if handler is fake_shutdown_logging
+    ]
+    assert len(shutdown_handlers) == 1

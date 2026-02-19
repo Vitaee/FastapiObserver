@@ -4,9 +4,10 @@ import json
 import logging
 import time
 
+import fastapiobserver.logging as logging_module
 from fastapiobserver import LOG_SCHEMA_VERSION, ObservabilitySettings, SecurityPolicy
 from fastapiobserver import __version__ as package_version
-from fastapiobserver.logging import StructuredJsonFormatter, setup_logging
+from fastapiobserver.logging import StructuredJsonFormatter, setup_logging, shutdown_logging
 from fastapiobserver.plugins import register_log_filter
 from fastapiobserver.request_context import (
     clear_request_id,
@@ -136,6 +137,39 @@ def test_setup_logging_is_idempotent_with_force_mode() -> None:
 
     assert first_count == 1
     assert second_count == 1
+
+
+def test_shutdown_logging_stops_queue_listener_and_removes_managed_handlers() -> None:
+    class _CollectingHandler(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            _ = record
+
+    settings = ObservabilitySettings(app_name="test", service="test", environment="test")
+    setup_logging(
+        settings,
+        force=True,
+        logs_mode="otlp",
+        extra_handlers=[_CollectingHandler()],
+    )
+
+    root = logging.getLogger()
+    managed_count_before = sum(
+        1
+        for handler in root.handlers
+        if getattr(handler, "_fastapiobserver_managed", False)
+    )
+    assert managed_count_before == 1
+    assert logging_module._QUEUE_LISTENER is not None
+
+    shutdown_logging()
+
+    managed_count_after = sum(
+        1
+        for handler in root.handlers
+        if getattr(handler, "_fastapiobserver_managed", False)
+    )
+    assert managed_count_after == 0
+    assert logging_module._QUEUE_LISTENER is None
 
 
 def test_setup_logging_applies_registered_log_filters() -> None:

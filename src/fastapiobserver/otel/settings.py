@@ -279,7 +279,11 @@ def parse_resource_attributes(value: object) -> dict[str, str]:
     if value is None:
         return {}
     if isinstance(value, Mapping):
-        return {str(key).strip(): str(val).strip() for key, val in value.items() if str(key).strip()}
+        return {
+            str(key).strip(): str(val).strip()
+            for key, val in value.items()
+            if str(key).strip()
+        }
     if isinstance(value, str):
         attributes: dict[str, str] = {}
         for item in value.split(","):

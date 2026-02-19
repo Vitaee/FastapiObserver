@@ -294,7 +294,6 @@ wheels = [
 
 [[package]]
 name = "fastapi-observer"
-version = "0.2.4"
 source = { editable = "." }
 dependencies = [
     { name = "fastapi" },

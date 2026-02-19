@@ -11,6 +11,7 @@ from .logging import (
     get_log_queue_stats,
     get_sink_circuit_breaker_stats,
     setup_logging,
+    shutdown_logging,
 )
 from .loguru import (
     build_loguru_to_stdlib_sink,
@@ -101,6 +102,7 @@ __all__ = [
     "get_log_queue_stats",
     "get_sink_circuit_breaker_stats",
     "setup_logging",
+    "shutdown_logging",
     # Loguru bridge
     "build_loguru_to_stdlib_sink",
     "install_loguru_bridge",
