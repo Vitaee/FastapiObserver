@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.2.3] - 2026-02-19
+
 ### Added
 - Structured top-level `error` payload in exception logs with `error.type`, `error.message`, and `error.stacktrace`.
 - OTel HTTP semantic-convention aliases in middleware events:
