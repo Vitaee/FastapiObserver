@@ -4,17 +4,27 @@ from __future__ import annotations
 
 import logging
 import os
+from types import ModuleType
 from typing import Any, Literal
 from urllib.parse import urlparse, urlunparse
 
 from ..config import ObservabilitySettings
 from ..utils import lazy_import
 from .settings import OTelLogsSettings, OTelMetricsSettings, OTelSettings
+from .types import (
+    LogExporterLike,
+    MetricExporterLike,
+    OTelResourceLike,
+    SpanExporterLike,
+)
 
 _LOGGER = logging.getLogger("fastapiobserver.otel")
 
 
-def create_otel_resource(settings: ObservabilitySettings, otel_settings: OTelSettings) -> Any:
+def create_otel_resource(
+    settings: ObservabilitySettings,
+    otel_settings: OTelSettings,
+) -> OTelResourceLike:
     resources_module = import_otel_module("opentelemetry.sdk.resources")
     resource_attrs = {
         "service.name": otel_settings.service_name or settings.service,
@@ -66,7 +76,7 @@ def build_excluded_urls_csv(settings: ObservabilitySettings) -> str | None:
 # ---------------------------------------------------------------------------
 
 
-def build_span_exporter(otel_settings: OTelSettings) -> Any:
+def build_span_exporter(otel_settings: OTelSettings) -> SpanExporterLike:
     endpoint = normalize_otlp_endpoint(
         otel_settings.otlp_endpoint,
         otel_settings.protocol,
@@ -91,7 +101,7 @@ def build_span_exporter(otel_settings: OTelSettings) -> Any:
 # ---------------------------------------------------------------------------
 
 
-def build_log_exporter(otel_logs_settings: OTelLogsSettings) -> Any:
+def build_log_exporter(otel_logs_settings: OTelLogsSettings) -> LogExporterLike:
     """Build the OTLP log exporter based on protocol."""
     endpoint = otel_logs_settings.otlp_endpoint
     if otel_logs_settings.protocol == "http/protobuf":
@@ -112,7 +122,9 @@ def build_log_exporter(otel_logs_settings: OTelLogsSettings) -> Any:
 # ---------------------------------------------------------------------------
 
 
-def build_metric_exporter(otel_metrics_settings: OTelMetricsSettings) -> Any:
+def build_metric_exporter(
+    otel_metrics_settings: OTelMetricsSettings,
+) -> MetricExporterLike:
     endpoint = normalize_otlp_metrics_endpoint(
         otel_metrics_settings.otlp_endpoint,
         otel_metrics_settings.protocol,
@@ -136,7 +148,7 @@ def build_metric_exporter(otel_metrics_settings: OTelMetricsSettings) -> Any:
 # ---------------------------------------------------------------------------
 
 
-def import_otel_module(name: str) -> Any:
+def import_otel_module(name: str) -> ModuleType:
     try:
         return lazy_import(name, package_hint="fastapi-observer[otel]")
     except RuntimeError as exc:

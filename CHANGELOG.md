@@ -4,6 +4,18 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.2.4] - 2026-02-19
+
+### Added
+- OTel typing protocols for optional integrations (`otel/types.py`) to improve IDE support without hard runtime OTel imports.
+
+### Changed
+- OTel helper return annotations in `otel/resource.py` now use protocol-based types instead of broad `Any` where practical.
+- Exception swallow paths now emit debug diagnostics with `exc_info=True` in:
+  - `TraceContextFilter` OTel span lookup fallback
+  - sink entry-point discovery outer fallback
+  - Logtail retryable send failure path
+
 ## [0.2.3] - 2026-02-19
 
 ### Added

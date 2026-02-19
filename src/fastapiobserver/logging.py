@@ -28,6 +28,7 @@ _LOGGING_LOCK = threading.Lock()
 _QUEUE_LISTENER: logging.handlers.QueueListener | None = None
 _MANAGED_OUTPUT_HANDLERS: list[logging.Handler] = []
 _SINK_CIRCUIT_BREAKERS: list["SinkCircuitBreakerHandler"] = []
+_LOGGER = logging.getLogger("fastapiobserver.logging")
 LOG_SCHEMA_VERSION = "1.0.0"
 
 CircuitBreakerState = Literal["closed", "open", "half_open"]
@@ -482,7 +483,11 @@ class TraceContextFilter(logging.Filter):
                 trace_id = f"{span_context.trace_id:032x}"
                 span_id = f"{span_context.span_id:016x}"
         except Exception:
-            pass
+            _LOGGER.debug(
+                "trace_context_filter.otel_lookup_failed",
+                exc_info=True,
+                extra={"_skip_enrichers": True},
+            )
 
         if trace_id:
             record.trace_id = trace_id  # type: ignore[attr-defined]

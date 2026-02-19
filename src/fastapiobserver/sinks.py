@@ -109,7 +109,11 @@ def discover_entry_point_sinks() -> None:
                     },
                 )
     except Exception:
-        pass
+        _LOGGER.debug(
+            "sinks.entry_point.discover_failed",
+            exc_info=True,
+            extra={"_skip_enrichers": True},
+        )
 
 
 # =====================================================================
@@ -285,7 +289,14 @@ class _LogtailHandler(logging.Handler):
                     self._error_count += 1
                     return  # Don't retry client errors
             except Exception:
-                pass
+                _LOGGER.debug(
+                    "logtail.send.retryable_error",
+                    exc_info=True,
+                    extra={
+                        "event": {"attempt": attempt + 1, "batch_size": len(batch)},
+                        "_skip_enrichers": True,
+                    },
+                )
 
             # Exponential backoff
             if attempt < self._max_retries - 1:

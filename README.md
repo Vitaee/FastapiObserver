@@ -831,7 +831,7 @@ Reproducible benchmark harness and methodology:
 - `0.2.x`: OTel interoperability, security presets, allowlists
 - `1.0.0`: dynamic runtime controls and plugin stability
 
-Current release version: `0.2.3`
+Current release version: `0.2.4`
 
 ## Changelog Policy
 
