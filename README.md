@@ -547,7 +547,7 @@ Repository integration tests include:
 - `0.2.x`: OTel interoperability, security presets, allowlists
 - `1.0.0`: dynamic runtime controls and plugin stability
 
-Current release version: `0.1.0`
+Current release version: `0.1.1`
 
 ## Changelog Policy
 
