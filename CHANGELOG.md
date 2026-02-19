@@ -10,6 +10,15 @@ All notable changes to this project will be documented in this file.
   - `http.request.method`
   - `url.path`
   - `http.response.status_code`
+- Loguru coexistence bridge helpers:
+  - `install_loguru_bridge()`
+  - `remove_loguru_bridge()`
+  - `build_loguru_to_stdlib_sink()`
+- Optional `loguru` dependency extra (`fastapi-observer[loguru]`).
+- Loguru coexistence guide (`loguru.md`) and benchmark guide (`benchmarks.md`) with runnable benchmark harness under `examples/benchmarks/`.
+
+### Changed
+- README now includes a CI badge, compatibility matrix, Loguru coexistence section, and benchmarking links.
 
 ## [0.2.2] - 2026-02-19
 

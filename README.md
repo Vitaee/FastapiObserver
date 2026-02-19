@@ -1,5 +1,6 @@
 # fastapi-observer
 
+[![CI](https://github.com/Vitaee/FastapiObserver/actions/workflows/ci.yml/badge.svg)](https://github.com/Vitaee/FastapiObserver/actions/workflows/ci.yml)
 [![Sponsor](https://img.shields.io/badge/Sponsor-Buy%20me%20a%20coffee-FFDD00?logo=buymeacoffee&logoColor=000000)](https://buymeacoffee.com/FYbPCSu)
 
 **Zero-glue observability for FastAPI.**
@@ -7,6 +8,20 @@
 `fastapi-observer` gives you structured JSON logs, request correlation, Prometheus metrics, OpenTelemetry tracing, security redaction presets, and runtime controls in one install step and one function call.
 
 **Supported Python versions:** `3.10` to `3.14`
+
+---
+
+## Compatibility Matrix
+
+| Component | Supported / Tested |
+|---|---|
+| Python | `3.10` to `3.14` (CI matrix) |
+| FastAPI | `>=0.129.0` |
+| Starlette | `>=0.52.1` |
+| pydantic-settings | `>=2.10.1` |
+| Prometheus backend | `prometheus-client>=0.24.1` (optional extra) |
+| OpenTelemetry | `opentelemetry-api/sdk/exporter>=1.39.1` (optional extra) |
+| Loguru bridge | `loguru>=0.7.2` (optional extra) |
 
 ---
 
@@ -59,6 +74,9 @@ pip install fastapi-observer
 
 # Prometheus metrics support
 pip install "fastapi-observer[prometheus]"
+
+# Loguru coexistence bridge support
+pip install "fastapi-observer[loguru]"
 
 # OpenTelemetry tracing/logs support
 pip install "fastapi-observer[otel]"
@@ -497,6 +515,7 @@ The `examples/` directory contains runnable demos:
 | [`security_presets_app.py`](examples/security_presets_app.py) | Preset-based security policy |
 | [`allowlist_app.py`](examples/allowlist_app.py) | Allowlist-only sanitization |
 | [`otel_app.py`](examples/otel_app.py) | OTel tracing and resource attributes |
+| [`benchmarks/`](examples/benchmarks/) | Baseline vs observer benchmark harness |
 | [`k8s/`](examples/k8s/) | Kubernetes-native stack with Prometheus + Loki + Tempo + Grafana |
 | [`full_stack/`](examples/full_stack/) | **Docker Compose stack**: 3 FastAPI services + Grafana + Prometheus + Loki + Tempo |
 
@@ -700,6 +719,20 @@ Breaker metrics exposed on `/metrics`:
 - `fastapiobserver_sink_circuit_breaker_half_open_total{sink}`
 - `fastapiobserver_sink_circuit_breaker_closes_total{sink}`
 
+### Loguru Coexistence
+
+If your service already uses `loguru`, forward those logs into
+`fastapi-observer` instead of maintaining two independent pipelines.
+
+```python
+from fastapiobserver import install_loguru_bridge
+
+# loguru -> stdlib -> fastapi-observer queue/sinks
+bridge_id = install_loguru_bridge()
+```
+
+Detailed migration/coexistence guide: [`loguru.md`](loguru.md)
+
 ---
 
 ## Plugin Hooks
@@ -783,13 +816,22 @@ Repository integration tests include:
 
 ---
 
+## Benchmarking
+
+Reproducible benchmark harness and methodology:
+- Guide: [`benchmarks.md`](benchmarks.md)
+- Apps: `examples/benchmarks/plain_fastapi.py` and `examples/benchmarks/observer_fastapi.py`
+- Runner: `examples/benchmarks/run_local_benchmark.sh`
+
+---
+
 ## Release Tracks
 
 - `0.1.x`: secure-by-default core
 - `0.2.x`: OTel interoperability, security presets, allowlists
 - `1.0.0`: dynamic runtime controls and plugin stability
 
-Current release version: `0.2.1`
+Current release version: `0.2.2`
 
 ## Changelog Policy
 
