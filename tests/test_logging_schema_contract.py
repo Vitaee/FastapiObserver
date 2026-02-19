@@ -184,3 +184,34 @@ def test_setup_logging_applies_registered_log_filters() -> None:
 
     assert any(p.get("message") == "business event" for p in filtered)
     assert not any(p.get("message") == "health probe" for p in filtered)
+
+
+def test_structured_formatter_emits_structured_error_payload() -> None:
+    settings = ObservabilitySettings(
+        app_name="orders-api",
+        service="orders",
+        environment="test",
+        version="1.2.3",
+    )
+    formatter = StructuredJsonFormatter(settings, security_policy=SecurityPolicy())
+
+    try:
+        raise RuntimeError("boom")
+    except RuntimeError as error:
+        exc_info = (error.__class__, error, error.__traceback__)
+        record = logging.LogRecord(
+            name="tests.logger",
+            level=logging.ERROR,
+            pathname=__file__,
+            lineno=200,
+            msg="request.failed",
+            args=(),
+            exc_info=exc_info,
+        )
+
+    payload = json.loads(formatter.format(record))
+
+    assert payload["error"]["type"] == "RuntimeError"
+    assert payload["error"]["message"] == "boom"
+    assert "RuntimeError: boom" in payload["error"]["stacktrace"]
+    assert payload["exc_info"] == payload["error"]["stacktrace"]

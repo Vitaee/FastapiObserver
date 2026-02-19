@@ -56,6 +56,9 @@ def test_middleware_logs_path_without_query_string(caplog) -> None:
     ]
     assert request_logs
     assert request_logs[-1].event["path"] == "/search"
+    assert request_logs[-1].event["url.path"] == "/search"
+    assert request_logs[-1].event["http.request.method"] == "GET"
+    assert request_logs[-1].event["http.response.status_code"] == 200
 
 
 def test_middleware_classifies_server_error_response(caplog) -> None:
@@ -82,6 +85,9 @@ def test_middleware_classifies_server_error_response(caplog) -> None:
     ]
     assert request_logs
     assert request_logs[-1].event["error_type"] == "server_error"
+    assert request_logs[-1].event["http.request.method"] == "GET"
+    assert request_logs[-1].event["url.path"] == "/down"
+    assert request_logs[-1].event["http.response.status_code"] == 503
 
 
 def test_middleware_classifies_unhandled_exception(caplog) -> None:
@@ -110,6 +116,10 @@ def test_middleware_classifies_unhandled_exception(caplog) -> None:
     assert request_logs
     assert request_logs[-1].event["error_type"] == "unhandled_exception"
     assert request_logs[-1].event["exception_class"] == "RuntimeError"
+    assert request_logs[-1].event["exception_message"] == "boom"
+    assert request_logs[-1].event["http.request.method"] == "GET"
+    assert request_logs[-1].event["url.path"] == "/boom"
+    assert request_logs[-1].event["http.response.status_code"] == 500
 
 
 def test_middleware_records_exception_on_active_span(

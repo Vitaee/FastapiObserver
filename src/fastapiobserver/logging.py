@@ -431,7 +431,10 @@ class StructuredJsonFormatter(logging.Formatter):
             payload["event"] = event
 
         if record.exc_info:
-            payload["exc_info"] = self.formatException(record.exc_info)
+            error_payload = _build_structured_error(record, self)
+            payload["error"] = error_payload
+            # Backward-compatible field retained for existing dashboards.
+            payload["exc_info"] = error_payload["stacktrace"]
 
         if getattr(record, "_skip_enrichers", False):
             enriched_payload = payload
@@ -642,6 +645,32 @@ def _json_dumps(payload: dict[str, Any]) -> str:
     if orjson is not None:
         return orjson.dumps(payload).decode("utf-8")
     return json.dumps(payload, ensure_ascii=True, default=str)
+
+
+def _build_structured_error(
+    record: logging.LogRecord,
+    formatter: logging.Formatter,
+) -> dict[str, str]:
+    exc_info = record.exc_info
+    if not exc_info:
+        return {"type": "", "message": "", "stacktrace": ""}
+
+    if not isinstance(exc_info, tuple) or len(exc_info) != 3:
+        return {
+            "type": "Exception",
+            "message": "",
+            "stacktrace": "",
+        }
+
+    exc_type, exc_value, _exc_tb = exc_info
+    error_type = exc_type.__name__ if exc_type is not None else "Exception"
+    error_message = str(exc_value) if exc_value is not None else ""
+    stacktrace = formatter.formatException(exc_info)
+    return {
+        "type": error_type,
+        "message": error_message,
+        "stacktrace": stacktrace,
+    }
 
 
 def _wrap_sink_handlers(

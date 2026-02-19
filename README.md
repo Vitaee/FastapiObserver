@@ -327,9 +327,24 @@ Request arrives
     "method": "GET",
     "path": "/orders/42",
     "status_code": 200,
+    "http.request.method": "GET",
+    "url.path": "/orders/42",
+    "http.response.status_code": 200,
     "duration_ms": 3.456,
     "client_ip": "10.0.0.1",
     "error_type": "ok"
+  }
+}
+```
+
+On exception logs, a structured `error` object is included for indexed queries:
+
+```json
+{
+  "error": {
+    "type": "RuntimeError",
+    "message": "boom",
+    "stacktrace": "Traceback (most recent call last): ..."
   }
 }
 ```

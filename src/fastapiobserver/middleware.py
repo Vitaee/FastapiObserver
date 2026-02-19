@@ -142,11 +142,7 @@ class RequestLoggingMiddleware:
                 request_body=request_body_capture.value,
                 response_body=response_body_capture.value,
                 error_type=error_type,
-                exception_class=(
-                    captured_error.__class__.__name__
-                    if captured_error is not None
-                    else None
-                ),
+                exception=captured_error,
             )
             if had_error:
                 self.logger.exception("request.failed", extra={"event": safe_event})
@@ -262,7 +258,7 @@ class _RequestEventBuilder:
         request_body: str | None,
         response_body: str | None,
         error_type: str,
-        exception_class: str | None,
+        exception: Exception | None,
     ) -> dict[str, Any]:
         event: dict[str, Any] = {
             "method": method,
@@ -271,13 +267,18 @@ class _RequestEventBuilder:
             "duration_ms": round(duration_seconds * 1000, 3),
             "client_ip": client_ip,
             "error_type": error_type,
+            # OpenTelemetry semantic-convention aliases for interoperability.
+            "http.request.method": method,
+            "url.path": path,
+            "http.response.status_code": status_code,
         }
         if request_body is not None:
             event["request_body"] = request_body
         if response_body is not None:
             event["response_body"] = response_body
-        if exception_class:
-            event["exception_class"] = exception_class
+        if exception is not None:
+            event["exception_class"] = exception.__class__.__name__
+            event["exception_message"] = str(exception)
         return sanitize_event(event, self.policy)
 
 
