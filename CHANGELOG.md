@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+## [0.2.2] - 2026-02-19
+
+### Added
+- Optional OTLP metrics signal support via `OTelMetricsSettings` and `install_otel_metrics()`.
+- Graceful OTel provider lifecycle hooks for flush/shutdown on application exit.
+- Middleware span error enrichment for unhandled exceptions (`record_exception` + `StatusCode.ERROR`).
+- Documentation and tests for baggage propagation behavior.
+
 ## [0.2.1] - 2026-02-19
 
 ### Added

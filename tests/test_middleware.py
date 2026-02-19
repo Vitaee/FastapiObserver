@@ -4,6 +4,7 @@ import logging
 
 from fastapi import FastAPI, Response
 from fastapi.testclient import TestClient
+import pytest
 
 from fastapiobserver import ObservabilitySettings, install_observability
 from fastapiobserver.request_context import get_request_id
@@ -109,3 +110,47 @@ def test_middleware_classifies_unhandled_exception(caplog) -> None:
     assert request_logs
     assert request_logs[-1].event["error_type"] == "unhandled_exception"
     assert request_logs[-1].event["exception_class"] == "RuntimeError"
+
+
+def test_middleware_records_exception_on_active_span(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    otel_trace = pytest.importorskip("opentelemetry.trace")
+
+    class _SpanContext:
+        is_valid = True
+
+    class _Span:
+        def __init__(self) -> None:
+            self.exceptions: list[Exception] = []
+            self.status: object | None = None
+
+        def get_span_context(self) -> _SpanContext:
+            return _SpanContext()
+
+        def record_exception(self, error: Exception) -> None:
+            self.exceptions.append(error)
+
+        def set_status(self, status: object) -> None:
+            self.status = status
+
+    span = _Span()
+    monkeypatch.setattr(otel_trace, "get_current_span", lambda: span)
+
+    app = FastAPI()
+
+    @app.get("/boom-span")
+    def boom() -> None:
+        raise RuntimeError("boom")
+
+    install_observability(
+        app,
+        ObservabilitySettings(app_name="test", service="svc", environment="test"),
+        metrics_enabled=False,
+    )
+
+    response = TestClient(app, raise_server_exceptions=False).get("/boom-span")
+    assert response.status_code == 500
+    assert span.exceptions
+    assert isinstance(span.exceptions[0], RuntimeError)
+    assert span.status is not None

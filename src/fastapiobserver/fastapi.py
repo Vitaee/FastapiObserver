@@ -13,7 +13,14 @@ from .metrics import (
     mount_backend_metrics_endpoint,
 )
 from .middleware import RequestLoggingMiddleware
-from .otel import OTelLogsSettings, OTelSettings, install_otel, install_otel_logs
+from .otel import (
+    OTelLogsSettings,
+    OTelMetricsSettings,
+    OTelSettings,
+    install_otel,
+    install_otel_logs,
+    install_otel_metrics,
+)
 from .security import SecurityPolicy, TrustedProxyPolicy
 
 _LOGGER = logging.getLogger("fastapiobserver.fastapi")
@@ -28,6 +35,7 @@ def install_observability(
     metrics_enabled: bool | None = None,
     otel_settings: OTelSettings | None = None,
     otel_logs_settings: OTelLogsSettings | None = None,
+    otel_metrics_settings: OTelMetricsSettings | None = None,
     runtime_control_settings: RuntimeControlSettings | None = None,
 ) -> None:
     """One-call entry point that wires up all observability subsystems.
@@ -50,6 +58,7 @@ def install_observability(
         otel_log_handler = install_otel_logs(
             settings,
             otel_logs_settings,
+            app=app,
             otel_settings=otel_settings,
             security_policy=security_policy,
         )
@@ -92,7 +101,16 @@ def install_observability(
     if otel_settings and otel_settings.enabled:
         install_otel(app, settings, otel_settings)
 
-    # --- 5. Middleware ordering check ---
+    # --- 5. OTel metrics ---
+    if otel_metrics_settings and otel_metrics_settings.enabled:
+        install_otel_metrics(
+            settings,
+            otel_metrics_settings,
+            app=app,
+            otel_settings=otel_settings,
+        )
+
+    # --- 6. Middleware ordering check ---
     if (
         security_policy.log_request_body or security_policy.log_response_body
     ) and app.user_middleware:
@@ -113,7 +131,7 @@ def install_observability(
             },
         )
 
-    # --- 6. Request logging middleware ---
+    # --- 7. Request logging middleware ---
     if not _has_request_logging_middleware(app):
         app.add_middleware(
             RequestLoggingMiddleware,
@@ -123,7 +141,7 @@ def install_observability(
             metrics_backend=metrics_backend,
         )
 
-    # --- 7. Runtime control plane ---
+    # --- 8. Runtime control plane ---
     if runtime_control_settings and runtime_control_settings.enabled:
         mount_control_plane(app, runtime_control_settings)
 

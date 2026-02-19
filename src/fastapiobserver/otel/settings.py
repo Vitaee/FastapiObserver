@@ -1,4 +1,4 @@
-"""OTel and OTLP log settings models with env-based loading."""
+"""OTel signal settings models with env-based loading."""
 
 from __future__ import annotations
 
@@ -102,6 +102,32 @@ class OTelLogsSettings(EnvLoadable, BaseModel):
     @classmethod
     def _env_settings_class(cls) -> type[BaseSettings]:
         return _OTelLogsEnvSettings
+
+
+class OTelMetricsSettings(EnvLoadable, BaseModel):
+    """Configuration for OTLP metrics export."""
+
+    model_config = ConfigDict(frozen=True)
+
+    enabled: bool = False
+    otlp_endpoint: str | None = None
+    protocol: Literal["grpc", "http/protobuf"] = "grpc"
+    export_interval_millis: int = Field(default=60_000, ge=1_000)
+
+    @field_validator("protocol", mode="before")
+    @classmethod
+    def _normalize_protocol(cls, value: object) -> str:
+        return normalize_protocol(
+            value,
+            allowed=OTEL_PROTOCOLS,
+            default="grpc",
+            strict=False,
+            label="OTel protocol",
+        )
+
+    @classmethod
+    def _env_settings_class(cls) -> type[BaseSettings]:
+        return _OTelMetricsEnvSettings
 
 
 # ---------------------------------------------------------------------------
@@ -210,6 +236,38 @@ class _OTelLogsEnvSettings(BaseSettings):
         if normalized not in ("local_json", "otlp", "both"):
             return "local_json"
         return normalized
+
+
+class _OTelMetricsEnvSettings(BaseSettings):
+    model_config = SettingsConfigDict(
+        extra="ignore",
+        case_sensitive=False,
+        populate_by_name=True,
+    )
+
+    enabled: bool = Field(default=False, validation_alias="OTEL_METRICS_ENABLED")
+    otlp_endpoint: str | None = Field(
+        default=None, validation_alias="OTEL_METRICS_ENDPOINT"
+    )
+    protocol: Literal["grpc", "http/protobuf"] = Field(
+        default="grpc", validation_alias="OTEL_METRICS_PROTOCOL"
+    )
+    export_interval_millis: int = Field(
+        default=60_000,
+        ge=1_000,
+        validation_alias="OTEL_METRICS_EXPORT_INTERVAL_MILLIS",
+    )
+
+    @field_validator("protocol", mode="before")
+    @classmethod
+    def _normalize_protocol_env(cls, value: object) -> str:
+        return normalize_protocol(
+            value,
+            allowed=OTEL_PROTOCOLS,
+            default="grpc",
+            strict=False,
+            label="OTel protocol",
+        )
 
 
 # ---------------------------------------------------------------------------

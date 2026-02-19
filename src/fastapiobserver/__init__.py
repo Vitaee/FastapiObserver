@@ -19,7 +19,15 @@ from .metrics import (
     register_metrics_backend,
     unregister_metrics_backend,
 )
-from .otel import OTelLogsSettings, OTelSettings, create_otel_resource, install_otel, install_otel_logs
+from .otel import (
+    OTelLogsSettings,
+    OTelMetricsSettings,
+    OTelSettings,
+    create_otel_resource,
+    install_otel,
+    install_otel_logs,
+    install_otel_metrics,
+)
 from .plugins import (
     LogFilter,
     apply_log_filters,
@@ -73,6 +81,7 @@ from .sinks import (
 __all__ = [
     # Models / Settings
     "OTelLogsSettings",
+    "OTelMetricsSettings",
     "OTelSettings",
     "ObservabilitySettings",
     "RuntimeControlSettings",
@@ -105,6 +114,7 @@ __all__ = [
     "install_observability",
     "install_otel",
     "install_otel_logs",
+    "install_otel_metrics",
     # Control plane
     "mount_control_plane",
     # Propagation

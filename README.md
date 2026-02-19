@@ -207,10 +207,15 @@ What changes immediately:
 
 ---
 
-## OpenTelemetry (Traces + Optional OTLP Logs)
+## OpenTelemetry (Traces + Optional OTLP Logs + Optional OTLP Metrics)
 
 ```python
-from fastapiobserver import OTelLogsSettings, OTelSettings, install_observability
+from fastapiobserver import (
+    OTelLogsSettings,
+    OTelMetricsSettings,
+    OTelSettings,
+    install_observability,
+)
 
 otel_settings = OTelSettings(
     enabled=True,
@@ -233,11 +238,19 @@ otel_logs_settings = OTelLogsSettings(
     protocol="grpc",
 )
 
+otel_metrics_settings = OTelMetricsSettings(
+    enabled=True,
+    otlp_endpoint="http://localhost:4317",
+    protocol="grpc",                  # or "http/protobuf"
+    export_interval_millis=60000,
+)
+
 install_observability(
     app,
     settings,
     otel_settings=otel_settings,
     otel_logs_settings=otel_logs_settings,
+    otel_metrics_settings=otel_metrics_settings,
 )
 ```
 
@@ -246,6 +259,27 @@ Design details:
 - Injects trace IDs into application logs for log-trace correlation.
 - Supports runtime sampling updates through the control plane.
 - Sends OTel logs in OTLP mode with the same sanitization policy.
+- Supports optional OTLP metrics export for unified OTel backends.
+- Registers graceful shutdown hooks to flush provider buffers on app exit.
+
+### Baggage propagation
+
+`inject_trace_headers()` uses OpenTelemetry propagation, so it forwards
+`traceparent`, `tracestate`, and `baggage` when baggage is present in the active context.
+
+```python
+from opentelemetry import baggage
+from opentelemetry.context import attach, detach
+
+from fastapiobserver import inject_trace_headers
+
+token = attach(baggage.set_baggage("tenant_id", "acme"))
+try:
+    headers = inject_trace_headers({})
+    # headers["baggage"] == "tenant_id=acme"
+finally:
+    detach(token)
+```
 
 ---
 
@@ -254,8 +288,9 @@ Design details:
 1. Structured logging pipeline (JSON formatter + bounded async queue handler).
 2. Metrics backend and `/metrics` endpoint when metrics are enabled.
 3. OTel tracing setup when OTel is enabled.
-4. Request logging middleware with sanitization and context cleanup.
-5. Runtime control endpoint when runtime control is enabled.
+4. Optional OTel logs/metrics setup when OTLP settings are enabled.
+5. Request logging middleware with sanitization and context cleanup.
+6. Runtime control endpoint when runtime control is enabled.
 
 Request path lifecycle (high-level):
 
@@ -543,6 +578,10 @@ Notes:
 | `OTEL_LOGS_MODE` | `local_json` | `local_json`, `otlp`, `both` |
 | `OTEL_LOGS_ENDPOINT` | - | OTLP logs endpoint |
 | `OTEL_LOGS_PROTOCOL` | `grpc` | `grpc` or `http/protobuf` |
+| `OTEL_METRICS_ENABLED` | `false` | Enable OTLP metrics export |
+| `OTEL_METRICS_ENDPOINT` | - | OTLP metrics endpoint |
+| `OTEL_METRICS_PROTOCOL` | `grpc` | `grpc` or `http/protobuf` |
+| `OTEL_METRICS_EXPORT_INTERVAL_MILLIS` | `60000` | OTLP metrics export interval in milliseconds |
 
 ### Runtime control plane
 

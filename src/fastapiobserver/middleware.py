@@ -62,6 +62,7 @@ class RequestLoggingMiddleware:
             metrics_backend=self.metrics_backend,
             logger=self.logger,
         )
+        self.span_error_recorder = _SpanErrorRecorder(self.logger)
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http":
@@ -127,6 +128,7 @@ class RequestLoggingMiddleware:
             had_error = True
             captured_error = exc
             status_code = 500
+            self.span_error_recorder.record_exception(exc)
             raise
         finally:
             duration_seconds = max(0.0, time.perf_counter() - start)
@@ -327,6 +329,36 @@ class _MetricsRecorder:
         request = Request(scope)
         response = Response(status_code=status_code)
         emit_metric_hooks(request, response, duration_seconds)
+
+
+class _SpanErrorRecorder:
+    """Record unhandled request exceptions on the active OTel span when present."""
+
+    def __init__(self, logger: logging.Logger) -> None:
+        self.logger = logger
+
+    def record_exception(self, error: Exception) -> None:
+        try:
+            from opentelemetry import trace as otel_trace
+            from opentelemetry.trace import Status, StatusCode
+        except ImportError:
+            return
+
+        try:
+            span = otel_trace.get_current_span()
+            if span is None:
+                return
+            span_context = span.get_span_context()
+            if not span_context or not span_context.is_valid:
+                return
+            span.record_exception(error)
+            span.set_status(Status(StatusCode.ERROR))
+        except Exception:
+            self.logger.debug(
+                "otel.span.exception_record.failed",
+                exc_info=True,
+                extra={"_skip_enrichers": True},
+            )
 
 
 def _extract_scope_client_ip(scope: Scope) -> str | None:

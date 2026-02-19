@@ -5,8 +5,11 @@ from __future__ import annotations
 import logging
 from typing import Any, Callable
 
+from fastapi import FastAPI
+
 from ..config import ObservabilitySettings
 from ..security import SecurityPolicy, sanitize_event
+from .lifecycle import build_provider_shutdown_callback, register_shutdown_hook
 from .resource import (
     build_log_exporter,
     create_otel_resource,
@@ -66,6 +69,7 @@ def install_otel_logs(
     settings: ObservabilitySettings,
     otel_logs_settings: OTelLogsSettings,
     *,
+    app: FastAPI | None = None,
     otel_settings: OTelSettings | None = None,
     security_policy: SecurityPolicy | None = None,
 ) -> logging.Handler | None:
@@ -117,6 +121,7 @@ def install_otel_logs(
         otel_log_api,
         logger_provider,
     )
+    provider_owned = False
     if not has_external_provider:
         candidate_provider = otel_logs_sdk.LoggerProvider(resource=resource)
         attached = _attach_log_processor_once(
@@ -135,6 +140,7 @@ def install_otel_logs(
         try:
             otel_log_api.set_logger_provider(candidate_provider)
             logger_provider = candidate_provider
+            provider_owned = True
         except Exception:
             logger_provider = otel_log_api.get_logger_provider()
             attached = _attach_log_processor_once(
@@ -150,6 +156,7 @@ def install_otel_logs(
                     extra={"_skip_enrichers": True},
                 )
                 return None
+            provider_owned = False
     elif otel_logs_settings.otlp_endpoint:
         attached = _attach_log_processor_once(
             logger_provider,
@@ -187,6 +194,17 @@ def install_otel_logs(
     otel_handler = _SanitizingOTLPLogHandler(
         raw_handler,
         security_policy=policy,
+    )
+    register_shutdown_hook(
+        key=f"otel.logger_provider.{id(logger_provider)}",
+        callback=build_provider_shutdown_callback(
+            logger_provider,
+            logger=_LOGGER,
+            component="logger_provider",
+            shutdown=provider_owned,
+        ),
+        app=app,
+        logger=_LOGGER,
     )
     _LOGGER.info(
         "otel.logs.installed",

@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 from fastapi import FastAPI
+import pytest
 
+import fastapiobserver.fastapi as fastapi_module
 from fastapiobserver import (
+    OTelMetricsSettings,
     ObservabilitySettings,
     install_observability,
     register_metrics_backend,
@@ -90,3 +93,43 @@ def test_install_observability_uses_registered_metrics_backend_from_settings() -
 
     assert app.state.custom_metrics_path == "/custom-metrics"
     assert app.state.custom_metrics_format == "negotiate"
+
+
+def test_install_observability_installs_otel_metrics_when_enabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    app = FastAPI()
+    settings = ObservabilitySettings(app_name="test", service="svc", environment="test")
+    calls: dict[str, object] = {}
+
+    def fake_install_otel_metrics(
+        settings_arg: ObservabilitySettings,
+        otel_metrics_settings_arg: OTelMetricsSettings,
+        *,
+        app: FastAPI | None = None,
+        otel_settings: object | None = None,
+    ) -> object:
+        calls["settings"] = settings_arg
+        calls["otel_metrics_settings"] = otel_metrics_settings_arg
+        calls["app"] = app
+        calls["otel_settings"] = otel_settings
+        return object()
+
+    monkeypatch.setattr(fastapi_module, "install_otel_metrics", fake_install_otel_metrics)
+
+    otel_metrics_settings = OTelMetricsSettings(
+        enabled=True,
+        otlp_endpoint="http://collector:4317",
+        protocol="grpc",
+    )
+    install_observability(
+        app,
+        settings,
+        metrics_enabled=False,
+        otel_metrics_settings=otel_metrics_settings,
+    )
+
+    assert calls["settings"] is settings
+    assert calls["otel_metrics_settings"] == otel_metrics_settings
+    assert calls["app"] is app
+    assert calls["otel_settings"] is None

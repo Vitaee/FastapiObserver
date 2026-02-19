@@ -9,7 +9,7 @@ from urllib.parse import urlparse, urlunparse
 
 from ..config import ObservabilitySettings
 from ..utils import lazy_import
-from .settings import OTelLogsSettings, OTelSettings
+from .settings import OTelLogsSettings, OTelMetricsSettings, OTelSettings
 
 _LOGGER = logging.getLogger("fastapiobserver.otel")
 
@@ -108,6 +108,30 @@ def build_log_exporter(otel_logs_settings: OTelLogsSettings) -> Any:
 
 
 # ---------------------------------------------------------------------------
+# Metric exporter builder
+# ---------------------------------------------------------------------------
+
+
+def build_metric_exporter(otel_metrics_settings: OTelMetricsSettings) -> Any:
+    endpoint = normalize_otlp_metrics_endpoint(
+        otel_metrics_settings.otlp_endpoint,
+        otel_metrics_settings.protocol,
+    )
+    if otel_metrics_settings.protocol == "http/protobuf":
+        exporter_module = import_otel_module(
+            "opentelemetry.exporter.otlp.proto.http.metric_exporter"
+        )
+    else:
+        exporter_module = import_otel_module(
+            "opentelemetry.exporter.otlp.proto.grpc.metric_exporter"
+        )
+
+    if endpoint:
+        return exporter_module.OTLPMetricExporter(endpoint=endpoint)
+    return exporter_module.OTLPMetricExporter()
+
+
+# ---------------------------------------------------------------------------
 # Shared helpers
 # ---------------------------------------------------------------------------
 
@@ -139,9 +163,42 @@ def has_configured_logger_provider(log_api: Any, provider: Any) -> bool:
     return hasattr(provider, "get_logger")
 
 
+def has_configured_meter_provider(metrics_api: Any, provider: Any) -> bool:
+    proxy_provider = getattr(metrics_api, "ProxyMeterProvider", None)
+    if proxy_provider is not None and isinstance(provider, proxy_provider):
+        return False
+    if provider.__class__.__name__ in {"ProxyMeterProvider", "NoOpMeterProvider"}:
+        return False
+    return hasattr(provider, "get_meter")
+
+
 def normalize_otlp_endpoint(
     endpoint: str | None,
     protocol: Literal["grpc", "http/protobuf"],
+) -> str | None:
+    return _normalize_otlp_endpoint_for_signal(
+        endpoint,
+        protocol,
+        http_path="/v1/traces",
+    )
+
+
+def normalize_otlp_metrics_endpoint(
+    endpoint: str | None,
+    protocol: Literal["grpc", "http/protobuf"],
+) -> str | None:
+    return _normalize_otlp_endpoint_for_signal(
+        endpoint,
+        protocol,
+        http_path="/v1/metrics",
+    )
+
+
+def _normalize_otlp_endpoint_for_signal(
+    endpoint: str | None,
+    protocol: Literal["grpc", "http/protobuf"],
+    *,
+    http_path: str,
 ) -> str | None:
     if endpoint is None:
         return None
@@ -151,10 +208,10 @@ def normalize_otlp_endpoint(
     if protocol == "grpc":
         parsed = urlparse(normalized_endpoint)
         grpc_path = parsed.path.rstrip("/")
-        if grpc_path.endswith("/v1/traces"):
+        if grpc_path.endswith(http_path):
             raise ValueError(
-                "gRPC OTLP endpoint must not include '/v1/traces'. "
-                "Use protocol='http/protobuf' for '/v1/traces' endpoints, "
+                f"gRPC OTLP endpoint must not include '{http_path}'. "
+                f"Use protocol='http/protobuf' for '{http_path}' endpoints, "
                 "or remove the path for gRPC."
             )
         return normalized_endpoint
@@ -162,4 +219,4 @@ def normalize_otlp_endpoint(
     parsed = urlparse(normalized_endpoint)
     if parsed.path and parsed.path != "/":
         return normalized_endpoint
-    return urlunparse(parsed._replace(path="/v1/traces"))
+    return urlunparse(parsed._replace(path=http_path))

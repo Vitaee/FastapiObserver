@@ -8,6 +8,7 @@ from typing import Any
 from fastapi import FastAPI
 
 from ..config import ObservabilitySettings
+from .lifecycle import build_provider_shutdown_callback, register_shutdown_hook
 from .resource import (
     build_excluded_urls_csv,
     build_span_exporter,
@@ -44,6 +45,7 @@ def install_otel(
     set_trace_sampling_ratio(otel_settings.trace_sampling_ratio)
     current_provider = trace_api.get_tracer_provider()
     has_external_provider = has_configured_tracer_provider(trace_api, current_provider)
+    provider_owned = False
 
     class DynamicTraceIdRatioSampler:
         def should_sample(
@@ -81,6 +83,7 @@ def install_otel(
 
         try:
             trace_api.set_tracer_provider(tracer_provider)
+            provider_owned = True
         except Exception:
             tracer_provider = trace_api.get_tracer_provider()
             _LOGGER.warning(
@@ -92,6 +95,7 @@ def install_otel(
                     "_skip_enrichers": True,
                 },
             )
+            provider_owned = False
     elif otel_settings.otlp_endpoint:
         _LOGGER.warning(
             "otel.external_provider.detected",
@@ -125,6 +129,19 @@ def install_otel(
             "otel.logging_instrumentor.failed",
             exc_info=True,
             extra={"_skip_enrichers": True},
+        )
+
+    if provider_owned:
+        register_shutdown_hook(
+            key=f"otel.tracer_provider.{id(tracer_provider)}",
+            callback=build_provider_shutdown_callback(
+                tracer_provider,
+                logger=_LOGGER,
+                component="tracer_provider",
+                shutdown=True,
+            ),
+            app=app,
+            logger=_LOGGER,
         )
 
     app.state._fastapiobserver_otel_installed = True
