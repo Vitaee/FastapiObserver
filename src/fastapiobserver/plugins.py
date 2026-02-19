@@ -7,6 +7,21 @@ from typing import Callable, Mapping, Protocol
 from starlette.requests import Request
 from starlette.responses import Response
 
+__all__ = [
+    "LogEnricher",
+    "MetricHook",
+    "LogFilterFn",
+    "LogFilter",
+    "register_log_enricher",
+    "register_metric_hook",
+    "register_log_filter",
+    "unregister_log_filter",
+    "clear_plugins",
+    "apply_log_enrichers",
+    "apply_log_filters",
+    "emit_metric_hooks",
+]
+
 logger = logging.getLogger("fastapiobserver.plugins")
 
 LogEnricher = Callable[[dict[str, object]], dict[str, object]]

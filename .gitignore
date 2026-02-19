@@ -20,3 +20,5 @@ wheels/
 release_dist
 release_dist_0_1_1
 release_dist_*
+
+.agents/*

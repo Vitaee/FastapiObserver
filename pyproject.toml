@@ -24,6 +24,7 @@ classifiers = [
     "Framework :: FastAPI",
     "Topic :: System :: Logging",
     "Topic :: System :: Monitoring",
+    "Typing :: Typed",
 ]
 keywords = ["fastapi", "observability", "logging", "metrics", "opentelemetry"]
 license = "MIT"
@@ -114,3 +115,4 @@ ignore_missing_imports = true
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 testpaths = ["tests"]
+asyncio_mode = "auto"

@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import logging
+import weakref
+import typing
+from contextlib import asynccontextmanager
 from typing import Literal
 
 from fastapi import FastAPI
@@ -24,7 +27,7 @@ from .otel import (
 from .security import SecurityPolicy, TrustedProxyPolicy
 
 _LOGGER = logging.getLogger("fastapiobserver.fastapi")
-_LOGGING_SHUTDOWN_HOOK_ATTR = "_fastapiobserver_logging_shutdown_hook_registered"
+_REGISTERED_APPS: weakref.WeakSet[FastAPI] = weakref.WeakSet()
 
 
 def install_observability(
@@ -156,7 +159,19 @@ def _has_request_logging_middleware(app: FastAPI) -> bool:
 
 
 def _register_logging_shutdown_hook(app: FastAPI) -> None:
-    if bool(getattr(app.state, _LOGGING_SHUTDOWN_HOOK_ATTR, False)):
+    if app in _REGISTERED_APPS:
         return
-    app.add_event_handler("shutdown", shutdown_logging)
-    setattr(app.state, _LOGGING_SHUTDOWN_HOOK_ATTR, True)
+
+    original_lifespan = app.router.lifespan_context
+
+    @asynccontextmanager
+    async def observability_lifespan(app_inst: FastAPI) -> typing.AsyncGenerator[typing.Any, None]:
+        if original_lifespan:
+            async with original_lifespan(app_inst) as state:
+                yield state
+        else:
+            yield {}
+        shutdown_logging()
+
+    app.router.lifespan_context = observability_lifespan
+    _REGISTERED_APPS.add(app)

@@ -18,14 +18,23 @@ Design rationale
 from __future__ import annotations
 
 import atexit
+import gzip
+import json
 import logging
+import logging.handlers
+import os
 import queue
+import shutil
 import sys
 import threading
 import time
 import urllib.error
 import urllib.request
-from typing import Any, Protocol, runtime_checkable
+from datetime import datetime, timezone
+from typing import TYPE_CHECKING, Any, Literal, Protocol, runtime_checkable
+
+if TYPE_CHECKING:
+    from .config import ObservabilitySettings
 
 _LOGGER = logging.getLogger("fastapiobserver.sinks")
 
@@ -69,11 +78,18 @@ def get_registered_sinks() -> dict[str, LogSink]:
 
 def clear_sinks() -> None:
     """Remove all registered sinks (useful for testing)."""
+    global _DISCOVERED
+    _DISCOVERED = False
     _SINK_REGISTRY.clear()
 
 
+_DISCOVERED: bool = False
+
 def discover_entry_point_sinks() -> None:
     """Auto-discover sinks from the ``fastapiobserver.log_sinks`` entry-point group."""
+    global _DISCOVERED
+    if _DISCOVERED:
+        return
     try:
         from importlib.metadata import entry_points
 
@@ -108,6 +124,7 @@ def discover_entry_point_sinks() -> None:
                         "_skip_enrichers": True,
                     },
                 )
+        _DISCOVERED = True
     except Exception:
         _LOGGER.debug(
             "sinks.entry_point.discover_failed",
@@ -177,6 +194,114 @@ class RotatingFileSink:
 # =====================================================================
 
 
+def _gzip_rotator(source: str, dest: str) -> None:
+    try:
+        with open(source, "rb") as f_in:
+            with gzip.open(dest, "wb") as f_out:
+                shutil.copyfileobj(f_in, f_out)
+        os.remove(source)
+    except Exception:
+        pass
+
+
+def _gzip_namer(default_name: str) -> str:
+    return default_name + ".gz"
+
+
+class LogtailDLQ:
+    """Best-effort local durability for Logtail dropped messages.
+    
+    Provides thread-safe persistence using a RotatingFileHandler configured to output NDJSON.
+    Supports gzip compression during rotation.
+    """
+
+    def __init__(
+        self,
+        directory: str,
+        filename: str,
+        max_bytes: int,
+        backup_count: int,
+        compress: bool,
+    ) -> None:
+        self.directory = directory
+        self.filename = filename
+        self.max_bytes = max_bytes
+        self.backup_count = backup_count
+        self.compress = compress
+        
+        self.written_overflow = 0
+        self.written_failed = 0
+        self.write_failures_total = 0
+        self.bytes_total = 0
+        # Re-entrant because handler error callbacks can be invoked while submit() holds the lock.
+        self._lock = threading.RLock()
+
+        os.makedirs(self.directory, exist_ok=True)
+        self.filepath = os.path.join(self.directory, self.filename)
+
+        self._handler = logging.handlers.RotatingFileHandler(
+            self.filepath,
+            maxBytes=self.max_bytes,
+            backupCount=self.backup_count,
+        )
+        self._handler.setFormatter(logging.Formatter("%(message)s"))
+        
+        def _handle_error(record: logging.LogRecord) -> None:
+            with self._lock:
+                self.write_failures_total += 1
+            
+        self._handler.handleError = _handle_error  # type: ignore[method-assign]
+        
+        if self.compress:
+            self._handler.rotator = _gzip_rotator  # type: ignore[assignment]
+            self._handler.namer = _gzip_namer  # type: ignore[assignment]
+
+    def submit(self, payload: str, reason: Literal["queue_overflow", "send_failed"]) -> None:
+        with self._lock:
+            try:
+                parsed_payload: Any
+                try:
+                    parsed_payload = json.loads(payload)
+                except Exception:
+                    parsed_payload = payload
+
+                envelope = json.dumps(
+                    {
+                        "ts": datetime.now(timezone.utc).isoformat(),
+                        "reason": reason,
+                        "payload": parsed_payload,
+                    }
+                )
+                
+                # Leverage the standard emit to ensure maxBytes size checking
+                # correctly triggers the rotator and namer overrides.
+                record = logging.LogRecord(
+                    name="dlq",
+                    level=logging.INFO,
+                    pathname="",
+                    lineno=0,
+                    msg=envelope,
+                    args=(),
+                    exc_info=None,
+                )
+                self._handler.emit(record)
+                
+                if reason == "queue_overflow":
+                    self.written_overflow += 1
+                else:
+                    self.written_failed += 1
+                self.bytes_total += len(envelope.encode("utf-8"))
+            except Exception:
+                self.write_failures_total += 1
+
+    def close(self) -> None:
+        with self._lock:
+            try:
+                self._handler.close()
+            except Exception:
+                pass
+
+
 class _LogtailHandler(logging.Handler):
     """Handler that batches and ships JSON logs to Logtail via HTTP.
 
@@ -209,8 +334,10 @@ class _LogtailHandler(logging.Handler):
         self._max_retries = max_retries
         self._queue: queue.Queue[str] = queue.Queue(maxsize=max_queue_size)
         self._shutdown = threading.Event()
+        self._count_lock = threading.Lock()
         self._error_count = 0
         self._drop_count = 0
+        self._dlq: LogtailDLQ | None = None
 
         self._worker = threading.Thread(
             target=self._flush_worker,
@@ -220,6 +347,22 @@ class _LogtailHandler(logging.Handler):
         self._worker.start()
         atexit.register(self._shutdown_flush)
 
+    def enable_dlq(
+        self,
+        directory: str,
+        filename: str,
+        max_bytes: int,
+        backup_count: int,
+        compress: bool,
+    ) -> None:
+        self._dlq = LogtailDLQ(
+            directory=directory,
+            filename=filename,
+            max_bytes=max_bytes,
+            backup_count=backup_count,
+            compress=compress,
+        )
+
     def emit(self, record: logging.LogRecord) -> None:
         try:
             formatted = self.format(record)
@@ -227,11 +370,17 @@ class _LogtailHandler(logging.Handler):
                 self._queue.put_nowait(formatted)
             except queue.Full:
                 # Drop oldest to make room (bounded memory)
+                dropped = None
                 try:
-                    self._queue.get_nowait()
-                    self._drop_count += 1
+                    dropped = self._queue.get_nowait()
                 except queue.Empty:
                     pass
+                
+                if dropped is not None:
+                    with self._count_lock:
+                        self._drop_count += 1
+                    if self._dlq:
+                        self._dlq.submit(dropped, reason="queue_overflow")
                 try:
                     self._queue.put_nowait(formatted)
                 except queue.Full:
@@ -286,7 +435,8 @@ class _LogtailHandler(logging.Handler):
                             "_skip_enrichers": True,
                         },
                     )
-                    self._error_count += 1
+                    with self._count_lock:
+                        self._error_count += 1
                     return  # Don't retry client errors
             except Exception:
                 _LOGGER.debug(
@@ -302,7 +452,12 @@ class _LogtailHandler(logging.Handler):
             if attempt < self._max_retries - 1:
                 time.sleep(min(2**attempt * 0.5, 10))
 
-        self._error_count += 1
+        with self._count_lock:
+            self._error_count += 1
+            
+        if self._dlq:
+            for item in batch:
+                self._dlq.submit(item, reason="send_failed")
 
     def _shutdown_flush(self) -> None:
         self._shutdown.set()
@@ -311,14 +466,29 @@ class _LogtailHandler(logging.Handler):
 
     @property
     def error_count(self) -> int:
-        return self._error_count
+        with self._count_lock:
+            return self._error_count
 
     @property
     def drop_count(self) -> int:
-        return self._drop_count
+        with self._count_lock:
+            return self._drop_count
+
+    def dlq_stats(self) -> dict[str, int]:
+        if not self._dlq:
+            return {"written_overflow": 0, "written_failed": 0, "failures": 0, "bytes": 0}
+        with self._dlq._lock:
+            return {
+                "written_overflow": self._dlq.written_overflow,
+                "written_failed": self._dlq.written_failed,
+                "failures": self._dlq.write_failures_total,
+                "bytes": self._dlq.bytes_total,
+            }
 
     def close(self) -> None:
         self._shutdown_flush()
+        if self._dlq:
+            self._dlq.close()
         super().close()
 
 
@@ -342,11 +512,23 @@ class LogtailSink:
         endpoint: str | None = None,
         batch_size: int = 50,
         flush_interval: float = 2.0,
+        dlq_enabled: bool = False,
+        dlq_dir: str = ".dlq/logtail",
+        dlq_filename: str = "logtail_dlq.ndjson",
+        dlq_max_bytes: int = 50 * 1024 * 1024,
+        dlq_backup_count: int = 10,
+        dlq_compress: bool = True,
     ) -> None:
         self._source_token = source_token
         self._endpoint = endpoint or self.ENDPOINT
         self._batch_size = batch_size
         self._flush_interval = flush_interval
+        self._dlq_enabled = dlq_enabled
+        self._dlq_dir = dlq_dir
+        self._dlq_filename = dlq_filename
+        self._dlq_max_bytes = dlq_max_bytes
+        self._dlq_backup_count = dlq_backup_count
+        self._dlq_compress = dlq_compress
 
     @property
     def name(self) -> str:
@@ -359,6 +541,14 @@ class LogtailSink:
             batch_size=self._batch_size,
             flush_interval=self._flush_interval,
         )
+        if self._dlq_enabled:
+            handler.enable_dlq(
+                directory=self._dlq_dir,
+                filename=self._dlq_filename,
+                max_bytes=self._dlq_max_bytes,
+                backup_count=self._dlq_backup_count,
+                compress=self._dlq_compress,
+            )
         handler.setFormatter(formatter)
         return handler
 
@@ -369,37 +559,40 @@ class LogtailSink:
 
 
 def build_sink_handlers(
-    settings: Any,
+    settings: "ObservabilitySettings",
     formatter: logging.Formatter,
-) -> list[logging.Handler]:
+) -> list[tuple[logging.Handler, str]]:
     """Build the list of output handlers from settings + registered sinks.
 
     Called by ``logging.setup_logging()``.  This is the single point of
     assembly (Dependency Inversion: high-level logging depends on this
     abstraction, not on concrete handler constructors).
     """
-    handlers: list[logging.Handler] = []
+    handlers: list[tuple[logging.Handler, str]] = []
 
     # Always add stdout
-    handlers.append(_tag_sink_handler(StdoutSink().create_handler(formatter), "stdout"))
+    handlers.append((StdoutSink().create_handler(formatter), "stdout"))
 
     # Add rotating file if configured
     if settings.log_dir:
         handlers.append(
-            _tag_sink_handler(
-                RotatingFileSink(log_dir=settings.log_dir).create_handler(formatter),
-                "rotating_file",
-            )
+            (RotatingFileSink(log_dir=settings.log_dir).create_handler(formatter), "rotating_file")
         )
 
     # Add Logtail if configured
     if settings.logtail_enabled and settings.logtail_source_token:
         handlers.append(
-            _tag_sink_handler(
+            (
                 LogtailSink(
                     source_token=settings.logtail_source_token,
                     batch_size=settings.logtail_batch_size,
                     flush_interval=settings.logtail_flush_interval,
+                    dlq_enabled=settings.logtail_dlq_enabled,
+                    dlq_dir=settings.logtail_dlq_dir,
+                    dlq_filename=settings.logtail_dlq_filename,
+                    dlq_max_bytes=settings.logtail_dlq_max_bytes,
+                    dlq_backup_count=settings.logtail_dlq_backup_count,
+                    dlq_compress=settings.logtail_dlq_compress,
                 ).create_handler(formatter),
                 "logtail",
             )
@@ -409,7 +602,7 @@ def build_sink_handlers(
     discover_entry_point_sinks()
     for sink in _SINK_REGISTRY.values():
         try:
-            handlers.append(_tag_sink_handler(sink.create_handler(formatter), sink.name))
+            handlers.append((sink.create_handler(formatter), sink.name))
         except Exception:
             _LOGGER.warning(
                 "sinks.create_handler.failed",
@@ -423,9 +616,50 @@ def build_sink_handlers(
     return handlers
 
 
-def _tag_sink_handler(handler: logging.Handler, sink_name: str) -> logging.Handler:
-    setattr(handler, "_fastapiobserver_sink_name", sink_name.strip().lower())
-    return handler
+def _iter_logtail_handlers(handler: logging.Handler) -> list[_LogtailHandler]:
+    stack: list[logging.Handler] = [handler]
+    resolved: list[_LogtailHandler] = []
+    visited: set[int] = set()
+    while stack:
+        current = stack.pop()
+        current_id = id(current)
+        if current_id in visited:
+            continue
+        visited.add(current_id)
+
+        if isinstance(current, _LogtailHandler):
+            resolved.append(current)
+            continue
+
+        delegate = getattr(current, "_delegate", None)
+        if isinstance(delegate, logging.Handler):
+            stack.append(delegate)
+
+    return resolved
+
+
+def get_logtail_dlq_stats() -> dict[str, int]:
+    """Return an aggregated snapshot of active Logtail DLQ statistics."""
+    stats = {
+        "written_queue_overflow": 0,
+        "written_send_failed": 0,
+        "failures": 0,
+        "bytes": 0,
+    }
+    try:
+        from .logging import get_managed_output_handlers
+    except Exception:
+        return stats
+
+    for handler in get_managed_output_handlers():
+        for logtail_handler in _iter_logtail_handlers(handler):
+            h_stats = logtail_handler.dlq_stats()
+            stats["written_queue_overflow"] += h_stats["written_overflow"]
+            stats["written_send_failed"] += h_stats["written_failed"]
+            stats["failures"] += h_stats["failures"]
+            stats["bytes"] += h_stats["bytes"]
+
+    return stats
 
 
 __all__ = [
@@ -436,6 +670,7 @@ __all__ = [
     "build_sink_handlers",
     "clear_sinks",
     "discover_entry_point_sinks",
+    "get_logtail_dlq_stats",
     "get_registered_sinks",
     "register_sink",
     "unregister_sink",

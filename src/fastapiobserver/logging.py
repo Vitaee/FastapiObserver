@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import atexit
+import hashlib
 import json
 import logging
 import logging.handlers
 import queue
+import re
 import threading
 import time
+import weakref
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Callable, Literal, Mapping, cast
@@ -29,6 +32,7 @@ _LOGGING_LOCK = threading.Lock()
 _QUEUE_LISTENER: logging.handlers.QueueListener | None = None
 _MANAGED_OUTPUT_HANDLERS: list[logging.Handler] = []
 _SINK_CIRCUIT_BREAKERS: list["SinkCircuitBreakerHandler"] = []
+_MANAGED_HANDLERS: weakref.WeakSet[logging.Handler] = weakref.WeakSet()
 _ATEXIT_SHUTDOWN_REGISTERED = False
 _LOGGER = logging.getLogger("fastapiobserver.logging")
 LOG_SCHEMA_VERSION = "1.0.0"
@@ -297,6 +301,12 @@ def get_sink_circuit_breaker_stats() -> dict[str, dict[str, int | float | str]]:
     return {breaker.sink_name: breaker.snapshot().as_dict() for breaker in breakers}
 
 
+def get_managed_output_handlers() -> list[logging.Handler]:
+    """Return the currently managed output handlers."""
+    with _LOGGING_LOCK:
+        return list(_MANAGED_OUTPUT_HANDLERS)
+
+
 def shutdown_logging() -> None:
     """Flush and stop managed logging components.
 
@@ -324,7 +334,7 @@ def shutdown_logging() -> None:
         managed_handlers = [
             handler
             for handler in root_logger.handlers
-            if getattr(handler, "_fastapiobserver_managed", False)
+            if handler in _MANAGED_HANDLERS
         ]
         for handler in managed_handlers:
             root_logger.removeHandler(handler)
@@ -348,6 +358,7 @@ def shutdown_logging() -> None:
                 )
         _MANAGED_OUTPUT_HANDLERS = []
         _SINK_CIRCUIT_BREAKERS = []
+        _MANAGED_HANDLERS.clear()
         _LOG_QUEUE_TELEMETRY.reset(
             log_queue=None,
             queue_capacity=0,
@@ -600,7 +611,7 @@ def setup_logging(
         managed_handlers = [
             handler
             for handler in root_logger.handlers
-            if getattr(handler, "_fastapiobserver_managed", False)
+            if handler in _MANAGED_HANDLERS
         ]
 
         if managed_handlers and not force:
@@ -630,22 +641,27 @@ def setup_logging(
         root_logger.setLevel(settings.log_level.upper())
 
         # Build output handlers based on logs_mode
-        output_handlers: list[logging.Handler] = []
+        output_handlers: list[tuple[logging.Handler, str]] = []
         if logs_mode in ("local_json", "both"):
             output_handlers = build_sink_handlers(settings, formatter)
+            
+        extra_output_handlers: list[tuple[logging.Handler, str]] = []
         if extra_handlers:
-            output_handlers.extend(extra_handlers)
-        if not output_handlers:
+            for h in extra_handlers:
+                extra_output_handlers.append((h, h.__class__.__name__.lower()))
+                
+        all_output_handlers = output_handlers + extra_output_handlers
+        if not all_output_handlers:
             raise RuntimeError(
                 "Logging setup resolved zero output handlers. "
                 "Configure at least one local sink or OTLP handler."
             )
-        for output_handler in output_handlers:
+        for output_handler, _ in all_output_handlers:
             if output_handler.formatter is None:
                 output_handler.setFormatter(formatter)
 
         managed_output_handlers, sink_breakers = _wrap_sink_handlers(
-            output_handlers,
+            all_output_handlers,
             failure_threshold=settings.sink_circuit_breaker_failure_threshold,
             recovery_timeout_seconds=settings.sink_circuit_breaker_recovery_timeout_seconds,
             enabled=settings.sink_circuit_breaker_enabled,
@@ -695,7 +711,7 @@ def _configure_queue_handler(handler: logging.Handler) -> None:
     handler.addFilter(RequestIdFilter())
     handler.addFilter(TraceContextFilter())
     handler.addFilter(PluginLogFilter())
-    setattr(handler, "_fastapiobserver_managed", True)
+    _MANAGED_HANDLERS.add(handler)
 
 
 def _safe_queue_size(log_queue: queue.Queue[logging.LogRecord] | None) -> int:
@@ -740,28 +756,52 @@ def _build_structured_error(
     error_type = exc_type.__name__ if exc_type is not None else "Exception"
     error_message = str(exc_value) if exc_value is not None else ""
     stacktrace = formatter.formatException(exc_info)
+    fingerprint = _generate_error_fingerprint(error_type, stacktrace)
+
     return {
         "type": error_type,
         "message": error_message,
         "stacktrace": stacktrace,
+        "fingerprint": fingerprint,
     }
 
 
+def _generate_error_fingerprint(error_type: str, stacktrace: str) -> str:
+    """Hash stack trace after stripping out environment-specific noise.
+    
+    Removes transient values like:
+    1. Memory addresses (e.g. 0x10a2b3c4d)
+    2. Exact line numbers (e.g. line 42)
+    This guarantees refactor-safe grouping of identical underlying errors.
+    """
+    if not stacktrace:
+        return hashlib.md5(error_type.encode("utf-8")).hexdigest()
+
+    # Strip hexadecimal memory addresses
+    sanitized = re.sub(r"0x[0-9a-fA-F]+", "0x<ptr>", stacktrace)
+    # Strip exact line numbers to survive minor file refactoring
+    sanitized = re.sub(r"line \d+", "line <N>", sanitized)
+    
+    # Combine error type and sanitized trace to ensure distinct groupings
+    payload = f"{error_type}:{sanitized}"
+    return hashlib.md5(payload.encode("utf-8")).hexdigest()
+
+
 def _wrap_sink_handlers(
-    handlers: list[logging.Handler],
+    handlers_with_names: list[tuple[logging.Handler, str]],
     *,
     failure_threshold: int,
     recovery_timeout_seconds: float,
     enabled: bool,
 ) -> tuple[list[logging.Handler], list[SinkCircuitBreakerHandler]]:
     if not enabled:
-        return handlers, []
+        return [h for h, _ in handlers_with_names], []
 
     wrapped_handlers: list[logging.Handler] = []
     breakers: list[SinkCircuitBreakerHandler] = []
     name_counts: dict[str, int] = {}
-    for handler in handlers:
-        sink_name = _resolve_sink_name(handler, name_counts)
+    for handler, base_name in handlers_with_names:
+        sink_name = _resolve_sink_name(base_name, name_counts)
         breaker = SinkCircuitBreakerHandler(
             sink_name=sink_name,
             delegate=handler,
@@ -774,13 +814,10 @@ def _wrap_sink_handlers(
 
 
 def _resolve_sink_name(
-    handler: logging.Handler,
+    base_name: str,
     name_counts: dict[str, int],
 ) -> str:
-    base_name = getattr(handler, "_fastapiobserver_sink_name", None)
-    if not isinstance(base_name, str) or not base_name.strip():
-        base_name = handler.__class__.__name__.strip().lower()
-    normalized_name = base_name
+    normalized_name = base_name.strip().lower()
     count = name_counts.get(normalized_name, 0) + 1
     name_counts[normalized_name] = count
     if count == 1:

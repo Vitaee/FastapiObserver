@@ -202,6 +202,7 @@ class _LogQueueMetricsCollector:
         from prometheus_client.core import CounterMetricFamily, GaugeMetricFamily
 
         from .logging import get_log_queue_stats, get_sink_circuit_breaker_stats
+        from .sinks import get_logtail_dlq_stats
 
         stats = get_log_queue_stats()
 
@@ -256,6 +257,30 @@ class _LogQueueMetricsCollector:
         )
         block_timeouts_total.add_metric([], float(stats["block_timeout_total"]))
         yield block_timeouts_total
+        
+        dlq_stats = get_logtail_dlq_stats()
+        dlq_written = CounterMetricFamily(
+            "fastapiobserver_dlq_written_total",
+            "Total payloads written to local DLQ.",
+            labels=["reason"],
+        )
+        dlq_written.add_metric(["queue_overflow"], float(dlq_stats["written_queue_overflow"]))
+        dlq_written.add_metric(["send_failed"], float(dlq_stats["written_send_failed"]))
+        yield dlq_written
+        
+        dlq_failures = CounterMetricFamily(
+            "fastapiobserver_dlq_write_failures_total",
+            "Total failures when attempting to write payloads to the DLQ disk.",
+        )
+        dlq_failures.add_metric([], float(dlq_stats["failures"]))
+        yield dlq_failures
+        
+        dlq_bytes = CounterMetricFamily(
+            "fastapiobserver_dlq_bytes_total",
+            "Total bytes written to the DLQ disk.",
+        )
+        dlq_bytes.add_metric([], float(dlq_stats["bytes"]))
+        yield dlq_bytes
 
         sink_stats = get_sink_circuit_breaker_stats()
         if not sink_stats:
@@ -563,7 +588,7 @@ def _mount_openmetrics_endpoint(
 # ---------------------------------------------------------------------------
 
 
-def normalize_path(path: str) -> str:
+def collapse_dynamic_segments(path: str) -> str:
     """Replace dynamic path segments with ``/:id`` to control label cardinality."""
     normalized = _UUID_RE.sub("/:id", path)
     normalized = _HEX_RE.sub("/:id", normalized)

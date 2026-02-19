@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import weakref
 from typing import Any
 
 from fastapi import FastAPI
@@ -19,6 +20,7 @@ from .resource import (
 from .settings import OTelSettings, get_trace_sampling_ratio, set_trace_sampling_ratio
 
 _LOGGER = logging.getLogger("fastapiobserver.otel")
+_OTEL_INSTALLED_APPS: weakref.WeakSet[FastAPI] = weakref.WeakSet()
 
 
 def install_otel(
@@ -28,7 +30,7 @@ def install_otel(
 ) -> None:
     if not otel_settings.enabled:
         return
-    if getattr(app.state, "_fastapiobserver_otel_installed", False):
+    if app in _OTEL_INSTALLED_APPS:
         return
 
     trace_api = import_otel_module("opentelemetry.trace")
@@ -47,7 +49,7 @@ def install_otel(
     has_external_provider = has_configured_tracer_provider(trace_api, current_provider)
     provider_owned = False
 
-    class DynamicTraceIdRatioSampler:
+    class DynamicTraceIdRatioSampler(sampling.Sampler): # type: ignore
         def should_sample(
             self,
             parent_context: Any,
@@ -144,4 +146,4 @@ def install_otel(
             logger=_LOGGER,
         )
 
-    app.state._fastapiobserver_otel_installed = True
+    _OTEL_INSTALLED_APPS.add(app)

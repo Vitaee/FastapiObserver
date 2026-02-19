@@ -355,14 +355,15 @@ Request arrives
 }
 ```
 
-On exception logs, a structured `error` object is included for indexed queries:
+On exception logs, a structured `error` object is included for indexed queries, featuring a stable AST-based `fingerprint` hash which ignores transient memory locations or exact line numbers, allowing zero-dependency alerting directly in your search backend.
 
 ```json
 {
   "error": {
     "type": "RuntimeError",
     "message": "boom",
-    "stacktrace": "Traceback (most recent call last): ..."
+    "stacktrace": "Traceback (most recent call last): ...",
+    "fingerprint": "a1b2c3d4e5f67890abcd12345678bbcc"
   }
 }
 ```
@@ -515,6 +516,7 @@ The `examples/` directory contains runnable demos:
 | [`security_presets_app.py`](examples/security_presets_app.py) | Preset-based security policy |
 | [`allowlist_app.py`](examples/allowlist_app.py) | Allowlist-only sanitization |
 | [`otel_app.py`](examples/otel_app.py) | OTel tracing and resource attributes |
+| [`graphql_app.py`](examples/graphql_app.py) | Native Strawberry GraphQL observability |
 | [`benchmarks/`](examples/benchmarks/) | Baseline vs observer benchmark harness |
 | [`k8s/`](examples/k8s/) | Kubernetes-native stack with Prometheus + Loki + Tempo + Grafana |
 | [`full_stack/`](examples/full_stack/) | **Docker Compose stack**: 3 FastAPI services + Grafana + Prometheus + Loki + Tempo |
@@ -634,6 +636,13 @@ Notes:
 | `LOGTAIL_SOURCE_TOKEN` | - | Logtail source token |
 | `LOGTAIL_BATCH_SIZE` | `50` | Batch size for shipping |
 | `LOGTAIL_FLUSH_INTERVAL` | `2.0` | Flush interval (seconds) |
+| `LOGTAIL_DLQ_ENABLED` | `false` | Enable resilient local disk fallback for dropped logs |
+| `LOGTAIL_DLQ_DIR` | `.dlq/logtail` | Directory to archive dropped NDJSON messages |
+| `LOGTAIL_DLQ_MAX_BYTES` | `52428800` | Max bytes per DLQ file before rotation (50MB) |
+| `LOGTAIL_DLQ_COMPRESS` | `true` | GZIP compress rotated DLQ files |
+
+> [!TIP]
+> The Logtail Dead Letter Queue (DLQ) provides best-effort local durability. If the internal memory queue overflows under immense API pressure (`queue.Full`), or if an external network partition completely exhausts the outbound HTTP retry backoff, the dropped log payloads are immediately salvaged into local NDJSON envelopes. You can replay these files to BetterStack later using the provided `scripts/replay_dlq.py` utility.
 
 ---
 
@@ -750,6 +759,45 @@ Detailed migration/coexistence guide: [`loguru.md`](loguru.md)
 
 ---
 
+## GraphQL Integrations (Strawberry)
+
+If you use `strawberry-graphql`, routing all traffic through `POST /graphql` severely blinds your logs and traces.
+`fastapi-observer` ships a native Strawberry extension (via Duck Typing, meaning NO bloated pip dependencies) to automatically extract GraphQL operations.
+
+```python
+import strawberry
+from fastapiobserver.integrations.strawberry import StrawberryObservabilityExtension
+
+@strawberry.type
+class Query:
+    @strawberry.field
+    def hello(self) -> str:
+        return "world"
+
+schema = strawberry.Schema(
+    query=Query,
+    extensions=[StrawberryObservabilityExtension],  # Inject this!
+)
+```
+
+With this extension, your logs will automatically get a `graphql` context key containing the extracted `operation_name`:
+```json
+{
+  "event": {
+    "method": "POST",
+    "path": "/graphql"
+  },
+  "user_context": {
+    "graphql": {
+      "operation_name": "GetUsersQuery"
+    }
+  }
+}
+```
+If OpenTelemetry is enabled, your traces will dynamically rename from `POST /graphql` to `graphql.operation.GetUsersQuery`.
+
+---
+
 ## Plugin Hooks
 
 Extend behavior without editing package internals:
@@ -846,7 +894,7 @@ Reproducible benchmark harness and methodology:
 - `0.2.x`: OTel interoperability, security presets, allowlists
 - `1.0.0`: dynamic runtime controls and plugin stability
 
-Current release version: `0.2.5`
+Current release version: `0.3.0`
 
 ## Changelog Policy
 

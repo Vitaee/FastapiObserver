@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-02-20
+
+### Added
+- **AST Error Fingerprinting**: Exception pipelines now sanitize transient data (memory addresses like `0x10a2b...` and exact line numbers) to generate a stable `error.fingerprint` hash. This allows zero-dependency grouping of identical server errors directly in external dashboards.
+- **Native GraphQL Observability (Strawberry)**: Ships with a zero-dependency duck-typed `StrawberryObservabilityExtension`. Add this to your `strawberry.Schema` to automatically extract `operationName` from `POST /graphql` queries and record it in JSON logs and OTel traces.
+- **Logtail Dead Letter Queue (DLQ)**: Implemented best-effort local durability for the Logtail sink. Under queue overflow (`queue.Full`) or network partitions (HTTP backoff exhaustion), dropped messages are now transparently archived to rotating, gzipped local files (`.dlq/logtail/*.ndjson.gz`) with specific Prometheus annotations (`fastapiobserver_dlq_written_total`). Includes a `scripts/replay_dlq.py` utility for operational data recovery.
+
 ## [0.2.5] - 2026-02-19
 
 ### Changed

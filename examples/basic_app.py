@@ -51,6 +51,10 @@ settings = ObservabilitySettings(
     environment="development",    # dev / staging / production
     version="0.1.0",              # Your app version (useful for canary deployments)
     metrics_enabled=True,         # Mount a /metrics endpoint for Prometheus
+    
+    # Enable Logtail Dead Letter Queue for best-effort local durability
+    # dropped logs will be archived to `.dlq/logtail` as NDJSON files
+    logtail_dlq_enabled=True,
 )
 
 
@@ -92,3 +96,13 @@ def read_item(item_id: int) -> dict[str, str | int | None]:
         "item_id": item_id,
         "request_id": get_request_id(),
     }
+
+
+@app.get("/crash")
+def crash() -> dict[str, str]:
+    """
+    Demonstrates the Advanced AST-based Error Fingerprinting.
+    Exceptions automatically generate a stable hash ignoring memory addresses
+    and exact line numbers, included as `error.fingerprint` in the JSON log.
+    """
+    raise RuntimeError("Simulated crash to demonstrate AST error grouping.")

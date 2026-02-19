@@ -5,6 +5,7 @@ from __future__ import annotations
 import atexit
 import logging
 import threading
+import weakref
 from typing import Any, Callable
 
 from fastapi import FastAPI
@@ -12,7 +13,7 @@ from fastapi import FastAPI
 _LOGGER = logging.getLogger("fastapiobserver.otel")
 _ATEXIT_LOCK = threading.Lock()
 _ATEXIT_KEYS: set[str] = set()
-_APP_HOOK_KEYS_ATTR = "_fastapiobserver_otel_shutdown_hook_keys"
+_APP_HOOK_KEYS: weakref.WeakKeyDictionary[FastAPI, set[str]] = weakref.WeakKeyDictionary()
 
 
 def register_shutdown_hook(
@@ -38,10 +39,7 @@ def register_shutdown_hook(
     if app is None:
         return
 
-    app_hook_keys = getattr(app.state, _APP_HOOK_KEYS_ATTR, None)
-    if not isinstance(app_hook_keys, set):
-        app_hook_keys = set()
-        setattr(app.state, _APP_HOOK_KEYS_ATTR, app_hook_keys)
+    app_hook_keys = _APP_HOOK_KEYS.setdefault(app, set())
     if normalized_key in app_hook_keys:
         return
 

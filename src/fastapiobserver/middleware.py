@@ -12,7 +12,7 @@ from starlette.responses import Response
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from .config import ObservabilitySettings
-from .metrics import MetricsBackend, NoopMetricsBackend, normalize_path
+from .metrics import MetricsBackend, NoopMetricsBackend, collapse_dynamic_segments
 from .plugins import emit_metric_hooks
 from .request_context import (
     clear_request_id,
@@ -307,7 +307,7 @@ class _MetricsRecorder:
         try:
             self.metrics_backend.observe(
                 method=method,
-                path=normalize_path(path),
+                path=collapse_dynamic_segments(path),
                 status_code=status_code,
                 duration_seconds=duration_seconds,
             )

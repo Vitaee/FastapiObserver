@@ -3,6 +3,21 @@ from __future__ import annotations
 from contextvars import ContextVar
 from typing import Any
 
+__all__ = [
+    "set_request_id",
+    "get_request_id",
+    "clear_request_id",
+    "set_trace_id",
+    "get_trace_id",
+    "clear_trace_id",
+    "set_span_id",
+    "get_span_id",
+    "clear_span_id",
+    "set_user_context",
+    "get_user_context",
+    "clear_user_context",
+]
+
 _request_id_var: ContextVar[str | None] = ContextVar("request_id", default=None)
 _trace_id_var: ContextVar[str | None] = ContextVar("trace_id", default=None)
 _span_id_var: ContextVar[str | None] = ContextVar("span_id", default=None)

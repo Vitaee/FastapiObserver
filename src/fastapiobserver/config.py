@@ -103,6 +103,28 @@ class ObservabilitySettings(BaseSettings):
         default=2.0, gt=0.0, validation_alias="LOGTAIL_FLUSH_INTERVAL"
     )
 
+    # --- logtail DLQ ---
+    logtail_dlq_enabled: bool = Field(
+        default=False, validation_alias="LOGTAIL_DLQ_ENABLED"
+    )
+    logtail_dlq_dir: str = Field(
+        default=".dlq/logtail", validation_alias="LOGTAIL_DLQ_DIR"
+    )
+    logtail_dlq_filename: str = Field(
+        default="logtail_dlq.ndjson",
+        validation_alias="LOGTAIL_DLQ_FILENAME",
+    )
+    logtail_dlq_max_bytes: int = Field(
+        default=50 * 1024 * 1024,
+        validation_alias="LOGTAIL_DLQ_MAX_BYTES",
+    )
+    logtail_dlq_backup_count: int = Field(
+        default=10, validation_alias="LOGTAIL_DLQ_BACKUP_COUNT"
+    )
+    logtail_dlq_compress: bool = Field(
+        default=True, validation_alias="LOGTAIL_DLQ_COMPRESS"
+    )
+
     # ---------- validators ----------
 
     @field_validator("log_level")

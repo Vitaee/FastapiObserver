@@ -125,14 +125,14 @@ def test_setup_logging_is_idempotent_with_force_mode() -> None:
     first_count = sum(
         1
         for handler in root.handlers
-        if getattr(handler, "_fastapiobserver_managed", False)
+        if handler in logging_module._MANAGED_HANDLERS
     )
 
     setup_logging(settings, force=True)
     second_count = sum(
         1
         for handler in root.handlers
-        if getattr(handler, "_fastapiobserver_managed", False)
+        if handler in logging_module._MANAGED_HANDLERS
     )
 
     assert first_count == 1
@@ -156,7 +156,7 @@ def test_shutdown_logging_stops_queue_listener_and_removes_managed_handlers() ->
     managed_count_before = sum(
         1
         for handler in root.handlers
-        if getattr(handler, "_fastapiobserver_managed", False)
+        if handler in logging_module._MANAGED_HANDLERS
     )
     assert managed_count_before == 1
     assert logging_module._QUEUE_LISTENER is not None
@@ -166,7 +166,7 @@ def test_shutdown_logging_stops_queue_listener_and_removes_managed_handlers() ->
     managed_count_after = sum(
         1
         for handler in root.handlers
-        if getattr(handler, "_fastapiobserver_managed", False)
+        if handler in logging_module._MANAGED_HANDLERS
     )
     assert managed_count_after == 0
     assert logging_module._QUEUE_LISTENER is None
@@ -249,3 +249,40 @@ def test_structured_formatter_emits_structured_error_payload() -> None:
     assert payload["error"]["message"] == "boom"
     assert "RuntimeError: boom" in payload["error"]["stacktrace"]
     assert payload["exc_info"] == payload["error"]["stacktrace"]
+    assert "fingerprint" in payload["error"]
+
+
+def test_error_fingerprint_is_stable_across_transient_noise() -> None:
+    settings = ObservabilitySettings(app_name="test", service="test", environment="test")
+
+    def _simulated_error(noise: str) -> logging.LogRecord:
+        try:
+            # The line number and this arbitrary noise will be stripped by the fingerprinter
+            raise ValueError(f"Some business logic failed {noise}")
+        except ValueError as e:
+            # We purposely monkeypatch the exception string to inject fake memory addresses 
+            # to simulate two different object lifetimes.
+            fake_tb = f'File "app.py", line 42, in <module>\n  <MyObject object at {noise}>'
+            exc_info = (e.__class__, e, e.__traceback__)
+            record = logging.LogRecord(
+                name="test", level=logging.ERROR, pathname="", lineno=0,
+                msg="error", args=(), exc_info=exc_info
+            )
+            # Override the traceback formatting via a mock class for the test
+            class MockFormatter(StructuredJsonFormatter):
+                def formatException(self, exc_info):
+                    return fake_tb
+            
+            mock_formatter = MockFormatter(settings)
+            
+            payload = json.loads(mock_formatter.format(record))
+            return payload["error"]["fingerprint"]
+
+    # Even though the simulated memory addresses differ completely, the fingerprint 
+    # must remain identical since it's the same error type and file location.
+    fingerprint_a = _simulated_error("0x10a2b3c4d")
+    fingerprint_b = _simulated_error("0x7f8e9d0c1b2a")
+    
+    assert fingerprint_a == fingerprint_b
+    assert isinstance(fingerprint_a, str)
+    assert len(fingerprint_a) == 32  # MD5 hex length
