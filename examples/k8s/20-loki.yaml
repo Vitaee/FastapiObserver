@@ -1,0 +1,104 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: loki-config
+  namespace: observability
+  labels:
+    app.kubernetes.io/name: loki
+    app.kubernetes.io/part-of: fastapi-observer
+data:
+  loki.yml: |
+    auth_enabled: false
+
+    server:
+      http_listen_port: 3100
+
+    common:
+      path_prefix: /loki
+      storage:
+        filesystem:
+          chunks_directory: /loki/chunks
+          rules_directory: /loki/rules
+      replication_factor: 1
+      ring:
+        kvstore:
+          store: inmemory
+
+    limits_config:
+      allow_structured_metadata: true
+      volume_enabled: true
+
+    schema_config:
+      configs:
+        - from: "2020-10-24"
+          store: tsdb
+          object_store: filesystem
+          schema: v13
+          index:
+            prefix: index_
+            period: 24h
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: loki
+  namespace: observability
+  labels:
+    app.kubernetes.io/name: loki
+    app.kubernetes.io/part-of: fastapi-observer
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: loki
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: loki
+        app.kubernetes.io/part-of: fastapi-observer
+    spec:
+      containers:
+        - name: loki
+          image: grafana/loki:3.4.3
+          imagePullPolicy: IfNotPresent
+          args:
+            - -config.file=/etc/loki/loki.yml
+          ports:
+            - containerPort: 3100
+              name: http
+          volumeMounts:
+            - name: config
+              mountPath: /etc/loki/loki.yml
+              subPath: loki.yml
+            - name: data
+              mountPath: /loki
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 1000m
+              memory: 1Gi
+      volumes:
+        - name: config
+          configMap:
+            name: loki-config
+        - name: data
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: loki
+  namespace: observability
+  labels:
+    app.kubernetes.io/name: loki
+    app.kubernetes.io/part-of: fastapi-observer
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: loki
+  ports:
+    - name: http
+      port: 3100
+      targetPort: http

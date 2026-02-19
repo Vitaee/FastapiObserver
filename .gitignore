@@ -16,3 +16,7 @@ wheels/
 
 # macOS metadata
 .DS_Store
+
+release_dist
+release_dist_0_1_1
+release_dist_*

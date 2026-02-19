@@ -1,0 +1,515 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: fastapi-observer-demo-app
+  namespace: observability
+  labels:
+    app.kubernetes.io/name: fastapi-observer-demo
+    app.kubernetes.io/part-of: fastapi-observer
+    app.kubernetes.io/component: application
+data:
+  app.py: |
+    import asyncio
+    import logging
+    import os
+    import random
+
+    import httpx
+    from fastapi import FastAPI, HTTPException
+
+    from fastapiobserver import (
+        ObservabilitySettings,
+        SecurityPolicy,
+        TrustedProxyPolicy,
+        get_request_id,
+        get_trace_id,
+        install_observability,
+        instrument_httpx_client,
+        register_log_enricher,
+        register_metric_hook,
+    )
+    from fastapiobserver.otel import OTelLogsSettings, OTelSettings
+
+    SERVICE_NAME = os.getenv("SERVICE_NAME", "app-a")
+    APP_NAME = os.getenv("APP_NAME", "demo-api")
+    ENVIRONMENT = os.getenv("ENVIRONMENT", "k8s")
+    APP_VERSION = os.getenv("APP_VERSION", "0.1.1")
+
+    TARGET_B = os.getenv("TARGET_B", "http://app-b:8000")
+    TARGET_C = os.getenv("TARGET_C", "http://app-c:8000")
+
+    app = FastAPI(title=f"{SERVICE_NAME} (fastapi-observer k8s demo)")
+    logger = logging.getLogger(SERVICE_NAME)
+
+    settings = ObservabilitySettings(
+        app_name=APP_NAME,
+        service=SERVICE_NAME,
+        environment=ENVIRONMENT,
+        version=APP_VERSION,
+        metrics_enabled=True,
+    )
+
+    otel_settings = OTelSettings.from_env(settings)
+    otel_logs_settings = OTelLogsSettings.from_env()
+
+    install_observability(
+        app,
+        settings,
+        security_policy=SecurityPolicy(),
+        trusted_proxy_policy=TrustedProxyPolicy(enabled=True),
+        otel_settings=otel_settings,
+        otel_logs_settings=otel_logs_settings,
+    )
+
+    # Enable outbound trace propagation for httpx calls used by /chain.
+    try:
+        instrument_httpx_client()
+    except RuntimeError:
+        logger.warning(
+            "httpx instrumentation unavailable",
+            extra={"event": {"service": SERVICE_NAME}},
+        )
+
+
+    def add_cluster_metadata(payload: dict) -> dict:
+        payload["k8s_namespace"] = os.getenv("POD_NAMESPACE", "observability")
+        payload["k8s_pod"] = os.getenv("POD_NAME", "unknown")
+        return payload
+
+
+    register_log_enricher("k8s_metadata", add_cluster_metadata)
+
+
+    def track_slow_requests(request: object, response: object, duration: float) -> None:
+        if duration > 1.0:
+            logger.warning(
+                "slow_request_detected",
+                extra={
+                    "event": {
+                        "duration_seconds": round(duration, 3),
+                        "service": SERVICE_NAME,
+                    }
+                },
+            )
+
+
+    register_metric_hook("slow_tracker", track_slow_requests)
+
+
+    @app.get("/health")
+    def health() -> dict:
+        return {"status": "ok", "service": SERVICE_NAME}
+
+
+    @app.get("/items/{item_id}")
+    def get_item(item_id: int) -> dict:
+        logger.info("item.lookup", extra={"event": {"item_id": item_id}})
+        return {
+            "item_id": item_id,
+            "service": SERVICE_NAME,
+            "request_id": get_request_id(),
+            "trace_id": get_trace_id(),
+        }
+
+
+    @app.get("/users/{user_id}")
+    def get_user(user_id: int) -> dict:
+        logger.info("user.lookup", extra={"event": {"user_id": user_id}})
+        return {
+            "user_id": user_id,
+            "name": f"User {user_id}",
+            "service": SERVICE_NAME,
+            "request_id": get_request_id(),
+        }
+
+
+    @app.get("/slow")
+    async def slow_endpoint() -> dict:
+        delay = random.uniform(0.4, 1.8)
+        logger.info("slow.processing", extra={"event": {"delay_seconds": round(delay, 3)}})
+        await asyncio.sleep(delay)
+        return {"delay_seconds": round(delay, 3), "service": SERVICE_NAME}
+
+
+    @app.get("/error")
+    def error_endpoint() -> dict:
+        roll = random.random()
+        if roll < 0.2:
+            raise HTTPException(status_code=400, detail="Bad request (simulated)")
+        if roll < 0.35:
+            raise HTTPException(status_code=404, detail="Not found (simulated)")
+        if roll < 0.5:
+            raise HTTPException(status_code=500, detail="Internal error (simulated)")
+        return {"status": "ok", "service": SERVICE_NAME}
+
+
+    @app.get("/chain")
+    async def chain() -> dict:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp_b, resp_c = await asyncio.gather(
+                client.get(f"{TARGET_B}/items/1"),
+                client.get(f"{TARGET_C}/users/1"),
+                return_exceptions=True,
+            )
+        return {
+            "source": SERVICE_NAME,
+            "trace_id": get_trace_id(),
+            "results": {
+                "app_b": resp_b.json() if not isinstance(resp_b, Exception) else {"error": str(resp_b)},
+                "app_c": resp_c.json() if not isinstance(resp_c, Exception) else {"error": str(resp_c)},
+            },
+        }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: app-a
+  namespace: observability
+  labels:
+    app.kubernetes.io/name: app-a
+    app.kubernetes.io/part-of: fastapi-observer
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: app-a
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: app-a
+        app.kubernetes.io/part-of: fastapi-observer
+    spec:
+      containers:
+        - name: app
+          image: python:3.13-slim
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              python -m pip install --no-cache-dir "fastapi-observer[all]==0.1.1" uvicorn httpx &&
+              uvicorn app:app --host 0.0.0.0 --port 8000 --app-dir /opt/app --log-level warning
+          ports:
+            - containerPort: 8000
+              name: http
+          env:
+            - name: APP_NAME
+              value: demo-api
+            - name: SERVICE_NAME
+              value: app-a
+            - name: OTEL_SERVICE_NAME
+              value: app-a
+            - name: ENVIRONMENT
+              value: k8s
+            - name: APP_VERSION
+              value: 0.1.1
+            - name: LOG_LEVEL
+              value: INFO
+            - name: METRICS_ENABLED
+              value: "true"
+            - name: OTEL_ENABLED
+              value: "true"
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: http://otel-collector:4317
+            - name: OTEL_EXPORTER_OTLP_PROTOCOL
+              value: grpc
+            - name: OTEL_TRACE_SAMPLING_RATIO
+              value: "1.0"
+            - name: OTEL_LOGS_ENABLED
+              value: "true"
+            - name: OTEL_LOGS_MODE
+              value: both
+            - name: OTEL_LOGS_ENDPOINT
+              value: http://otel-collector:4317
+            - name: OTEL_LOGS_PROTOCOL
+              value: grpc
+            - name: TARGET_B
+              value: http://app-b:8000
+            - name: TARGET_C
+              value: http://app-c:8000
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          volumeMounts:
+            - name: app-code
+              mountPath: /opt/app
+      volumes:
+        - name: app-code
+          configMap:
+            name: fastapi-observer-demo-app
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: app-a
+  namespace: observability
+  labels:
+    app.kubernetes.io/name: app-a
+    app.kubernetes.io/part-of: fastapi-observer
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: app-a
+  ports:
+    - name: http
+      port: 8000
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: app-b
+  namespace: observability
+  labels:
+    app.kubernetes.io/name: app-b
+    app.kubernetes.io/part-of: fastapi-observer
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: app-b
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: app-b
+        app.kubernetes.io/part-of: fastapi-observer
+    spec:
+      containers:
+        - name: app
+          image: python:3.13-slim
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              python -m pip install --no-cache-dir "fastapi-observer[all]==0.1.1" uvicorn httpx &&
+              uvicorn app:app --host 0.0.0.0 --port 8000 --app-dir /opt/app --log-level warning
+          ports:
+            - containerPort: 8000
+              name: http
+          env:
+            - name: APP_NAME
+              value: demo-api
+            - name: SERVICE_NAME
+              value: app-b
+            - name: OTEL_SERVICE_NAME
+              value: app-b
+            - name: ENVIRONMENT
+              value: k8s
+            - name: APP_VERSION
+              value: 0.1.1
+            - name: LOG_LEVEL
+              value: INFO
+            - name: METRICS_ENABLED
+              value: "true"
+            - name: OTEL_ENABLED
+              value: "true"
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: http://otel-collector:4317
+            - name: OTEL_EXPORTER_OTLP_PROTOCOL
+              value: grpc
+            - name: OTEL_TRACE_SAMPLING_RATIO
+              value: "1.0"
+            - name: OTEL_LOGS_ENABLED
+              value: "true"
+            - name: OTEL_LOGS_MODE
+              value: both
+            - name: OTEL_LOGS_ENDPOINT
+              value: http://otel-collector:4317
+            - name: OTEL_LOGS_PROTOCOL
+              value: grpc
+            - name: TARGET_B
+              value: http://app-a:8000
+            - name: TARGET_C
+              value: http://app-c:8000
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          volumeMounts:
+            - name: app-code
+              mountPath: /opt/app
+      volumes:
+        - name: app-code
+          configMap:
+            name: fastapi-observer-demo-app
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: app-b
+  namespace: observability
+  labels:
+    app.kubernetes.io/name: app-b
+    app.kubernetes.io/part-of: fastapi-observer
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: app-b
+  ports:
+    - name: http
+      port: 8000
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: app-c
+  namespace: observability
+  labels:
+    app.kubernetes.io/name: app-c
+    app.kubernetes.io/part-of: fastapi-observer
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: app-c
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: app-c
+        app.kubernetes.io/part-of: fastapi-observer
+    spec:
+      containers:
+        - name: app
+          image: python:3.13-slim
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              python -m pip install --no-cache-dir "fastapi-observer[all]==0.1.1" uvicorn httpx &&
+              uvicorn app:app --host 0.0.0.0 --port 8000 --app-dir /opt/app --log-level warning
+          ports:
+            - containerPort: 8000
+              name: http
+          env:
+            - name: APP_NAME
+              value: demo-api
+            - name: SERVICE_NAME
+              value: app-c
+            - name: OTEL_SERVICE_NAME
+              value: app-c
+            - name: ENVIRONMENT
+              value: k8s
+            - name: APP_VERSION
+              value: 0.1.1
+            - name: LOG_LEVEL
+              value: INFO
+            - name: METRICS_ENABLED
+              value: "true"
+            - name: OTEL_ENABLED
+              value: "true"
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: http://otel-collector:4317
+            - name: OTEL_EXPORTER_OTLP_PROTOCOL
+              value: grpc
+            - name: OTEL_TRACE_SAMPLING_RATIO
+              value: "1.0"
+            - name: OTEL_LOGS_ENABLED
+              value: "true"
+            - name: OTEL_LOGS_MODE
+              value: both
+            - name: OTEL_LOGS_ENDPOINT
+              value: http://otel-collector:4317
+            - name: OTEL_LOGS_PROTOCOL
+              value: grpc
+            - name: TARGET_B
+              value: http://app-a:8000
+            - name: TARGET_C
+              value: http://app-b:8000
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          volumeMounts:
+            - name: app-code
+              mountPath: /opt/app
+      volumes:
+        - name: app-code
+          configMap:
+            name: fastapi-observer-demo-app
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: app-c
+  namespace: observability
+  labels:
+    app.kubernetes.io/name: app-c
+    app.kubernetes.io/part-of: fastapi-observer
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: app-c
+  ports:
+    - name: http
+      port: 8000
+      targetPort: http

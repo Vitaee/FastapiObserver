@@ -1,0 +1,45 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: traffic-generator
+  namespace: observability
+  labels:
+    app.kubernetes.io/name: traffic-generator
+    app.kubernetes.io/part-of: fastapi-observer
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: traffic-generator
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: traffic-generator
+        app.kubernetes.io/part-of: fastapi-observer
+    spec:
+      containers:
+        - name: curl
+          image: curlimages/curl:8.11.1
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              i=1
+              while true; do
+                for svc in app-a app-b app-c; do
+                  curl -fsS "http://${svc}:8000/items/${i}" >/dev/null || true
+                  curl -fsS "http://${svc}:8000/users/${i}" >/dev/null || true
+                  curl -fsS "http://${svc}:8000/slow" >/dev/null || true
+                  curl -fsS "http://${svc}:8000/error" >/dev/null || true
+                done
+                curl -fsS "http://app-a:8000/chain" >/dev/null || true
+                i=$((i + 1))
+                sleep 1
+              done
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi

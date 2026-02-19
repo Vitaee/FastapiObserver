@@ -1,0 +1,22 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: observability
+
+resources:
+  - 00-namespace.yaml
+  - 10-demo-app.yaml
+  - 20-loki.yaml
+  - 21-tempo.yaml
+  - 22-otel-collector.yaml
+  - 23-prometheus.yaml
+  - 24-grafana.yaml
+  - 25-traffic-generator.yaml
+
+generatorOptions:
+  disableNameSuffixHash: true
+
+configMapGenerator:
+  - name: grafana-dashboard-fastapi-observer
+    files:
+      - api-overview-k8s.json=../full_stack/config/grafana/dashboards/api-overview.json
