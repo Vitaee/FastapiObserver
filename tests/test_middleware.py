@@ -164,3 +164,37 @@ def test_middleware_records_exception_on_active_span(
     assert span.exceptions
     assert isinstance(span.exceptions[0], RuntimeError)
     assert span.status is not None
+
+def test_extract_scope_client_ip_contract() -> None:
+    from fastapiobserver.middleware import _extract_scope_client_ip
+
+    assert _extract_scope_client_ip({"client": ("192.168.1.1", 1234)}) == "192.168.1.1"
+    assert _extract_scope_client_ip({"client": None}) is None
+    assert _extract_scope_client_ip({}) is None
+
+def test_resolve_request_id_contract() -> None:
+    from fastapiobserver.middleware import _resolve_request_id
+    import uuid
+
+    # Generated if false
+    req_id = _resolve_request_id(None, False)
+    assert isinstance(uuid.UUID(req_id), uuid.UUID)
+
+    # Trusted candidate returns itself
+    req_id = _resolve_request_id("custom-id", True)
+    assert req_id == "custom-id"
+
+    # Untrusted candidate generates
+    req_id = _resolve_request_id("custom-id", False)
+    assert isinstance(uuid.UUID(req_id), uuid.UUID)
+
+def test_extract_route_template_contract() -> None:
+    from fastapiobserver.middleware import _extract_route_template
+
+    assert _extract_route_template({}, "/raw") == "/raw"
+
+    scope = {
+        "endpoint": lambda: None,
+        "route": type("Route", (), {"path": "/users/{user_id}"})(),
+    }
+    assert _extract_route_template(scope, "/raw") == "/users/{user_id}"

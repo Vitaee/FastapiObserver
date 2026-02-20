@@ -1,15 +1,11 @@
-from __future__ import annotations
-
-import functools
-import hashlib
-import ipaddress
 import os
-from typing import Any, Literal, Mapping
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from .utils import EnvLoadable, parse_csv
+from ..utils import EnvLoadable, parse_csv
+from .normalize import _normalize_key, _normalize_media_type
 
 DEFAULT_REDACTED_FIELDS = (
     "password",
@@ -103,8 +99,8 @@ _OPTIONAL_SECURITY_FIELDS = {
     "event_key_allowlist",
     "body_capture_media_types",
 }
-
 _DROP = object()
+
 RedactionMode = Literal["mask", "hash", "drop"]
 
 
@@ -133,12 +129,12 @@ class SecurityPolicy(EnvLoadable, BaseModel):
     def _parse_key_tuples(
         cls, value: object, info: ValidationInfo
     ) -> tuple[str, ...] | None:
-        defaults = {
+        defaults: dict[str, tuple[str, ...]] = {
             "redacted_fields": DEFAULT_REDACTED_FIELDS,
             "redacted_headers": DEFAULT_REDACTED_HEADERS,
         }
         field_name = info.field_name
-        if field_name in defaults:
+        if field_name and field_name in defaults:
             return parse_csv(value, default=defaults[field_name], optional=False)
         return parse_csv(value, optional=True)
 
@@ -313,196 +309,16 @@ class _TrustedProxyPolicySettings(BaseSettings):
             return parsed
         return DEFAULT_TRUSTED_CIDRS
 
-
-def _normalize_key(key: str) -> str:
-    return key.strip().lower().replace("_", "-")
-
-
-def _normalize_media_type(value: str) -> str:
-    return value.split(";", 1)[0].strip().lower()
-
-
-def _redact_value(value: Any, policy: SecurityPolicy) -> Any:
-    if policy.redaction_mode == "drop":
-        return _DROP
-    if policy.redaction_mode == "hash":
-        digest = hashlib.sha256(str(value).encode("utf-8")).hexdigest()
-        return f"sha256:{digest}"
-    return policy.mask_text
-
-
-def sanitize_event(data: dict[str, Any], policy: SecurityPolicy) -> dict[str, Any]:
-    sensitive_fields = {_normalize_key(item) for item in policy.redacted_fields}
-    sensitive_headers = {_normalize_key(item) for item in policy.redacted_headers}
-    header_allowlist = (
-        {_normalize_key(item) for item in policy.header_allowlist}
-        if policy.header_allowlist is not None
-        else None
-    )
-    event_key_allowlist = (
-        {_normalize_key(item) for item in policy.event_key_allowlist}
-        if policy.event_key_allowlist is not None
-        else None
-    )
-    return _sanitize_mapping(
-        data,
-        policy,
-        sensitive_fields,
-        sensitive_headers,
-        parent_is_headers=False,
-        depth=0,
-        header_allowlist=header_allowlist,
-        event_key_allowlist=event_key_allowlist,
-    )
-
-
-def _sanitize_mapping(
-    data: Mapping[str, Any],
-    policy: SecurityPolicy,
-    sensitive_fields: set[str],
-    sensitive_headers: set[str],
-    parent_is_headers: bool,
-    depth: int,
-    header_allowlist: set[str] | None,
-    event_key_allowlist: set[str] | None,
-) -> dict[str, Any]:
-    out: dict[str, Any] = {}
-    for key, value in data.items():
-        normalized_key = _normalize_key(str(key))
-
-        if parent_is_headers and header_allowlist is not None:
-            if normalized_key not in header_allowlist:
-                continue
-        if depth == 0 and event_key_allowlist is not None:
-            if normalized_key not in event_key_allowlist:
-                continue
-
-        should_redact = normalized_key in sensitive_fields or (
-            parent_is_headers and normalized_key in sensitive_headers
-        )
-
-        if should_redact:
-            redacted = _redact_value(value, policy)
-            if redacted is not _DROP:
-                out[str(key)] = redacted
-            continue
-
-        out[str(key)] = _sanitize_value(
-            value,
-            policy,
-            sensitive_fields,
-            sensitive_headers,
-            parent_is_headers=normalized_key == "headers",
-            depth=depth + 1,
-            header_allowlist=header_allowlist,
-            event_key_allowlist=event_key_allowlist,
-        )
-    return out
-
-
-def _sanitize_value(
-    value: Any,
-    policy: SecurityPolicy,
-    sensitive_fields: set[str],
-    sensitive_headers: set[str],
-    parent_is_headers: bool,
-    depth: int,
-    header_allowlist: set[str] | None,
-    event_key_allowlist: set[str] | None,
-) -> Any:
-    if isinstance(value, Mapping):
-        string_mapping = {str(k): v for k, v in value.items()}
-        return _sanitize_mapping(
-            string_mapping,
-            policy,
-            sensitive_fields,
-            sensitive_headers,
-            parent_is_headers,
-            depth,
-            header_allowlist,
-            event_key_allowlist,
-        )
-    if isinstance(value, list):
-        return [
-            _sanitize_value(
-                item,
-                policy,
-                sensitive_fields,
-                sensitive_headers,
-                parent_is_headers=False,
-                depth=depth + 1,
-                header_allowlist=header_allowlist,
-                event_key_allowlist=event_key_allowlist,
-            )
-            for item in value
-        ]
-    if isinstance(value, tuple):
-        return tuple(
-            _sanitize_value(
-                item,
-                policy,
-                sensitive_fields,
-                sensitive_headers,
-                parent_is_headers=False,
-                depth=depth + 1,
-                header_allowlist=header_allowlist,
-                event_key_allowlist=event_key_allowlist,
-            )
-            for item in value
-        )
-    return value
-
-
-def is_body_capturable(content_type: str | None, policy: SecurityPolicy) -> bool:
-    if policy.body_capture_media_types is None:
-        return True
-    if not content_type:
-        return False
-    normalized_content_type = _normalize_media_type(content_type)
-    for media_type in policy.body_capture_media_types:
-        if normalized_content_type.startswith(media_type):
-            return True
-    return False
-
-
-@functools.lru_cache(maxsize=1024)
-def is_trusted_client_ip(client_ip: str | None, policy: TrustedProxyPolicy) -> bool:
-    if not policy.enabled:
-        return True
-    if not client_ip:
-        return False
-    try:
-        parsed_ip = ipaddress.ip_address(client_ip)
-    except ValueError:
-        return False
-
-    for cidr in policy.trusted_cidrs:
-        try:
-            network = ipaddress.ip_network(cidr, strict=False)
-        except ValueError:
-            continue
-        if parsed_ip in network:
-            return True
-    return False
-
-
-def resolve_client_ip(
-    client_ip: str | None,
-    headers: list[tuple[bytes, bytes]],
-    policy: TrustedProxyPolicy,
-) -> str | None:
-    if not policy.honor_forwarded_headers:
-        return client_ip
-    if not is_trusted_client_ip(client_ip, policy):
-        return client_ip
-
-    forwarded_for = None
-    for k, v in headers:
-        if k.lower() == b"x-forwarded-for":
-            forwarded_for = v.decode("latin1")
-            break
-
-    if not forwarded_for:
-        return client_ip
-    first_hop = forwarded_for.split(",")[0].strip()
-    return first_hop or client_ip
+__all__ = [
+    "DEFAULT_REDACTED_FIELDS",
+    "DEFAULT_REDACTED_HEADERS",
+    "STRICT_HEADER_ALLOWLIST",
+    "PCI_REDACTED_FIELDS",
+    "GDPR_REDACTED_FIELDS",
+    "SECURITY_POLICY_PRESETS",
+    "DEFAULT_TRUSTED_CIDRS",
+    "RedactionMode",
+    "SecurityPolicy",
+    "TrustedProxyPolicy",
+    "_DROP",
+]
