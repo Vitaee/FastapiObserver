@@ -4,6 +4,18 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-02-20
+
+### Added
+- Added advanced benchmark applications and a benchmark runner mode for realistic request-body + OTLP measurement.
+- Added `.env.example` with a production-focused observability settings template.
+
+### Changed
+- Reduced header decoding overhead in middleware by reading needed headers directly from raw ASGI header bytes.
+- Cached trusted CIDR resolution decisions in `is_trusted_client_ip()` for faster repeated proxy checks.
+- Expanded README and benchmark documentation with high-throughput tuning and Gunicorn preload safety guidance.
+
+
 ## [0.3.1] - 2026-02-19
 
 ### Fixed

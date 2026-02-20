@@ -33,10 +33,13 @@ This file tracks what is completed and what remains before stable `0.2.x`.
 - [ ] Add middleware overhead benchmark with CI regression threshold.
 - [ ] Add high-concurrency tests for context isolation.
 - [ ] Add graceful fallback behavior if Prometheus endpoint mount fails.
+- [ ] Investigate runtime detection heuristics to warn users if observability was initialized before a process fork (e.g., comparing `os.getpid()` at init vs request time).
 
 ### DX / Platform
 - [ ] Add first-class health/readiness helper endpoint integration.
 - [ ] Add explicit middleware-ordering section to examples docs (beyond runtime warning).
+- [ ] Create a dedicated `gunicorn.md` deployment guide covering safe initialization with `--preload-app`, `uvloop`, and multiprocessing metrics.
+- [ ] Add a `gunicorn` example deployment script to `examples/` demonstrating best practices with worker lifecycle management.
 
 ### Release Pipeline
 - [ ] Configure Trusted Publishing for TestPyPI and PyPI.

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import functools
 import hashlib
 import ipaddress
 import os
@@ -464,6 +465,7 @@ def is_body_capturable(content_type: str | None, policy: SecurityPolicy) -> bool
     return False
 
 
+@functools.lru_cache(maxsize=1024)
 def is_trusted_client_ip(client_ip: str | None, policy: TrustedProxyPolicy) -> bool:
     if not policy.enabled:
         return True
@@ -486,14 +488,20 @@ def is_trusted_client_ip(client_ip: str | None, policy: TrustedProxyPolicy) -> b
 
 def resolve_client_ip(
     client_ip: str | None,
-    headers: Mapping[str, str],
+    headers: list[tuple[bytes, bytes]],
     policy: TrustedProxyPolicy,
 ) -> str | None:
     if not policy.honor_forwarded_headers:
         return client_ip
     if not is_trusted_client_ip(client_ip, policy):
         return client_ip
-    forwarded_for = headers.get("x-forwarded-for")
+
+    forwarded_for = None
+    for k, v in headers:
+        if k.lower() == b"x-forwarded-for":
+            forwarded_for = v.decode("latin1")
+            break
+
     if not forwarded_for:
         return client_ip
     first_hop = forwarded_for.split(",")[0].strip()

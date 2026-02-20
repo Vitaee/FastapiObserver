@@ -70,15 +70,15 @@ class RequestLoggingMiddleware:
             return
 
         start = time.perf_counter()
-        headers = _decode_headers(scope.get("headers", []))
-        client_ip, trusted_source = self.ip_resolver.resolve(scope, headers)
-        request_id = self.context_manager.initialize(headers, trusted_source)
+        raw_headers = scope.get("headers", [])
+        client_ip, trusted_source = self.ip_resolver.resolve(scope, raw_headers)
+        request_id = self.context_manager.initialize(raw_headers, trusted_source)
 
         path = scope.get("path", "")
         method = scope.get("method", "UNKNOWN")
         status_code = 500
         captured_error: Exception | None = None
-        request_content_type = headers.get("content-type")
+        request_content_type = _get_header(raw_headers, b"content-type")
         request_body_enabled = self.security_policy.log_request_body and is_body_capturable(
             request_content_type,
             self.security_policy,
@@ -102,17 +102,17 @@ class RequestLoggingMiddleware:
             nonlocal status_code
             if message["type"] == "http.response.start":
                 status_code = int(message.get("status", 500))
-                response_headers = _decode_headers(message.get("headers", []))
+                resp_headers = message.get("headers", [])
                 if (
                     self.security_policy.log_response_body
                     and self.security_policy.body_capture_media_types is not None
                 ):
-                    response_content_type = response_headers.get("content-type")
+                    response_content_type = _get_header(resp_headers, b"content-type")
                     response_body_capture.set_enabled(
                         is_body_capturable(response_content_type, self.security_policy)
                     )
                 updated_headers = _upsert_header(
-                    message.get("headers", []),
+                    resp_headers,
                     self.settings.response_request_id_header,
                     request_id,
                 )
@@ -206,7 +206,11 @@ class _IpResolver:
     def __init__(self, policy: TrustedProxyPolicy) -> None:
         self.policy = policy
 
-    def resolve(self, scope: Scope, headers: dict[str, str]) -> tuple[str | None, bool]:
+    def resolve(
+        self,
+        scope: Scope,
+        headers: list[tuple[bytes, bytes]],
+    ) -> tuple[str | None, bool]:
         scope_client_ip = _extract_scope_client_ip(scope)
         trusted_source = (
             is_trusted_client_ip(scope_client_ip, self.policy)
@@ -220,16 +224,16 @@ class _IpResolver:
 class _RequestContextManager:
     def __init__(self, settings: ObservabilitySettings) -> None:
         self.settings = settings
+        self._request_id_header_bytes = settings.request_id_header.lower().encode("latin1")
 
-    def initialize(self, headers: dict[str, str], trusted_source: bool) -> str:
-        request_id = _resolve_request_id(
-            headers.get(self.settings.request_id_header),
-            trusted_source,
-        )
+    def initialize(self, headers: list[tuple[bytes, bytes]], trusted_source: bool) -> str:
+        request_id_header = _get_header(headers, self._request_id_header_bytes)
+        request_id = _resolve_request_id(request_id_header, trusted_source)
         set_request_id(request_id)
 
         if trusted_source:
-            trace_id, span_id = _parse_traceparent(headers.get("traceparent"))
+            traceparent = _get_header(headers, b"traceparent")
+            trace_id, span_id = _parse_traceparent(traceparent)
             if trace_id:
                 set_trace_id(trace_id)
             if span_id:
@@ -400,11 +404,11 @@ def _upsert_header(
     return next_headers
 
 
-def _decode_headers(headers: list[tuple[bytes, bytes]]) -> dict[str, str]:
-    return {
-        key.decode("latin1").lower(): value.decode("latin1")
-        for key, value in headers
-    }
+def _get_header(headers: list[tuple[bytes, bytes]], target: bytes) -> str | None:
+    for k, v in headers:
+        if k.lower() == target:
+            return v.decode("latin1")
+    return None
 
 
 def _classify_error(status_code: int, error: Exception | None) -> str:

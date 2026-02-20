@@ -7,6 +7,8 @@ HOST="${HOST:-127.0.0.1}"
 PORT_BASELINE="${PORT_BASELINE:-9001}"
 PORT_OBSERVER="${PORT_OBSERVER:-9002}"
 
+TEST_SUITE="${TEST_SUITE:-basic}"
+
 if ! command -v hey >/dev/null 2>&1; then
   echo "error: 'hey' is required. Install from https://github.com/rakyll/hey"
   exit 1
@@ -17,13 +19,29 @@ if ! command -v uv >/dev/null 2>&1; then
   exit 1
 fi
 
+if [[ "${TEST_SUITE}" == "advanced" ]]; then
+  ENDPOINT="/items"
+  METHOD="POST"
+  DATA='{"name":"BenchmarkItem","description":"A test item for benchmarking","price":42.99,"tags":["test","benchmark"]}'
+  CONTENT_TYPE="application/json"
+  APP_BASELINE="examples.benchmarks.advanced_plain_fastapi:app"
+  APP_OBSERVER="examples.benchmarks.advanced_observer_fastapi:app"
+else
+  ENDPOINT="/ping"
+  METHOD="GET"
+  DATA=""
+  CONTENT_TYPE=""
+  APP_BASELINE="examples.benchmarks.plain_fastapi:app"
+  APP_OBSERVER="examples.benchmarks.observer_fastapi:app"
+fi
+
 run_case() {
   local case_name="$1"
   local app_target="$2"
   local port="$3"
 
   echo ""
-  echo "== ${case_name} =="
+  echo "== ${case_name} (${TEST_SUITE} suite) =="
   uv run uvicorn "${app_target}" --host "${HOST}" --port "${port}" --workers 1 >/tmp/fastapiobserver-benchmark-"${case_name}".log 2>&1 &
   local server_pid=$!
 
@@ -37,7 +55,9 @@ run_case() {
 
   local ready=0
   for _ in $(seq 1 50); do
-    if curl -fsS "http://${HOST}:${port}/ping" >/dev/null 2>&1; then
+    if curl -fsS "http://${HOST}:${port}${ENDPOINT}" \
+      -X "${METHOD}" \
+      ${DATA:+-H "Content-Type: ${CONTENT_TYPE}" -d "${DATA}"} >/dev/null 2>&1; then
       ready=1
       break
     fi
@@ -51,11 +71,15 @@ run_case() {
     exit 1
   fi
 
-  hey -n "${REQUESTS}" -c "${CONCURRENCY}" "http://${HOST}:${port}/ping"
+  if [[ -n "${DATA}" ]]; then
+      hey -n "${REQUESTS}" -c "${CONCURRENCY}" -m "${METHOD}" -T "${CONTENT_TYPE}" -d "${DATA}" "http://${HOST}:${port}${ENDPOINT}"
+  else
+      hey -n "${REQUESTS}" -c "${CONCURRENCY}" "http://${HOST}:${port}${ENDPOINT}"
+  fi
 
   cleanup
   trap - EXIT
 }
 
-run_case "baseline" "examples.benchmarks.plain_fastapi:app" "${PORT_BASELINE}"
-run_case "observer" "examples.benchmarks.observer_fastapi:app" "${PORT_OBSERVER}"
+run_case "baseline" "${APP_BASELINE}" "${PORT_BASELINE}"
+run_case "observer" "${APP_OBSERVER}" "${PORT_OBSERVER}"
