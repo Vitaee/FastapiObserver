@@ -101,3 +101,20 @@ def test_block_policy_times_out_and_drops_newest_when_queue_stays_full() -> None
     assert snapshot.dropped_newest_total == 1
     assert snapshot.blocked_total == 1
     assert snapshot.block_timeout_total == 1
+
+def test_get_log_queue_stats_contract() -> None:
+    from fastapiobserver.logging import get_log_queue_stats
+    from fastapiobserver.logging.queueing import _LOG_QUEUE_TELEMETRY
+
+    # Reset globally
+    _LOG_QUEUE_TELEMETRY.reset(
+        log_queue=queue.Queue(maxsize=42),
+        queue_capacity=42,
+        overflow_policy="drop_oldest"
+    )
+    _LOG_QUEUE_TELEMETRY.record_enqueued()
+
+    stats = get_log_queue_stats()
+    assert stats["queue_capacity"] == 42
+    assert stats["enqueued_total"] == 1
+    assert stats["overflow_policy"] == "drop_oldest"

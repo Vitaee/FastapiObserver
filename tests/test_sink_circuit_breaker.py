@@ -78,3 +78,24 @@ def test_sink_circuit_breaker_half_open_success_closes_breaker() -> None:
     assert snapshot.opens_total == 1
     assert snapshot.half_open_total == 1
     assert snapshot.closes_total == 1
+
+def test_get_sink_circuit_breaker_stats_contract() -> None:
+    from fastapiobserver.logging import get_sink_circuit_breaker_stats, SinkCircuitBreakerHandler
+    import fastapiobserver.logging.state as state
+
+    delegate = _ScriptedHandler([True])
+    breaker = SinkCircuitBreakerHandler(
+        sink_name="test-sink-global",
+        delegate=delegate,
+        failure_threshold=1,
+        recovery_timeout_seconds=5.0,
+    )
+    # mock the global
+    state._SINK_CIRCUIT_BREAKERS = [breaker]
+
+    stats = get_sink_circuit_breaker_stats()
+    assert "test-sink-global" in stats
+    assert stats["test-sink-global"]["state"] == "closed"
+
+    # cleanup
+    state._SINK_CIRCUIT_BREAKERS = []

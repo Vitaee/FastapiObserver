@@ -4,7 +4,6 @@ import json
 import logging
 import time
 
-import fastapiobserver.logging as logging_module
 from fastapiobserver import LOG_SCHEMA_VERSION, ObservabilitySettings, SecurityPolicy
 from fastapiobserver import __version__ as package_version
 from fastapiobserver.logging import StructuredJsonFormatter, setup_logging, shutdown_logging
@@ -120,19 +119,20 @@ def test_structured_formatter_supports_injected_dependencies() -> None:
 def test_setup_logging_is_idempotent_with_force_mode() -> None:
     settings = ObservabilitySettings(app_name="test", service="test", environment="test")
     root = logging.getLogger()
+    import fastapiobserver.logging.state as state
 
     setup_logging(settings, force=True)
     first_count = sum(
         1
         for handler in root.handlers
-        if handler in logging_module._MANAGED_HANDLERS
+        if handler in state._MANAGED_HANDLERS
     )
 
     setup_logging(settings, force=True)
     second_count = sum(
         1
         for handler in root.handlers
-        if handler in logging_module._MANAGED_HANDLERS
+        if handler in state._MANAGED_HANDLERS
     )
 
     assert first_count == 1
@@ -153,23 +153,25 @@ def test_shutdown_logging_stops_queue_listener_and_removes_managed_handlers() ->
     )
 
     root = logging.getLogger()
+    import fastapiobserver.logging.state as state
     managed_count_before = sum(
         1
         for handler in root.handlers
-        if handler in logging_module._MANAGED_HANDLERS
+        if handler in state._MANAGED_HANDLERS
     )
     assert managed_count_before == 1
-    assert logging_module._QUEUE_LISTENER is not None
+    import fastapiobserver.logging.state as state
+    assert state._QUEUE_LISTENER is not None
 
     shutdown_logging()
 
     managed_count_after = sum(
         1
         for handler in root.handlers
-        if handler in logging_module._MANAGED_HANDLERS
+        if handler in state._MANAGED_HANDLERS
     )
     assert managed_count_after == 0
-    assert logging_module._QUEUE_LISTENER is None
+    assert state._QUEUE_LISTENER is None
 
 
 def test_setup_logging_applies_registered_log_filters() -> None:
@@ -260,7 +262,7 @@ def test_error_fingerprint_is_stable_across_transient_noise() -> None:
             # The line number and this arbitrary noise will be stripped by the fingerprinter
             raise ValueError(f"Some business logic failed {noise}")
         except ValueError as e:
-            # We purposely monkeypatch the exception string to inject fake memory addresses 
+            # We purposely monkeypatch the exception string to inject fake memory addresses
             # to simulate two different object lifetimes.
             fake_tb = f'File "app.py", line 42, in <module>\n  <MyObject object at {noise}>'
             exc_info = (e.__class__, e, e.__traceback__)
@@ -272,17 +274,36 @@ def test_error_fingerprint_is_stable_across_transient_noise() -> None:
             class MockFormatter(StructuredJsonFormatter):
                 def formatException(self, exc_info):
                     return fake_tb
-            
+
             mock_formatter = MockFormatter(settings)
-            
+
             payload = json.loads(mock_formatter.format(record))
             return payload["error"]["fingerprint"]
 
-    # Even though the simulated memory addresses differ completely, the fingerprint 
+    # Even though the simulated memory addresses differ completely, the fingerprint
     # must remain identical since it's the same error type and file location.
     fingerprint_a = _simulated_error("0x10a2b3c4d")
     fingerprint_b = _simulated_error("0x7f8e9d0c1b2a")
-    
+
     assert fingerprint_a == fingerprint_b
     assert isinstance(fingerprint_a, str)
     assert len(fingerprint_a) == 32  # MD5 hex length
+
+def test_request_id_filter_standalone() -> None:
+    from fastapiobserver.logging import RequestIdFilter
+    f = RequestIdFilter()
+    record = logging.LogRecord("test", logging.INFO, "", 0, "msg", (), None)
+    set_request_id("filter-req-1")
+    f.filter(record)
+    assert getattr(record, "request_id", None) == "filter-req-1"
+    clear_request_id()
+
+def test_trace_context_filter_standalone() -> None:
+    from fastapiobserver.logging import TraceContextFilter
+    f = TraceContextFilter()
+    record = logging.LogRecord("test", logging.INFO, "", 0, "msg", (), None)
+
+    # We just ensure it doesn't crash when OTel is not present or no active span
+    f.filter(record)
+    # trace_id/span_id should not be set if there is no context
+    assert not hasattr(record, "trace_id")
