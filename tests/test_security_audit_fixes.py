@@ -145,7 +145,9 @@ def test_ip_resolver_warns_when_forwarded_headers_enabled(caplog: pytest.LogCapt
     )
 
 
-def test_ip_resolver_no_warning_when_forwarded_headers_disabled(caplog: pytest.LogCaptureFixture) -> None:
+def test_ip_resolver_no_warning_when_forwarded_headers_disabled(
+        caplog: pytest.LogCaptureFixture
+    ) -> None:
     from fastapiobserver.middleware.ip import _IpResolver
     from fastapiobserver.security import TrustedProxyPolicy
 

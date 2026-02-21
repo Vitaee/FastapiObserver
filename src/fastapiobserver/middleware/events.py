@@ -86,4 +86,5 @@ def _extract_route_template(scope: Scope, raw_path: str) -> str:
             return template
     return raw_path
 
-__all__ = ["_RequestEventBuilder", "_classify_error", "_extract_route_template", "_sanitize_exception_message"]
+__all__ = ["_RequestEventBuilder", "_classify_error", "_extract_route_template", 
+           "_sanitize_exception_message"]
