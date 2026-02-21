@@ -3,8 +3,9 @@ from __future__ import annotations
 import logging
 import weakref
 import typing
+from collections.abc import Sequence
 from contextlib import asynccontextmanager
-from typing import Literal
+from typing import Any, Literal
 
 from fastapi import FastAPI
 
@@ -42,6 +43,9 @@ def install_observability(
     otel_metrics_settings: OTelMetricsSettings | None = None,
     runtime_control_settings: RuntimeControlSettings | None = None,
     audit_key_provider: object | None = None,
+    db_engine: Any | Sequence[Any] | None = None,
+    db_commenter_enabled: bool = True,
+    db_commenter_options: dict[str, bool] | None = None,
 ) -> None:
     """One-call entry point that wires up all observability subsystems.
 
@@ -107,6 +111,31 @@ def install_observability(
     # --- 4. OTel tracing ---
     if otel_settings and otel_settings.enabled:
         install_otel(app, settings, otel_settings)
+
+    # --- 4b. Database tracing + SQLCommenter ---
+    if db_engine is not None and otel_settings and otel_settings.enabled:
+        from .db_tracing import (
+            instrument_sqlalchemy,
+            instrument_sqlalchemy_async,
+        )
+
+        # Normalize to a list so users can pass a single engine or many.
+        engines = (
+            db_engine if isinstance(db_engine, Sequence) else [db_engine]
+        )
+        for engine in engines:
+            if hasattr(engine, "sync_engine"):
+                instrument_sqlalchemy_async(
+                    engine,
+                    enable_commenter=db_commenter_enabled,
+                    commenter_options=db_commenter_options,
+                )
+            else:
+                instrument_sqlalchemy(
+                    engine,
+                    enable_commenter=db_commenter_enabled,
+                    commenter_options=db_commenter_options,
+                )
 
     # --- 5. OTel metrics ---
     if otel_metrics_settings and otel_metrics_settings.enabled:
@@ -174,6 +203,10 @@ def _register_logging_shutdown_hook(app: FastAPI) -> None:
         else:
             yield {}
         shutdown_logging()
+        # Clean up OTel SQLAlchemy event listeners (safe no-op if not installed).
+        from .db_tracing import uninstrument_sqlalchemy
+
+        uninstrument_sqlalchemy()
 
     app.router.lifespan_context = observability_lifespan
     _REGISTERED_APPS.add(app)

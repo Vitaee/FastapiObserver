@@ -8,6 +8,11 @@ from .audit import (
 )
 from .config import ObservabilitySettings
 from .control_plane import RuntimeControlSettings, mount_control_plane
+from .db_tracing import (
+    instrument_sqlalchemy,
+    instrument_sqlalchemy_async,
+    uninstrument_sqlalchemy,
+)
 from .fastapi import install_observability
 from .logging import (
     LOG_SCHEMA_VERSION,
@@ -178,4 +183,8 @@ __all__ = [
     "AuditVerificationResult",
     "LocalHMACProvider",
     "verify_audit_chain",
+    # Database tracing
+    "instrument_sqlalchemy",
+    "instrument_sqlalchemy_async",
+    "uninstrument_sqlalchemy",
 ]

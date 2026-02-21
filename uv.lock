@@ -465,6 +465,7 @@ all = [
     { name = "opentelemetry-instrumentation-httpx" },
     { name = "opentelemetry-instrumentation-logging" },
     { name = "opentelemetry-instrumentation-requests" },
+    { name = "opentelemetry-instrumentation-sqlalchemy" },
     { name = "opentelemetry-sdk" },
     { name = "orjson" },
     { name = "prometheus-client" },
@@ -502,6 +503,9 @@ otel-httpx = [
 otel-requests = [
     { name = "opentelemetry-instrumentation-requests" },
 ]
+otel-sqlalchemy = [
+    { name = "opentelemetry-instrumentation-sqlalchemy" },
+]
 prometheus = [
     { name = "prometheus-client" },
 ]
@@ -529,6 +533,8 @@ requires-dist = [
     { name = "opentelemetry-instrumentation-logging", marker = "extra == 'otel'", specifier = ">=0.60b1" },
     { name = "opentelemetry-instrumentation-requests", marker = "extra == 'all'", specifier = ">=0.60b1" },
     { name = "opentelemetry-instrumentation-requests", marker = "extra == 'otel-requests'", specifier = ">=0.60b1" },
+    { name = "opentelemetry-instrumentation-sqlalchemy", marker = "extra == 'all'", specifier = ">=0.60b1" },
+    { name = "opentelemetry-instrumentation-sqlalchemy", marker = "extra == 'otel-sqlalchemy'", specifier = ">=0.60b1" },
     { name = "opentelemetry-sdk", marker = "extra == 'all'", specifier = ">=1.39.1" },
     { name = "opentelemetry-sdk", marker = "extra == 'otel'", specifier = ">=1.39.1" },
     { name = "orjson", marker = "extra == 'all'", specifier = ">=3.11.7" },
@@ -543,7 +549,7 @@ requires-dist = [
     { name = "starlette", specifier = ">=0.52.1" },
     { name = "uvicorn", marker = "extra == 'dev'", specifier = ">=0.30.0" },
 ]
-provides-extras = ["fast-json", "prometheus", "loguru", "otel", "otel-httpx", "otel-requests", "audit", "all", "dev"]
+provides-extras = ["fast-json", "prometheus", "loguru", "otel", "otel-httpx", "otel-requests", "audit", "otel-sqlalchemy", "all", "dev"]
 
 [[package]]
 name = "filelock"
@@ -1307,6 +1313,22 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/9d/4a/bb9d47d7424fc33aeba75275256ae6e6031f44b6a9a3f778d611c0c3ac27/opentelemetry_instrumentation_requests-0.60b1.tar.gz", hash = "sha256:9a1063c16c44a3ba6e81870c4fa42a0fac3ecef5a4d60a11d0976eec9046f3d4", size = 16366, upload-time = "2025-12-11T13:37:12.456Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/f2/7f/969b59a5acccb4c35317421843d63d7853ad7a18078ca3a9b80c248be448/opentelemetry_instrumentation_requests-0.60b1-py3-none-any.whl", hash = "sha256:eec9fac3fab84737f663a2e08b12cb095b4bd67643b24587a8ecfa3cf4d0ca4c", size = 13141, upload-time = "2025-12-11T13:36:23.696Z" },
+]
+
+[[package]]
+name = "opentelemetry-instrumentation-sqlalchemy"
+version = "0.60b1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "opentelemetry-api" },
+    { name = "opentelemetry-instrumentation" },
+    { name = "opentelemetry-semantic-conventions" },
+    { name = "packaging" },
+    { name = "wrapt" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/92/16/6a4cbff1b7cd86d1e58ffd100255f6da781a88f4a2affdcc3721880191c9/opentelemetry_instrumentation_sqlalchemy-0.60b1.tar.gz", hash = "sha256:b614e874a7c0a692838a0da613d1654e81a0612867836a1f0765e40e9c8cc49b", size = 15317, upload-time = "2025-12-11T13:37:13.089Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/d0/b7/2234bc761c197c7f099f30cad5d50efd8286c59b5b8f45cfd6ba6ebe7d5e/opentelemetry_instrumentation_sqlalchemy-0.60b1-py3-none-any.whl", hash = "sha256:486a5f264d264c44e07e0320e33fd19d09cecd2fd4b99c1064046e77a27d9f9f", size = 14529, upload-time = "2025-12-11T13:36:24.964Z" },
 ]
 
 [[package]]

@@ -575,6 +575,8 @@ The `examples/` directory contains runnable demos:
 | [`security_presets_app.py`](examples/security_presets_app.py) | Preset-based security policy |
 | [`allowlist_app.py`](examples/allowlist_app.py) | Allowlist-only sanitization |
 | [`otel_app.py`](examples/otel_app.py) | OTel tracing and resource attributes |
+| [`audit_app.py`](examples/audit_app.py) | Tamper-evident cryptographic log signatures |
+| [`db_tracing_app.py`](examples/db_tracing_app.py) | SQLCommenter and database trace injection |
 | [`graphql_app.py`](examples/graphql_app.py) | Native Strawberry GraphQL observability |
 | [`benchmarks/`](examples/benchmarks/) | Baseline vs observer benchmark harness |
 | [`k8s/`](examples/k8s/) | Kubernetes-native stack with Prometheus + Loki + Tempo + Grafana |
@@ -748,6 +750,68 @@ export OBS_AUDIT_SECRET_KEY="your-signing-secret"
 python scripts/verify_audit_chain.py exported_logs.ndjson
 # PASS — 1042 records verified, chain intact.
 ```
+
+### SQLCommenter & database tracing
+
+Bridges the gap between FastAPI application traces and database performance monitoring. When enabled, the `trace_id` is automatically injected into raw SQL queries as a comment:
+
+```sql
+SELECT * FROM users /*traceparent='00-abc123def456-01',route='/api/users'*/
+```
+
+This lets DBAs correlate slow Postgres/MySQL queries directly back to the originating HTTP request.
+
+```bash
+pip install "fastapi-observer[otel-sqlalchemy]"
+```
+
+**Automatic** (via `install_observability`):
+
+```python
+from sqlalchemy import create_engine
+
+engine = create_engine("postgresql://...")
+install_observability(app, settings, otel_settings=otel_settings, db_engine=engine)
+```
+
+Multiple engines (e.g. read/write replicas):
+
+```python
+write_engine = create_engine("postgresql://primary/...")
+read_engine = create_engine("postgresql://replica/...")
+install_observability(
+    app, settings,
+    otel_settings=otel_settings,
+    db_engine=[write_engine, read_engine],
+    db_commenter_options={"opentelemetry_values": True, "route": False},
+)
+```
+
+**Manual** (standalone):
+
+```python
+from fastapiobserver import instrument_sqlalchemy, instrument_sqlalchemy_async
+
+# Sync engine
+instrument_sqlalchemy(engine)
+
+# Async engine (extracts .sync_engine automatically)
+instrument_sqlalchemy_async(async_engine)
+```
+
+Custom commenter options:
+
+```python
+instrument_sqlalchemy(engine, commenter_options={
+    "opentelemetry_values": True,  # traceparent (default: True)
+    "db_driver": True,              # e.g. psycopg2 (default: True)
+    "route": True,                  # e.g. /api/users (default: True)
+    "db_framework": True,           # e.g. sqlalchemy (default: False)
+})
+```
+
+> [!CAUTION]
+> **Database statement PII risk:** The OpenTelemetry SQLAlchemy instrumentor captures raw SQL as the `db.statement` span attribute and exports it directly to your tracing backend (Jaeger, Tempo, Datadog). These span attributes are **not** scrubbed by `fastapi-observer`'s `SecurityPolicy`. If your application has poorly parameterized queries (e.g. `WHERE email = 'user@example.com'`), PII will leak into your trace storage. Always use parameterized queries and review your `db.statement` exports in production.
 
 ---
 
