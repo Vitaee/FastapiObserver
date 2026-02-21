@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-02-21
+
+### Added
+- Stable `1.0.0` release milestone with the existing extension surfaces (`LogSink`, log filters, and pluggable metrics backends) promoted for long-term use.
+
+### Changed
+- Promoted package metadata classifier from alpha to `Production/Stable`.
+- Consolidated the hardened `0.4.x` line into the first stable contract, including package modularization, lock-safe sink registry/discovery behavior, and runtime control token rotation handling.
+
 ## [0.4.1] - 2026-02-21
 
 ### Fixed

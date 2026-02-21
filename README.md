@@ -983,10 +983,11 @@ Reproducible benchmark harness and methodology:
 
 - `0.1.x`: secure-by-default core
 - `0.2.x`: OTel interoperability, security presets, allowlists
-- `0.3.x`: package modularization, sink/metrics hardening, and performance reliability updates
-- `1.0.0`: dynamic runtime controls and plugin stability
+- `0.3.x`: GraphQL observability, error fingerprinting, and Logtail DLQ durability
+- `0.4.x`: package modularization, sink/registry hardening, and runtime control token rotation
+- `1.0.0`: first stable release contract for production deployments
 
-Current release version: `0.4.1`
+Current release version: `1.0.0`
 
 ## Changelog Policy
 
@@ -995,6 +996,12 @@ Breaking changes must be listed under a `Breaking Changes` section in `CHANGELOG
 ---
 
 ## Packaging and Publishing (Maintainers)
+
+Recommended release command (uses `.env` with `PYPI_TOKEN`):
+
+```bash
+scripts/deploy_pypi.sh --tag v1.0.0 --push-tag
+```
 
 ### 1) Build distributions
 

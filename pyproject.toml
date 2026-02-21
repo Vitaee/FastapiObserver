@@ -12,7 +12,7 @@ authors = [
     { name = "Vitaee", email = "opensource@vitaee.dev" },
 ]
 classifiers = [
-    "Development Status :: 3 - Alpha",
+    "Development Status :: 5 - Production/Stable",
     "Intended Audience :: Developers",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
