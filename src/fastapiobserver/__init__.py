@@ -1,6 +1,18 @@
 from ._version import __version__
+from .audit import (
+    AuditChainFormatter,
+    AuditKeyProvider,
+    AuditVerificationResult,
+    LocalHMACProvider,
+    verify_audit_chain,
+)
 from .config import ObservabilitySettings
 from .control_plane import RuntimeControlSettings, mount_control_plane
+from .db_tracing import (
+    instrument_sqlalchemy,
+    instrument_sqlalchemy_async,
+    uninstrument_sqlalchemy,
+)
 from .fastapi import install_observability
 from .logging import (
     LOG_SCHEMA_VERSION,
@@ -165,4 +177,14 @@ __all__ = [
     "set_user_context",
     # Version
     "__version__",
+    # Audit
+    "AuditChainFormatter",
+    "AuditKeyProvider",
+    "AuditVerificationResult",
+    "LocalHMACProvider",
+    "verify_audit_chain",
+    # Database tracing
+    "instrument_sqlalchemy",
+    "instrument_sqlalchemy_async",
+    "uninstrument_sqlalchemy",
 ]

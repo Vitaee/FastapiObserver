@@ -4,7 +4,7 @@ import atexit
 import logging
 import logging.handlers
 import queue
-from typing import Literal
+from typing import Literal, cast
 
 from ..config import ObservabilitySettings
 from ..security import SecurityPolicy
@@ -88,6 +88,7 @@ def setup_logging(
     security_policy: SecurityPolicy | None = None,
     logs_mode: Literal["local_json", "otlp", "both"] = "local_json",
     extra_handlers: list[logging.Handler] | None = None,
+    audit_key_provider: object | None = None,
 ) -> None:
     """Configure the root logger with structured JSON output."""
     import fastapiobserver.logging.state as state
@@ -121,9 +122,21 @@ def setup_logging(
             overflow_policy=settings.log_queue_overflow_policy,
         )
 
-        formatter = StructuredJsonFormatter(
+        formatter: logging.Formatter = StructuredJsonFormatter(
             settings=settings, security_policy=security_policy
         )
+
+        # Wrap with tamper-evident audit chain if enabled.
+        if settings.audit_logging_enabled:
+            from ..audit import AuditChainFormatter, AuditKeyProvider, LocalHMACProvider
+
+            provider = audit_key_provider or LocalHMACProvider(
+                env_var=settings.audit_key_env_var,
+            )
+            formatter = AuditChainFormatter(
+                delegate=formatter, key_provider=cast(AuditKeyProvider, provider),
+            )
+
         root_logger.setLevel(settings.log_level.upper())
 
         # Build output handlers based on logs_mode
