@@ -986,7 +986,7 @@ Reproducible benchmark harness and methodology:
 - `0.3.x`: package modularization, sink/metrics hardening, and performance reliability updates
 - `1.0.0`: dynamic runtime controls and plugin stability
 
-Current release version: `0.4.0`
+Current release version: `0.4.1`
 
 ## Changelog Policy
 

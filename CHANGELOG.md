@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-02-21
+
+### Fixed
+- Patch release cut for new PyPI artifacts (0.4.0 artifacts are immutable once published).
+
 ## [0.4.0] - 2026-02-21
 
 ### Added
