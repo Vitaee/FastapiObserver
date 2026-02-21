@@ -9,11 +9,12 @@ Run this:
     uvicorn examples.audit_app:app --reload
 
 What happens under the hood:
-    Every structured JSON log exported by this application will include an HMAC-SHA256 signature chain.
+    Every structured JSON log exported by this application will include an HMAC-SHA256 signature
+    chain.
     - `_audit_seq`: Increments monotonically for every log emitted.
     - `_audit_stream`: A unique ID denoting this exact application instance's stream.
-    - `_audit_sig`: A cryptographically secure signature binding the current record, 
-                    the sequence number, the stream ID, and the signature of the previous record.
+    - `_audit_sig`: A cryptographically secure signature binding the current record, the sequence
+                    number, the stream ID, and the signature of the previous record.
 
 You can verify the output stream using the included verification tool:
     python scripts/verify_audit_chain.py path/to/logs.ndjson
