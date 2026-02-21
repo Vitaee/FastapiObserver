@@ -1092,9 +1092,10 @@ Reproducible benchmark harness and methodology:
 - `0.2.x`: OTel interoperability, security presets, allowlists
 - `0.3.x`: GraphQL observability, error fingerprinting, and Logtail DLQ durability
 - `0.4.x`: package modularization, sink/registry hardening, and runtime control token rotation
-- `1.0.0`: first stable release contract for production deployments
+- `1.0.x`: first stable release contract for production deployments
+- `1.2.0`: tamper-evident audit logging and SQLAlchemy trace/commenter integration
 
-Current release version: `1.0.0`
+Current release version: `1.2.0`
 
 ## Changelog Policy
 
@@ -1107,7 +1108,7 @@ Breaking changes must be listed under a `Breaking Changes` section in `CHANGELOG
 Recommended release command (uses `.env` with `PYPI_TOKEN`):
 
 ```bash
-scripts/deploy_pypi.sh --tag v1.0.0 --push-tag
+scripts/deploy_pypi.sh --tag v1.2.0 --push-tag
 ```
 
 ### 1) Build distributions

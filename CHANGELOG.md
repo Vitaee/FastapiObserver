@@ -4,6 +4,23 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-02-21
+
+### Added
+- Tamper-evident audit logging support with hash-chain formatter, pluggable key providers, and verification helpers under `fastapiobserver.audit`.
+- SQLAlchemy tracing helpers with optional SQLCommenter enrichment via `fastapiobserver.db_tracing` for sync and async engines.
+- New optional dependency groups:
+  - `fastapi-observer[audit]` for local HMAC audit-chain signing.
+  - `fastapi-observer[otel-sqlalchemy]` for SQLAlchemy OpenTelemetry instrumentation.
+- New runnable examples and utilities:
+  - `examples/audit_app.py`
+  - `examples/db_tracing_app.py`
+  - `scripts/verify_audit_chain.py`
+
+### Changed
+- `install_observability()` now accepts `audit_key_provider`, `db_engine`, `db_commenter_enabled`, and `db_commenter_options` for one-call audit + DB tracing setup.
+- `all` extra now includes both `cryptography` and SQLAlchemy OTel instrumentation dependencies.
+
 ## [1.0.0] - 2026-02-21
 
 ### Added
