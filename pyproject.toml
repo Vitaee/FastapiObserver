@@ -65,6 +65,9 @@ otel-httpx = [
 otel-requests = [
     "opentelemetry-instrumentation-requests>=0.60b1",
 ]
+audit = [
+    "cryptography>=46.0.5",
+]
 all = [
     "orjson>=3.11.7",
     "prometheus-client>=0.24.1",
@@ -76,6 +79,7 @@ all = [
     "opentelemetry-instrumentation-logging>=0.60b1",
     "opentelemetry-instrumentation-httpx>=0.60b1",
     "opentelemetry-instrumentation-requests>=0.60b1",
+    "cryptography>=46.0.5",
 ]
 dev = [
     "httpx>=0.28.1",

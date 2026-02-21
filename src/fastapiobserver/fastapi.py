@@ -41,6 +41,7 @@ def install_observability(
     otel_logs_settings: OTelLogsSettings | None = None,
     otel_metrics_settings: OTelMetricsSettings | None = None,
     runtime_control_settings: RuntimeControlSettings | None = None,
+    audit_key_provider: object | None = None,
 ) -> None:
     """One-call entry point that wires up all observability subsystems.
 
@@ -80,6 +81,7 @@ def install_observability(
         security_policy=security_policy,
         logs_mode=logs_mode,
         extra_handlers=extra_handlers,
+        audit_key_provider=audit_key_provider,
     )
     _register_logging_shutdown_hook(app)
 

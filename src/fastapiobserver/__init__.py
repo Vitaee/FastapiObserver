@@ -1,4 +1,11 @@
 from ._version import __version__
+from .audit import (
+    AuditChainFormatter,
+    AuditKeyProvider,
+    AuditVerificationResult,
+    LocalHMACProvider,
+    verify_audit_chain,
+)
 from .config import ObservabilitySettings
 from .control_plane import RuntimeControlSettings, mount_control_plane
 from .fastapi import install_observability
@@ -165,4 +172,10 @@ __all__ = [
     "set_user_context",
     # Version
     "__version__",
+    # Audit
+    "AuditChainFormatter",
+    "AuditKeyProvider",
+    "AuditVerificationResult",
+    "LocalHMACProvider",
+    "verify_audit_chain",
 ]

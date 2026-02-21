@@ -125,6 +125,14 @@ class ObservabilitySettings(BaseSettings):
         default=True, validation_alias="LOGTAIL_DLQ_COMPRESS"
     )
 
+    # --- tamper-evident audit logging ---
+    audit_logging_enabled: bool = Field(
+        default=False, validation_alias="OBS_AUDIT_LOGGING_ENABLED"
+    )
+    audit_key_env_var: str = Field(
+        default="OBS_AUDIT_SECRET_KEY", validation_alias="OBS_AUDIT_KEY_ENV_VAR"
+    )
+
     # ---------- validators ----------
 
     @field_validator("log_level")
