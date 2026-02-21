@@ -4,6 +4,20 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-02-21
+
+### Added
+- README contributor map documenting the new internal package layout (`logging/`, `middleware/`, `sinks/`, `metrics/`, `security/`, `otel/`).
+
+### Changed
+- Split monolithic modules into focused subpackages for logging, middleware, sinks, metrics, and security while preserving public imports through package facades.
+- Metrics builder now uses registry accessors instead of importing registry private state directly.
+- Sink registry operations are now lock-protected and factory assembly now reads from registry snapshots.
+- Sink discovery now uses lock-protected double-checked initialization for thread-safe entry-point discovery.
+- Logtail handler now accounts for high-contention requeue drops and routes those dropped records to DLQ when enabled.
+- Logtail DLQ now exposes `get_stats()` to avoid direct private-state access from handler code.
+- Runtime control-plane token authorization now re-reads the configured token env var on each request to support token rotation.
+
 ## [0.3.2] - 2026-02-20
 
 ### Added

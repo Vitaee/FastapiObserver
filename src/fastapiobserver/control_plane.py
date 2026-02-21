@@ -72,7 +72,13 @@ def mount_control_plane(app: FastAPI, settings: RuntimeControlSettings) -> None:
     def authorize(
         authorization: Annotated[str | None, Header()] = None,
     ) -> None:
-        expected = f"Bearer {token}"
+        current_token = os.getenv(settings.token_env_var)
+        if not current_token:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Unauthorized",
+            )
+        expected = f"Bearer {current_token}"
         if not authorization or not secrets.compare_digest(authorization, expected):
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,

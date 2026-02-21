@@ -322,6 +322,19 @@ Request arrives
   -> context cleared
 ```
 
+### Internal Package Layout (Contributor Map)
+
+The project is now organized as focused subpackages instead of large monolithic modules:
+
+- `fastapiobserver/logging/`: formatter, queueing, filters, setup lifecycle, sink circuit-breakers.
+- `fastapiobserver/middleware/`: request logging orchestration, context, IP resolution, headers, body capture, metrics hooks.
+- `fastapiobserver/sinks/`: sink protocol, registry/discovery, built-ins, factory wiring, Logtail + DLQ implementation.
+- `fastapiobserver/metrics/`: backend contracts/registry/builder/endpoint, Prometheus integration subpackage.
+- `fastapiobserver/security/`: policy/settings models, normalization helpers, redaction engine, trusted-proxy utilities.
+- `fastapiobserver/otel/`: OTel settings/resource/tracing/logs/metrics/lifecycle helpers.
+
+Public imports remain backward-compatible via package facades (`__init__.py` re-exports).
+
 ---
 
 ## Example JSON Log Event
@@ -967,9 +980,10 @@ Reproducible benchmark harness and methodology:
 
 - `0.1.x`: secure-by-default core
 - `0.2.x`: OTel interoperability, security presets, allowlists
+- `0.3.x`: package modularization, sink/metrics hardening, and performance reliability updates
 - `1.0.0`: dynamic runtime controls and plugin stability
 
-Current release version: `0.3.1`
+Current release version: `0.4.0`
 
 ## Changelog Policy
 
@@ -1024,4 +1038,4 @@ The pre-push hook runs:
 
 ## Roadmap Tracking
 
-See [NEXT_STEPS.md](NEXT_STEPS.md) for the active `0.2.0` roadmap and release checklist.
+See [NEXT_STEPS.md](NEXT_STEPS.md) for the active roadmap and release checklist.

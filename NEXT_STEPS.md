@@ -1,6 +1,6 @@
-# Next Steps (v0.2.0.dev1+)
+# Next Steps
 
-This file tracks what is completed and what remains before stable `0.2.x`.
+This file tracks what is completed and what remains for upcoming releases.
 
 ## Completed
 
@@ -48,4 +48,4 @@ This file tracks what is completed and what remains before stable `0.2.x`.
   - schema compatibility check
   - test matrix green
   - SBOM generated
-- [ ] Publish and validate `0.2.0.dev1` on TestPyPI, then cut stable `0.2.x`.
+- [ ] Publish and validate the next release candidate on TestPyPI, then cut the next stable release.

@@ -28,10 +28,15 @@ def get_registered_metrics_backends() -> dict[str, MetricsBackendFactory]:
     with _METRICS_BACKEND_LOCK:
         return dict(_METRICS_BACKEND_FACTORIES)
 
+
+def get_metrics_backend_factory(name: str) -> MetricsBackendFactory | None:
+    normalized_name = name.strip().lower()
+    with _METRICS_BACKEND_LOCK:
+        return _METRICS_BACKEND_FACTORIES.get(normalized_name)
+
 __all__ = [
     "register_metrics_backend",
     "unregister_metrics_backend",
     "get_registered_metrics_backends",
-    "_METRICS_BACKEND_FACTORIES",
-    "_METRICS_BACKEND_LOCK",
+    "get_metrics_backend_factory",
 ]

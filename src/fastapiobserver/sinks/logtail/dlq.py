@@ -111,6 +111,15 @@ class LogtailDLQ:
             except Exception:
                 self.write_failures_total += 1
 
+    def get_stats(self) -> dict[str, int]:
+        with self._lock:
+            return {
+                "written_overflow": self.written_overflow,
+                "written_failed": self.written_failed,
+                "failures": self.write_failures_total,
+                "bytes": self.bytes_total,
+            }
+
     def close(self) -> None:
         with self._lock:
             try:

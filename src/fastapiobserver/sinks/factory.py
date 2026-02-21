@@ -9,7 +9,7 @@ if TYPE_CHECKING:
 from .builtin import RotatingFileSink, StdoutSink
 from .discovery import discover_entry_point_sinks
 from .logtail.sink import LogtailSink
-from .registry import _SINK_REGISTRY
+from .registry import get_registered_sinks
 
 _LOGGER = logging.getLogger("fastapiobserver.sinks")
 
@@ -55,7 +55,7 @@ def build_sink_handlers(
 
     # Add entry-point discovered sinks
     discover_entry_point_sinks()
-    for sink in _SINK_REGISTRY.values():
+    for sink in get_registered_sinks().values():
         try:
             handlers.append((sink.create_handler(formatter), sink.name))
         except Exception:

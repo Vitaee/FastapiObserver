@@ -97,7 +97,11 @@ class _LogtailHandler(logging.Handler):
                 try:
                     self._queue.put_nowait(formatted)
                 except queue.Full:
-                    pass
+                    # Catch highly-contentious race where it filled up again instantly.
+                    with self._count_lock:
+                        self._drop_count += 1
+                    if self._dlq:
+                        self._dlq.submit(formatted, reason="queue_overflow")
         except Exception:
             self.handleError(record)
 
@@ -190,13 +194,7 @@ class _LogtailHandler(logging.Handler):
     def dlq_stats(self) -> dict[str, int]:
         if not self._dlq:
             return {"written_overflow": 0, "written_failed": 0, "failures": 0, "bytes": 0}
-        with self._dlq._lock:
-            return {
-                "written_overflow": self._dlq.written_overflow,
-                "written_failed": self._dlq.written_failed,
-                "failures": self._dlq.write_failures_total,
-                "bytes": self._dlq.bytes_total,
-            }
+        return self._dlq.get_stats()
 
     def close(self) -> None:
         self._shutdown_flush()
