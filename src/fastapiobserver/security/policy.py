@@ -57,6 +57,7 @@ GDPR_REDACTED_FIELDS = (
     "date-of-birth",
     "ssn",
     "ip-address",
+    "client-ip",
     "first-name",
     "last-name",
     "full-name",

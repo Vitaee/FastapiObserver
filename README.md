@@ -634,6 +634,9 @@ The library supports configuration from code and env vars. Below are the most re
 | `METRICS_EXEMPLARS_ENABLED` | `false` | Enable exemplars where supported |
 | `METRICS_FORMAT` | `negotiate` | `prometheus`, `openmetrics`, or `negotiate` |
 
+> [!CAUTION]
+> The `/metrics` endpoint is **unauthenticated by default**. In production it should be restricted to internal networks (e.g. behind a Kubernetes `NetworkPolicy`, VPC security group, or ingress rule that only allows your Prometheus scraper). Exposing it publicly leaks service topology, error rates, and request patterns.
+
 ### Security and trust boundary
 
 | Variable | Default | Description |
@@ -971,8 +974,8 @@ Repository integration tests include:
 
 Reproducible benchmark harness and methodology:
 - Guide: [`benchmarks.md`](benchmarks.md)
-- Apps: `examples/benchmarks/plain_fastapi.py` and `examples/benchmarks/observer_fastapi.py`
-- Runner: `examples/benchmarks/run_local_benchmark.sh`
+- Apps: `examples/benchmarks/app.py`
+- Runner: `examples/benchmarks/harness.py`
 
 ---
 

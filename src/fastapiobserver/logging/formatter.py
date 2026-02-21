@@ -145,7 +145,7 @@ def _build_structured_error(
 def _generate_error_fingerprint(error_type: str, stacktrace: str) -> str:
     """Hash stack trace after stripping out environment-specific noise."""
     if not stacktrace:
-        return hashlib.md5(error_type.encode("utf-8")).hexdigest()
+        return hashlib.sha256(error_type.encode("utf-8")).hexdigest()[:32]
 
     # Strip hexadecimal memory addresses
     sanitized = re.sub(r"0x[0-9a-fA-F]+", "0x<ptr>", stacktrace)
@@ -154,4 +154,4 @@ def _generate_error_fingerprint(error_type: str, stacktrace: str) -> str:
     
     # Combine error type and sanitized trace to ensure distinct groupings
     payload = f"{error_type}:{sanitized}"
-    return hashlib.md5(payload.encode("utf-8")).hexdigest()
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:32]

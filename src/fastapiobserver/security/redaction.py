@@ -4,6 +4,8 @@ from typing import Any, Mapping
 from .normalize import _normalize_key, _normalize_media_type
 from .policy import _DROP, SecurityPolicy
 
+MAX_SANITIZE_DEPTH = 32
+
 
 def _redact_value(value: Any, policy: SecurityPolicy) -> Any:
     if policy.redaction_mode == "drop":
@@ -49,6 +51,8 @@ def _sanitize_mapping(
     header_allowlist: set[str] | None,
     event_key_allowlist: set[str] | None,
 ) -> dict[str, Any]:
+    if depth > MAX_SANITIZE_DEPTH:
+        return dict(data)
     out: dict[str, Any] = {}
     for key, value in data.items():
         normalized_key = _normalize_key(str(key))

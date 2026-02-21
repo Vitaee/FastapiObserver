@@ -1,0 +1,15 @@
+global:
+  scrape_interval: 5s
+
+scrape_configs:
+  - job_name: 'hard_way_api'
+    static_configs:
+      - targets: 
+          - 'host.docker.internal:8001' # For Docker Desktop (Mac/Win)
+          - '127.0.0.1:8001'            # For host networking
+
+  - job_name: 'easy_way_api'
+    static_configs:
+      - targets: 
+          - 'host.docker.internal:8002' # For Docker Desktop (Mac/Win)
+          - '127.0.0.1:8002'            # For host networking

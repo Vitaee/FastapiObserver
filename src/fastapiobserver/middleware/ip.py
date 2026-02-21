@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+
 from starlette.types import Scope
 
 from ..security import (
@@ -7,6 +9,8 @@ from ..security import (
     is_trusted_client_ip,
     resolve_client_ip,
 )
+
+_LOGGER = logging.getLogger("fastapiobserver.security")
 
 
 def _extract_scope_client_ip(scope: Scope) -> str | None:
@@ -22,6 +26,19 @@ def _extract_scope_client_ip(scope: Scope) -> str | None:
 class _IpResolver:
     def __init__(self, policy: TrustedProxyPolicy) -> None:
         self.policy = policy
+        if policy.honor_forwarded_headers:
+            _LOGGER.warning(
+                "security.forwarded_headers.enabled",
+                extra={
+                    "event": {
+                        "message": (
+                            "X-Forwarded-For trust is enabled. "
+                            "Ensure trusted_cidrs is locked to your proxy IPs only."
+                        ),
+                    },
+                    "_skip_enrichers": True,
+                },
+            )
 
     def resolve(
         self,

@@ -1,10 +1,18 @@
 from __future__ import annotations
 
+import re
 from typing import Any
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.types import Scope
 
 from ..security import SecurityPolicy, sanitize_event
+
+_CREDENTIAL_RE = re.compile(r"://[^:]+:[^@]+@")
+
+
+def _sanitize_exception_message(msg: str, *, max_length: int = 512) -> str:
+    """Strip credential patterns (e.g. ``://user:pass@``) from exception text."""
+    return _CREDENTIAL_RE.sub("://***:***@", msg)[:max_length]
 
 class _RequestEventBuilder:
     def __init__(self, policy: SecurityPolicy) -> None:
@@ -41,7 +49,7 @@ class _RequestEventBuilder:
             event["response_body"] = response_body
         if exception is not None:
             event["exception_class"] = exception.__class__.__name__
-            event["exception_message"] = str(exception)
+            event["exception_message"] = _sanitize_exception_message(str(exception))
         return sanitize_event(event, self.policy)
 
 
@@ -78,4 +86,4 @@ def _extract_route_template(scope: Scope, raw_path: str) -> str:
             return template
     return raw_path
 
-__all__ = ["_RequestEventBuilder", "_classify_error", "_extract_route_template"]
+__all__ = ["_RequestEventBuilder", "_classify_error", "_extract_route_template", "_sanitize_exception_message"]
