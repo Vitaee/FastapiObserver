@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 
 import pytest
 
@@ -15,7 +14,6 @@ from fastapiobserver import ObservabilitySettings, SecurityPolicy
 from fastapiobserver.audit import (
     AuditChainFormatter,
     AuditKeyProvider,
-    AuditVerificationResult,
     LocalHMACProvider,
     verify_audit_chain,
 )
@@ -181,8 +179,6 @@ class TestVerification:
         assert "Missing _audit_stream" in (result.error or "")
 
     def test_newline_stripping_preserves_surgery(self) -> None:
-        import hashlib
-        import hmac as hmac_mod
 
         # Manually create a formatter that outputs a trailing newline
         formatter = _make_formatter()
@@ -194,7 +190,6 @@ class TestVerification:
         formatter._delegate.format = malformed_format  # type: ignore
 
         output = formatter.format(_make_record("surgery-test"))
-        payload = json.loads(output)
         
         # The surgery should have cleanly stripped the newlines before signing,
         # so verification should succeed.

@@ -6,7 +6,7 @@ import hmac
 import json
 import re
 from dataclasses import dataclass
-from typing import Iterable
+from typing import Iterable, Any
 
 # Must match the genesis in formatter.py.
 _GENESIS_SIG = b"\x00" * 32
@@ -92,7 +92,10 @@ def verify_audit_chain(
                 total_records=total,
                 failed_at_seq=seq,
                 failed_stream_id=stream_id,
-                error=f"Sequence discontinuity for stream {stream_id}: expected {state['expected_seq']}, got {seq}",
+                error=(
+                    f"Sequence discontinuity for stream {stream_id}: "
+                    f"expected {state['expected_seq']}, got {seq}"
+                ),
             )
 
         total += 1

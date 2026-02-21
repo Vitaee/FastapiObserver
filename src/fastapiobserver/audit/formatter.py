@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import hashlib
 import hmac
-import json
 import logging
 import threading
 from typing import Any
@@ -87,7 +86,10 @@ def _inject_audit_fields(json_str: str, stream_id: str, seq: int, sig_hex: str) 
     if idx == -1:
         # Fallback: not valid JSON, just append.
         return json_str
-    audit_suffix = f', "_audit_stream": "{stream_id}", "_audit_seq": {seq}, "_audit_sig": "{sig_hex}"}}'
+    audit_suffix = (
+        f', "_audit_stream": "{stream_id}", '
+        f'"_audit_seq": {seq}, "_audit_sig": "{sig_hex}"}}'
+    )
     return json_str[:idx] + audit_suffix
 
 
