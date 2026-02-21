@@ -4,7 +4,7 @@ import atexit
 import logging
 import logging.handlers
 import queue
-from typing import Literal
+from typing import Literal, cast
 
 from ..config import ObservabilitySettings
 from ..security import SecurityPolicy
@@ -128,13 +128,13 @@ def setup_logging(
 
         # Wrap with tamper-evident audit chain if enabled.
         if settings.audit_logging_enabled:
-            from ..audit import AuditChainFormatter, LocalHMACProvider
+            from ..audit import AuditChainFormatter, AuditKeyProvider, LocalHMACProvider
 
             provider = audit_key_provider or LocalHMACProvider(
                 env_var=settings.audit_key_env_var,
             )
             formatter = AuditChainFormatter(
-                delegate=formatter, key_provider=provider,
+                delegate=formatter, key_provider=cast(AuditKeyProvider, provider),
             )
 
         root_logger.setLevel(settings.log_level.upper())
