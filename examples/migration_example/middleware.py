@@ -52,7 +52,9 @@ class RequestLoggingMiddleware:
             elapsed = perf_counter() - start
             HTTP_REQUESTS_IN_PROGRESS.dec()
             HTTP_REQUEST_DURATION.labels(handler=handler, method=method).observe(elapsed)
-            HTTP_REQUESTS_TOTAL.labels(handler=handler, method=method, status=str(response_status)).inc()
+            HTTP_REQUESTS_TOTAL.labels(handler=handler,
+            method=method,
+            status=str(response_status)).inc()
             
             http_details = {
                 "method": method,

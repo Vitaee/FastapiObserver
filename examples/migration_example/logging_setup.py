@@ -65,7 +65,8 @@ class StructuredJsonFormatter(logging.Formatter):
             "stack_info", "exc_info", "exc_text", "thread", "threadName",
             "taskName", "message",
         }
-        return {k: v for k, v in record.__dict__.items() if k not in standard_attrs and not k.startswith("_")}
+        return {k: v for k, v in record.__dict__.items() 
+        if k not in standard_attrs and not k.startswith("_")}
         
     def _format_exception(self, record: logging.LogRecord) -> dict:
         exc_type, exc_value, exc_tb = record.exc_info

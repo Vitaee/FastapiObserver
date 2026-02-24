@@ -23,4 +23,4 @@ logger = logging.getLogger(__name__)
 @app.get("/")
 def read_root():
     logger.info("Handling root request in the migrated app")
-    return {"message": "Hello World. Notice how metrics are at /metrics, and logs are structured JSON."}
+    return {"message": "Notice how metrics are at /metrics, and logs are structured JSON."}

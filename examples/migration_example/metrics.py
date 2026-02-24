@@ -27,7 +27,8 @@ HTTP_REQUESTS_IN_PROGRESS = Gauge(
     "Number of HTTP requests currently being processed",
 )
 
-_UUID_RE = re.compile(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
+_UUID_RE = re.compile(r"""[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-
+[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}""")
 _INT_RE = re.compile(r"/\d+(?=/|$)")
 
 def normalize_path(path: str) -> str:
