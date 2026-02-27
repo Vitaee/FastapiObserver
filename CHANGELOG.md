@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [1.3.2] - 2026-02-27
+
+### Fixed
+- Request metrics exclusions now always include the configured `metrics_path`, so custom scrape endpoints are not recorded as application traffic.
+- Logging queue listener fork reinitialization now rewires queue handlers correctly in child processes and avoids dead listener queue buildup after `fork()`.
+- Route auto-discovery no longer raises startup errors when a middleware named `OpenTelemetryMiddleware` is present but `opentelemetry.util.http` is unavailable.
+- Auto lifespan wrapper now reuses `observability_lifespan` to avoid duplicated setup/teardown logic.
+
 ## [1.3.1] - 2026-02-27
 
 ### Fixed

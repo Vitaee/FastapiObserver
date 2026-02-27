@@ -213,6 +213,9 @@ def _auto_discover_excluded_routes(app: FastAPI, settings: ObservabilitySettings
     """Auto-discover routes like /docs, /openapi.json, or include_in_schema=False."""
     # Build a set of paths to exclude
     excluded = set(settings.metrics_exclude_paths)
+    if settings.metrics_path:
+        excluded.update(_build_exclude_path_variants(settings.metrics_path))
+
     for route in app.routes:
         path = getattr(route, "path", None)
         if not path:
@@ -233,7 +236,10 @@ def _auto_discover_excluded_routes(app: FastAPI, settings: ObservabilitySettings
         while hasattr(current, "app"):
             # Check by name since we don't want a hard dependency
             if current.__class__.__name__ == "OpenTelemetryMiddleware":
-                from opentelemetry.util.http import parse_excluded_urls
+                try:
+                    from opentelemetry.util.http import parse_excluded_urls
+                except ImportError:
+                    break
 
                 current_excluded: set[str] = set()
                 for attr_name in ("excluded_urls", "_excluded_urls"):
@@ -293,10 +299,7 @@ def _register_logging_shutdown_hook(app: FastAPI) -> None:
     async def auto_observability_lifespan(
         app_inst: FastAPI,
     ) -> typing.AsyncGenerator[typing.Any, None]:
-        if hasattr(app_inst.state, "_observability_settings"):
-            _auto_discover_excluded_routes(app_inst, app_inst.state._observability_settings)
-
-        try:
+        async with observability_lifespan(app_inst):
             if original_lifespan:
                 # If the user is explicitly using observability_lifespan inside their
                 # original_lifespan, this will safely no-op during cleanup because
@@ -305,8 +308,6 @@ def _register_logging_shutdown_hook(app: FastAPI) -> None:
                     yield state
             else:
                 yield {}
-        finally:
-            _teardown_observability(app_inst)
 
     app.router.lifespan_context = auto_observability_lifespan
     _REGISTERED_APPS.add(app)

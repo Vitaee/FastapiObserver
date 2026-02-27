@@ -193,6 +193,7 @@ def setup_logging(
         state._QUEUE_LISTENER = listener
         state._MANAGED_OUTPUT_HANDLERS = managed_output_handlers
         _ensure_atexit_shutdown_hook_locked()
+        _ensure_fork_reinitialization_locked()
 
         for name in ("uvicorn", "uvicorn.error", "uvicorn.access"):
             uvicorn_logger = logging.getLogger(name)
@@ -215,6 +216,56 @@ def _ensure_atexit_shutdown_hook_locked() -> None:
         return
     atexit.register(shutdown_logging)
     state._ATEXIT_SHUTDOWN_REGISTERED = True
+
+
+def _ensure_fork_reinitialization_locked() -> None:
+    import os
+    import fastapiobserver.logging.state as state
+    if getattr(state, "_FORK_HOOK_REGISTERED", False):
+        return
+    if hasattr(os, "register_at_fork"):
+        os.register_at_fork(after_in_child=_restart_queue_listener_in_child)
+    setattr(state, "_FORK_HOOK_REGISTERED", True)
+
+
+def _restart_queue_listener_in_child() -> None:
+    import fastapiobserver.logging.state as state
+
+    listener = state._QUEUE_LISTENER
+    if listener is not None:
+        # The inherited queue's Condition lock might be held by the parent
+        # or left in an inconsistent state across the fork. To reliably resume
+        # processing, we must create a fresh queue and manually drain any
+        # inherited records from the old queue.
+        old_queue = cast(queue.Queue[logging.LogRecord], listener.queue)
+        new_queue: queue.Queue[logging.LogRecord] = queue.Queue(maxsize=old_queue.maxsize)
+
+        while not old_queue.empty():
+            try:
+                record = old_queue.get_nowait()
+                new_queue.put_nowait(record)
+            except queue.Empty:
+                break
+            except queue.Full:
+                break
+
+        # Re-attach the new queue to the OverflowPolicyQueueHandler if present
+        for handler in state._MANAGED_HANDLERS:
+            from .queueing import OverflowPolicyQueueHandler
+
+            if (
+                isinstance(handler, OverflowPolicyQueueHandler)
+                and getattr(handler, "queue", None) is old_queue
+            ):
+                handler.queue = new_queue
+
+        new_listener = logging.handlers.QueueListener(
+            new_queue,
+            *listener.handlers,
+            respect_handler_level=listener.respect_handler_level,
+        )
+        state._QUEUE_LISTENER = new_listener
+        new_listener.start()
 
 
 def _wrap_sink_handlers(
