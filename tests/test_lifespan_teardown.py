@@ -1,4 +1,3 @@
-import pytest
 from fastapi import FastAPI
 from contextlib import asynccontextmanager
 from fastapiobserver import install_observability, ObservabilitySettings, observability_lifespan
