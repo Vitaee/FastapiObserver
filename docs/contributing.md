@@ -26,8 +26,9 @@ Reproducible benchmark harness and methodology:
 - `0.4.x`: package modularization, sink/registry hardening, and runtime control token rotation
 - `1.0.x`: first stable release contract for production deployments
 - `1.2.0`: tamper-evident audit logging and SQLAlchemy trace/commenter integration
+- `1.3.0`: zero-glue install defaults, profile-aware configuration, lifespan teardown hardening, and route exclusion auto-discovery
 
-Current release version: `1.2.0`
+Current release version: `1.3.0`
 
 ## Changelog Policy
 
@@ -40,7 +41,7 @@ Breaking changes must be listed under a `Breaking Changes` section in `CHANGELOG
 Recommended release command (uses `.env` with `PYPI_TOKEN`):
 
 ```bash
-scripts/deploy_pypi.sh --tag v1.2.0 --push-tag
+scripts/deploy_pypi.sh --tag v1.3.0 --push-tag
 ```
 
 ### 1) Build distributions

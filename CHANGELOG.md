@@ -4,6 +4,24 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-02-27
+
+### Added
+- Zero-glue installation path via `install_observability(app)` with environment-driven auto-loading for settings, security policy, trusted proxy policy, OTel settings, and runtime control settings.
+- Environment profile support (`OBS_PROFILE`) with built-in `development` and `production` defaults through `fastapiobserver.profiles.apply_profile_context`.
+- Public FastAPI lifespan helper `observability_lifespan` for explicit lifecycle integration.
+- Route exclusion auto-discovery for utility endpoints and `include_in_schema=False` routes, including dynamic path normalization variants for telemetry filters.
+- New tests for profiles and teardown behavior:
+  - `tests/test_profiles.py`
+  - `tests/test_lifespan_teardown.py`
+
+### Changed
+- `install_observability` now accepts optional `settings` and resolves defaults from env when omitted.
+- Teardown flow is now centralized and idempotent via `_teardown_observability(...)`, and runs with `try/finally` semantics in lifespan wrappers.
+- Metrics exclusion checks now support both raw and collapsed route paths and can read discovered exclusions from app state.
+- Active OTel middleware exclusions are updated at lifespan-time route discovery so hidden routes are consistently excluded from tracing.
+- Documentation was reorganized into the `docs/` directory with expanded zero-glue, profiles, architecture, and operations guidance.
+
 ## [1.2.0] - 2026-02-21
 
 ### Added
