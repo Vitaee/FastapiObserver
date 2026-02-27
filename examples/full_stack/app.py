@@ -22,8 +22,6 @@ from fastapi import FastAPI, HTTPException
 
 from fastapiobserver import (
     ObservabilitySettings,
-    SecurityPolicy,
-    TrustedProxyPolicy,
     get_request_id,
     get_span_id,
     get_trace_id,
@@ -65,8 +63,6 @@ otel_logs_settings = OTelLogsSettings.from_env()
 install_observability(
     app,
     settings,
-    security_policy=SecurityPolicy(),
-    trusted_proxy_policy=TrustedProxyPolicy(enabled=True),
     otel_settings=otel_settings,
     otel_logs_settings=otel_logs_settings,
 )

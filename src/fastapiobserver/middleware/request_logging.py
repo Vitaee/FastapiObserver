@@ -143,6 +143,7 @@ class RequestLoggingMiddleware:
                 path=route_template,
                 status_code=status_code,
                 duration_seconds=duration_seconds,
+                scope=scope,
             )
             self.metrics_recorder.emit_hooks(
                 scope=scope,

@@ -13,7 +13,7 @@ from .db_tracing import (
     instrument_sqlalchemy_async,
     uninstrument_sqlalchemy,
 )
-from .fastapi import install_observability
+from .fastapi import install_observability, observability_lifespan
 from .logging import (
     LOG_SCHEMA_VERSION,
     PluginLogFilter,
@@ -135,6 +135,7 @@ __all__ = [
     # OTel
     "create_otel_resource",
     "install_observability",
+    "observability_lifespan",
     "install_otel",
     "install_otel_logs",
     "install_otel_metrics",
