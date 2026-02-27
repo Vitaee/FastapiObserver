@@ -246,9 +246,9 @@ def _auto_discover_excluded_routes(app: FastAPI, settings: ObservabilitySettings
 
                 merged = parse_excluded_urls(",".join(sorted(current_excluded)))
                 if hasattr(current, "excluded_urls"):
-                    current.excluded_urls = merged
+                    setattr(current, "excluded_urls", merged)
                 else:
-                    current._excluded_urls = merged
+                    setattr(current, "_excluded_urls", merged)
                 break
             current = current.app
 
