@@ -7,7 +7,9 @@ Run this:
 Then try:
     curl http://localhost:8000/health
     curl http://localhost:8000/items/42
-    curl http://localhost:8000/metrics   (Prometheus metrics)
+    # Metrics are disabled by default in zero-glue mode.
+    # Enable them with METRICS_ENABLED=true, then:
+    # curl http://localhost:8000/metrics
 
 Watch your terminal — every request produces a structured JSON log line with:
   - A unique request_id (for tracing a request across your system)
@@ -30,49 +32,32 @@ What happens under the hood when you call install_observability():
 
 from fastapi import FastAPI
 
+from contextlib import asynccontextmanager
+
 from fastapiobserver import (
-    ObservabilitySettings,
-    SecurityPolicy,
-    TrustedProxyPolicy,
     install_observability,
+    observability_lifespan,
 )
 from fastapiobserver.request_context import get_request_id
 
 # --- Step 1: Create your FastAPI app as usual ---
-app = FastAPI(title="Basic Observability Example")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    async with observability_lifespan(app):
+        yield
+
+app = FastAPI(title="Basic Observability Example", lifespan=lifespan)
 
 
-# --- Step 2: Define your observability settings ---
-# These values appear in every log line, making it easy to filter logs
-# in Grafana, Kibana, or any log aggregator.
-settings = ObservabilitySettings(
-    app_name="example-api",       # Name of your application
-    service="example",            # Logical service name (used in metrics labels)
-    environment="development",    # dev / staging / production
-    version="0.1.0",              # Your app version (useful for canary deployments)
-    metrics_enabled=True,         # Mount a /metrics endpoint for Prometheus
-    
-    # Enable Logtail Dead Letter Queue for best-effort local durability
-    # dropped logs will be archived to `.dlq/logtail` as NDJSON files
-    logtail_dlq_enabled=True,
-)
-
-
-# --- Step 3: Install observability in one call ---
-# This single call sets up: structured logging, request middleware,
-# Prometheus metrics endpoint, and security policies.
-install_observability(
-    app,
-    settings,
-    # SecurityPolicy controls what gets logged and what gets masked.
-    # By default: passwords, tokens, authorization headers → "***"
-    # Body logging is OFF by default (opt-in for safety).
-    security_policy=SecurityPolicy(),
-    # TrustedProxyPolicy controls whether to trust x-request-id headers
-    # from incoming requests. Only IPs in trusted CIDRs are honored.
-    # Default trusted: 10.x.x.x, 172.16.x.x, 192.168.x.x, 127.0.0.1
-    trusted_proxy_policy=TrustedProxyPolicy(enabled=True),
-)
+# --- Step 2: Install observability in one call (Zero-Glue) ---
+# Since we aren't passing `settings`, `security_policy`, etc. manually,
+# `install_observability` will read from environment variables.
+#
+# Try running this app with different profiles:
+#   OBS_PROFILE=development uvicorn examples.basic_app:app --reload
+#   OBS_PROFILE=production uvicorn examples.basic_app:app --reload
+#   METRICS_ENABLED=true uvicorn examples.basic_app:app --reload
+install_observability(app)
 
 
 # --- Step 4: Write your endpoints as normal ---

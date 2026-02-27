@@ -12,7 +12,7 @@ obs_settings = ObservabilitySettings(
     environment="production",
     version="1.0.0",
     metrics_enabled=True,
-    # OTel tracing is enabled by default in fastapiobserver
+    # OTel tracing is opt-in (for example: OTelSettings(enabled=True) or OTEL_ENABLED=true).
 )
 
 # 2. One line to install all observability features

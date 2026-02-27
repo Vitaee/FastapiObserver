@@ -157,16 +157,34 @@ To dramatically reduce boilerplate, you can use the `OBS_PROFILE` environment va
 
 ## Documentation Map
 
-For deep-dive documentation, please explore the official documentation site (or read the `docs/` folder directly):
-- [Security & Presets](security.md)
-- [Environment Variables](configuration.md)
-- [Runtime Control](runtime-control.md)
-- [OpenTelemetry](opentelemetry.md)
-- [Logtail Sink](logtail-sink.md)
-- [Audit Logging](audit-logging.md)
-- [Database Tracing](db-tracing.md)
-- [GraphQL Support](graphql.md)
-- [Architecture & Operations](architecture.md)
-- [Production Deployment](deployment.md)
-- [Performance Tuning](tuning.md)
-- [Advanced Operations](advanced.md)
+Use this map by goal so teams can find the right guide quickly.
+
+### Start Here (core setup)
+
+- [Environment Variables](configuration.md): full env-var reference for logging, metrics, security, OTel, and runtime control.
+- [Security & Presets](security.md): secure defaults, redaction presets, and allowlist-first logging.
+- [Structured Logging Guide](logging.md): schema contract, request event levels, and queue/sink resilience controls.
+- [OpenTelemetry](opentelemetry.md): traces plus optional OTLP log/metric export.
+
+### Feature Integrations (what you can enable)
+
+- [GraphQL Support](graphql.md): Strawberry extension for operation-level log/trace visibility.
+- [Database Tracing](db-tracing.md): SQLCommenter trace correlation for SQLAlchemy engines.
+- [Plugin Hooks](plugins.md): custom enrichers, filters, metric hooks, and custom metrics backends.
+- [Loguru Coexistence](loguru.md): migrate gradually without dual pipelines.
+- [Logtail Sink](logtail-sink.md): Better Stack sink and DLQ durability controls.
+- [Audit Logging](audit-logging.md): tamper-evident HMAC log chains for regulated environments.
+
+### Operations and Deployment (running in production)
+
+- [Architecture](architecture.md): what `install_observability()` wires up on request path and lifecycle.
+- [Runtime Control](runtime-control.md): change log level and trace sampling without restart.
+- [Production Deployment](deployment.md): rollout strategy, failure modes, alert starters, incident playbook.
+- [Kubernetes Deployment](kubernetes.md): end-to-end K8s stack deployment and validation flow.
+- [Performance Tuning](tuning.md): OpenTelemetry runtime tuning for high-throughput services.
+- [Advanced Operations](advanced.md): Gunicorn multiprocess safety, queue controls, breaker metrics, and lifecycle behavior.
+
+### Engineering and Maintenance
+
+- [Benchmarks](benchmarks.md): DX reduction metrics and latency scenario matrix.
+- [Maintenance & Contributing](contributing.md): test coverage, release tracks, publishing flow, and roadmap links.

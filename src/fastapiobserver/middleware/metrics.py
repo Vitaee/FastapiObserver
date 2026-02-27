@@ -28,13 +28,25 @@ class _MetricsRecorder:
         path: str,
         status_code: int,
         duration_seconds: float,
+        scope: Scope | None = None,
     ) -> None:
-        if path in self.settings.metrics_exclude_paths:
+        collapsed_path = collapse_dynamic_segments(path)
+        excluded_urls = self.settings.metrics_exclude_paths
+        
+        if scope and "app" in scope:
+            app = scope["app"]
+            if hasattr(app.state, "_observability_excluded_urls"):
+                excluded_urls = app.state._observability_excluded_urls
+
+        if (
+            path in excluded_urls
+            or collapsed_path in excluded_urls
+        ):
             return
         try:
             self.metrics_backend.observe(
                 method=method,
-                path=collapse_dynamic_segments(path),
+                path=collapsed_path,
                 status_code=status_code,
                 duration_seconds=duration_seconds,
             )

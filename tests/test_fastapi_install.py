@@ -10,6 +10,7 @@ from fastapiobserver import (
     OTelMetricsSettings,
     ObservabilitySettings,
     install_observability,
+    observability_lifespan,
     register_metrics_backend,
     unregister_metrics_backend,
 )
@@ -134,7 +135,8 @@ def test_install_observability_installs_otel_metrics_when_enabled(
     assert calls["settings"] is settings
     assert calls["otel_metrics_settings"] == otel_metrics_settings
     assert calls["app"] is app
-    assert calls["otel_settings"] is None
+    assert isinstance(calls["otel_settings"], fastapi_module.OTelSettings)
+    assert not calls["otel_settings"].enabled
 
 
 def test_install_observability_registers_logging_shutdown_hook_once(
@@ -163,3 +165,130 @@ def test_install_observability_registers_logging_shutdown_hook_once(
     asyncio.run(_run_lifespan())
         
     assert len(mock_calls) == 1
+
+
+def test_custom_observability_lifespan_cleans_up_resources(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    app = FastAPI()
+    
+    # We will track calls to shutdown_logging
+    mock_calls = []
+
+    def mock_shutdown() -> None:
+        mock_calls.append(1)
+
+    monkeypatch.setattr(fastapi_module, "shutdown_logging", mock_shutdown)
+    
+    async def _run_explicit_lifespan() -> None:
+        async with observability_lifespan(app):
+            pass
+
+    asyncio.run(_run_explicit_lifespan())
+    assert len(mock_calls) == 1
+
+
+def test_cleanup_runs_again_after_reinstall(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    app = FastAPI()
+    settings = ObservabilitySettings(app_name="test", service="svc", environment="test")
+    mock_calls: list[int] = []
+
+    def mock_shutdown() -> None:
+        mock_calls.append(1)
+
+    monkeypatch.setattr(fastapi_module, "shutdown_logging", mock_shutdown)
+
+    async def _run_lifespan_cycle() -> None:
+        async with app.router.lifespan_context(app):
+            pass
+
+    install_observability(app, settings, metrics_enabled=False)
+    asyncio.run(_run_lifespan_cycle())
+
+    install_observability(app, settings, metrics_enabled=False)
+    asyncio.run(_run_lifespan_cycle())
+
+    assert len(mock_calls) == 2
+
+
+def test_auto_discover_excluded_routes() -> None:
+    app = FastAPI()
+    
+    @app.get("/visible")
+    def visible():
+        pass
+        
+    @app.get("/hidden", include_in_schema=False)
+    def hidden():
+        pass
+        
+    @app.get("/docs")
+    def docs():
+        pass
+        
+    settings = ObservabilitySettings(
+        app_name="test",
+        service="svc",
+        metrics_exclude_paths=("/metrics",),
+    )
+    
+    fastapi_module._auto_discover_excluded_routes(app, settings)
+    
+    # Check that /hidden and /docs were dynamically added to the exclude tuple
+    excluded_urls = app.state._observability_excluded_urls
+    
+    assert "/metrics" in excluded_urls
+    assert "/hidden" in excluded_urls
+    assert "/docs" in excluded_urls
+    assert "/visible" not in excluded_urls
+
+
+def test_auto_discover_excluded_routes_normalizes_parameterized_paths() -> None:
+    app = FastAPI()
+
+    @app.get("/hidden/{item_id}", include_in_schema=False)
+    def hidden(item_id: int):
+        return item_id
+
+    settings = ObservabilitySettings(
+        app_name="test",
+        service="svc",
+        metrics_exclude_paths=("/metrics",),
+    )
+
+    fastapi_module._auto_discover_excluded_routes(app, settings)
+    excluded_urls = app.state._observability_excluded_urls
+    assert "/hidden/{item_id}" in excluded_urls
+    assert "/hidden/:id" in excluded_urls
+
+
+def test_auto_discover_updates_active_otel_exclusion_list() -> None:
+    pytest.importorskip("opentelemetry.util.http")
+    from opentelemetry.util.http import parse_excluded_urls
+
+    app = FastAPI()
+
+    @app.get("/hidden", include_in_schema=False)
+    def hidden() -> None:
+        return None
+
+    settings = ObservabilitySettings(
+        app_name="test",
+        service="svc",
+        metrics_exclude_paths=("/metrics",),
+    )
+
+    class OpenTelemetryMiddleware:
+        def __init__(self) -> None:
+            self.excluded_urls = parse_excluded_urls("/existing")
+            self.app = object()
+
+    app.middleware_stack = OpenTelemetryMiddleware()
+
+    fastapi_module._auto_discover_excluded_routes(app, settings)
+
+    otel_middleware = app.middleware_stack
+    assert otel_middleware.excluded_urls.url_disabled("/existing")
+    assert otel_middleware.excluded_urls.url_disabled("/hidden")

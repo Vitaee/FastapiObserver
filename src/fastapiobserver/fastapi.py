@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import weakref
 import typing
 from collections.abc import Sequence
@@ -12,8 +13,11 @@ from fastapi import FastAPI
 from .config import ObservabilitySettings
 from .control_plane import RuntimeControlSettings, mount_control_plane
 from .logging import setup_logging, shutdown_logging
+from .profiles import apply_profile_context
+from .db_tracing import uninstrument_sqlalchemy
 from .metrics import (
     build_metrics_backend,
+    collapse_dynamic_segments,
     mount_backend_metrics_endpoint,
 )
 from .middleware import RequestLoggingMiddleware
@@ -29,11 +33,12 @@ from .security import SecurityPolicy, TrustedProxyPolicy
 
 _LOGGER = logging.getLogger("fastapiobserver.fastapi")
 _REGISTERED_APPS: weakref.WeakSet[FastAPI] = weakref.WeakSet()
+_ROUTE_PARAM_PATTERN = re.compile(r"\{[^{}]+\}")
 
 
 def install_observability(
     app: FastAPI,
-    settings: ObservabilitySettings,
+    settings: ObservabilitySettings | None = None,
     *,
     security_policy: SecurityPolicy | None = None,
     trusted_proxy_policy: TrustedProxyPolicy | None = None,
@@ -53,8 +58,24 @@ def install_observability(
     metrics backend selection, OTel installation, and middleware ordering
     behind a single function.
     """
-    security_policy = security_policy or SecurityPolicy()
-    trusted_proxy_policy = trusted_proxy_policy or TrustedProxyPolicy()
+    # --- 0. Zero-Glue Profile Application ---
+    # Apply profile defaults via context manager so configure objects
+    # pick them up, but environment reverts instantly after.
+    with apply_profile_context():
+        # Auto-instantiate any missing configuration objects
+        settings = settings or ObservabilitySettings.from_env()
+        security_policy = security_policy or SecurityPolicy.from_env()
+        trusted_proxy_policy = trusted_proxy_policy or TrustedProxyPolicy.from_env()
+        otel_settings = otel_settings or OTelSettings.from_env(settings)
+        otel_logs_settings = otel_logs_settings or OTelLogsSettings.from_env()
+        otel_metrics_settings = otel_metrics_settings or OTelMetricsSettings.from_env()
+        runtime_control_settings = runtime_control_settings or RuntimeControlSettings.from_env()
+
+    # Mark a fresh install cycle so shutdown executes once per lifecycle.
+    app.state._observability_teardown_done = False
+
+    # Ensure settings are stored on state for lifespan to access
+    app.state._observability_settings = settings
 
     # --- 1. Resolve OTLP log handler (before logging setup) ---
     # We get the handler first so it can be routed through the
@@ -188,6 +209,79 @@ def _has_request_logging_middleware(app: FastAPI) -> bool:
             return True
     return False
 
+def _auto_discover_excluded_routes(app: FastAPI, settings: ObservabilitySettings) -> None:
+    """Auto-discover routes like /docs, /openapi.json, or include_in_schema=False."""
+    # Build a set of paths to exclude
+    excluded = set(settings.metrics_exclude_paths)
+    for route in app.routes:
+        path = getattr(route, "path", None)
+        if not path:
+            continue
+        # Exclude standard utility routes and hidden specs
+        if path in {"/docs", "/redoc", "/openapi.json"}:
+            excluded.update(_build_exclude_path_variants(path))
+        # Exclude implicitly hidden routes (if it has include_in_schema attr)
+        elif hasattr(route, "include_in_schema") and not route.include_in_schema:
+            excluded.update(_build_exclude_path_variants(path))
+            
+    # Save into app state, do not mutate settings
+    app.state._observability_excluded_urls = frozenset(excluded)
+
+    # If OTel middleware is present, dynamically update its excluded URLs
+    if hasattr(app, "middleware_stack") and app.middleware_stack:
+        current = app.middleware_stack
+        while hasattr(current, "app"):
+            # Check by name since we don't want a hard dependency
+            if current.__class__.__name__ == "OpenTelemetryMiddleware":
+                from opentelemetry.util.http import parse_excluded_urls
+
+                current_excluded: set[str] = set()
+                for attr_name in ("excluded_urls", "_excluded_urls"):
+                    existing_exclusions = getattr(current, attr_name, None)
+                    existing_patterns = getattr(existing_exclusions, "_excluded_urls", None)
+                    if existing_patterns:
+                        current_excluded.update(str(pattern) for pattern in existing_patterns)
+
+                current_excluded.update(excluded)
+
+                merged = parse_excluded_urls(",".join(sorted(current_excluded)))
+                if hasattr(current, "excluded_urls"):
+                    current.excluded_urls = merged
+                else:
+                    current._excluded_urls = merged
+                break
+            current = current.app
+
+
+def _build_exclude_path_variants(path: str) -> set[str]:
+    template_normalized = _ROUTE_PARAM_PATTERN.sub(":id", path)
+    return {
+        path,
+        collapse_dynamic_segments(path),
+        template_normalized,
+        collapse_dynamic_segments(template_normalized),
+    }
+
+
+@asynccontextmanager
+async def observability_lifespan(app: FastAPI) -> typing.AsyncGenerator[typing.Any, None]:
+    """A native FastAPI lifespan context manager for graceful observability teardown.
+    
+    Developers can yield from this manager directly in their app's lifespan:
+    
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        async with observability_lifespan(app):
+            yield
+    """
+    if hasattr(app.state, "_observability_settings"):
+        _auto_discover_excluded_routes(app, app.state._observability_settings)
+
+    try:
+        yield {}
+    finally:
+        _teardown_observability(app)
+
 
 def _register_logging_shutdown_hook(app: FastAPI) -> None:
     if app in _REGISTERED_APPS:
@@ -196,17 +290,35 @@ def _register_logging_shutdown_hook(app: FastAPI) -> None:
     original_lifespan = app.router.lifespan_context
 
     @asynccontextmanager
-    async def observability_lifespan(app_inst: FastAPI) -> typing.AsyncGenerator[typing.Any, None]:
-        if original_lifespan:
-            async with original_lifespan(app_inst) as state:
-                yield state
-        else:
-            yield {}
-        shutdown_logging()
-        # Clean up OTel SQLAlchemy event listeners (safe no-op if not installed).
-        from .db_tracing import uninstrument_sqlalchemy
+    async def auto_observability_lifespan(
+        app_inst: FastAPI,
+    ) -> typing.AsyncGenerator[typing.Any, None]:
+        if hasattr(app_inst.state, "_observability_settings"):
+            _auto_discover_excluded_routes(app_inst, app_inst.state._observability_settings)
 
-        uninstrument_sqlalchemy()
+        try:
+            if original_lifespan:
+                # If the user is explicitly using observability_lifespan inside their
+                # original_lifespan, this will safely no-op during cleanup because
+                # _teardown_observability is idempotent.
+                async with original_lifespan(app_inst) as state:
+                    yield state
+            else:
+                yield {}
+        finally:
+            _teardown_observability(app_inst)
 
-    app.router.lifespan_context = observability_lifespan
+    app.router.lifespan_context = auto_observability_lifespan
     _REGISTERED_APPS.add(app)
+
+
+def _teardown_observability(app: FastAPI) -> None:
+    if getattr(app.state, "_observability_teardown_done", False):
+        return
+    
+    shutdown_logging()
+    uninstrument_sqlalchemy()
+    
+    app.state._observability_teardown_done = True
+
+__all__ = ["install_observability", "observability_lifespan"]
