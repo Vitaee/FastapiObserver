@@ -39,7 +39,20 @@ Breaking changes must be listed under a `Breaking Changes` section in `CHANGELOG
 
 ## Packaging and Publishing (Maintainers)
 
-Recommended release command (uses `.env` with `PYPI_TOKEN`):
+Recommended release flow (Trusted Publishing + auto GitHub release notes):
+
+```bash
+git tag v1.3.1
+git push origin v1.3.1
+```
+
+On tag push, `.github/workflows/release.yml` will:
+
+1. Build and validate package artifacts.
+2. Publish to PyPI via Trusted Publishing.
+3. Create/update the GitHub Release body from the matching section in `CHANGELOG.md`.
+
+Manual fallback command (uses `.env` with `PYPI_TOKEN`):
 
 ```bash
 scripts/deploy_pypi.sh --tag v1.3.1 --push-tag
