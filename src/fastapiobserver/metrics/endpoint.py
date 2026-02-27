@@ -7,7 +7,10 @@ from fastapi import FastAPI
 from ..utils import normalize_path as normalize_route_path
 from .contracts import MetricsFormat
 from .prometheus.client import _import_prometheus_client
-from .prometheus.multiprocess import _is_prometheus_multiprocess_enabled
+from .prometheus.multiprocess import (
+    _is_prometheus_multiprocess_enabled,
+    _prepare_prometheus_multiprocess,
+)
 
 _LOGGER = logging.getLogger("fastapiobserver.metrics")
 
@@ -60,6 +63,7 @@ def mount_metrics_endpoint(
     prometheus_client = _import_prometheus_client()
 
     if _is_prometheus_multiprocess_enabled():
+        _prepare_prometheus_multiprocess()
         registry = prometheus_client.CollectorRegistry(auto_describe=True)
         prometheus_client.multiprocess.MultiProcessCollector(registry)
         app.mount(path, prometheus_client.make_asgi_app(registry=registry))

@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [1.3.1] - 2026-02-27
+
+### Fixed
+- Prometheus multiprocess compatibility on environments where `prometheus_client.multiprocess`
+  is not attached to the root module until explicitly imported.
+- Added internal multiprocess preloading shim so `mark_process_dead(...)` and metrics endpoint
+  mounting work without client-side monkey patches when `PROMETHEUS_MULTIPROC_DIR` is enabled.
+
 ## [1.3.0] - 2026-02-27
 
 ### Added

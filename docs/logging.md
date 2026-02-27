@@ -69,7 +69,7 @@ Example request log:
   "version": "0.1.0",
   "log_schema_version": "1.0.0",
   "library": "fastapiobserver",
-  "library_version": "1.3.0",
+  "library_version": "1.3.1",
   "request_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
   "trace_id": "0af7651916cd43dd8448eb211c80319c",
   "span_id": "b7ad6b7169203331",

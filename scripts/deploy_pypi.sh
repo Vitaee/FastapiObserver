@@ -27,7 +27,7 @@ Options:
   --testpypi      Upload to TestPyPI instead of production PyPI
   --skip-checks   Skip ruff/mypy/pytest quality gates
   --allow-dirty   Allow running with uncommitted git changes
-  --tag <tag>     Create git tag after successful upload (e.g. v1.3.0)
+  --tag <tag>     Create git tag after successful upload (e.g. v1.3.1)
   --push-tag      Push the created tag to origin (requires --tag)
   -h, --help      Show this help message
 USAGE

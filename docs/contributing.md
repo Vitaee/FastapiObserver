@@ -27,8 +27,9 @@ Reproducible benchmark harness and methodology:
 - `1.0.x`: first stable release contract for production deployments
 - `1.2.0`: tamper-evident audit logging and SQLAlchemy trace/commenter integration
 - `1.3.0`: zero-glue install defaults, profile-aware configuration, lifespan teardown hardening, and route exclusion auto-discovery
+- `1.3.1`: prometheus-client multiprocess compatibility fix for delayed submodule attachment
 
-Current release version: `1.3.0`
+Current release version: `1.3.1`
 
 ## Changelog Policy
 
@@ -41,7 +42,7 @@ Breaking changes must be listed under a `Breaking Changes` section in `CHANGELOG
 Recommended release command (uses `.env` with `PYPI_TOKEN`):
 
 ```bash
-scripts/deploy_pypi.sh --tag v1.3.0 --push-tag
+scripts/deploy_pypi.sh --tag v1.3.1 --push-tag
 ```
 
 ### 1) Build distributions

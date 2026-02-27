@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import types
 from unittest import mock
 
 import pytest
@@ -109,3 +110,73 @@ def test_prometheus_multiprocess_validation_contract(
     mock_exists.return_value = False
     with pytest.raises(RuntimeError, match="set but does not exist"):
         _validate_prometheus_multiprocess_dir()
+
+
+def test_prepare_prometheus_multiprocess_attaches_submodule(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from fastapiobserver.metrics.prometheus import multiprocess as multiprocess_module
+
+    class _PromClient:
+        pass
+
+    client = _PromClient()
+    fake_multiprocess = types.SimpleNamespace()
+
+    def _fake_import_module(module_name: str) -> object:
+        if module_name != "prometheus_client.multiprocess":
+            raise AssertionError(f"Unexpected import: {module_name}")
+        return fake_multiprocess
+
+    monkeypatch.setenv("PROMETHEUS_MULTIPROC_DIR", "/tmp/prom")
+    monkeypatch.setattr(
+        multiprocess_module,
+        "_import_prometheus_client",
+        lambda: client,
+    )
+    monkeypatch.setattr(
+        multiprocess_module.importlib,
+        "import_module",
+        _fake_import_module,
+    )
+
+    multiprocess_module._prepare_prometheus_multiprocess()
+
+    assert hasattr(client, "multiprocess")
+    assert client.multiprocess is fake_multiprocess
+
+
+def test_mark_prometheus_process_dead_prepares_missing_submodule(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from fastapiobserver.metrics.prometheus import multiprocess as multiprocess_module
+
+    class _PromClient:
+        pass
+
+    marked: list[int] = []
+    client = _PromClient()
+    fake_multiprocess = types.SimpleNamespace(
+        mark_process_dead=lambda pid: marked.append(pid),
+    )
+
+    def _fake_import_module(module_name: str) -> object:
+        if module_name != "prometheus_client.multiprocess":
+            raise AssertionError(f"Unexpected import: {module_name}")
+        return fake_multiprocess
+
+    monkeypatch.setenv("PROMETHEUS_MULTIPROC_DIR", "/tmp/prom")
+    monkeypatch.setattr(
+        multiprocess_module,
+        "_import_prometheus_client",
+        lambda: client,
+    )
+    monkeypatch.setattr(
+        multiprocess_module.importlib,
+        "import_module",
+        _fake_import_module,
+    )
+
+    multiprocess_module.mark_prometheus_process_dead(4321)
+
+    assert marked == [4321]
