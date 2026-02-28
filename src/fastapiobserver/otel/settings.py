@@ -6,25 +6,41 @@ import threading
 from typing import Literal, Mapping
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings
 
 from ..config import ObservabilitySettings
-from ..utils import EnvLoadable, normalize_protocol
+from ..utils import EnvLoadable, InternalSettingsBase, normalize_protocol
 
 OTEL_PROTOCOLS = {"grpc", "http/protobuf"}
 _RUNTIME_LOCK = threading.RLock()
 _RUNTIME_TRACE_SAMPLING_RATIO = 1.0
 
 
-class OTelSettings(EnvLoadable, BaseModel):
+class _BaseOTelSettings(EnvLoadable, BaseModel):
     model_config = ConfigDict(frozen=True)
+
+    enabled: bool = False
+    otlp_endpoint: str | None = None
+    protocol: Literal["grpc", "http/protobuf"] = "grpc"
+
+    @field_validator("protocol", mode="before")
+    @classmethod
+    def _normalize_protocol_base(cls, value: object) -> str:
+        return normalize_protocol(
+            value,
+            allowed=OTEL_PROTOCOLS,
+            default="grpc",
+            strict=False,
+            label="OTel protocol",
+        )
+
+
+class OTelSettings(_BaseOTelSettings):
 
     enabled: bool = False
     service_name: str = "api"
     service_version: str = "0.0.0"
     environment: str = "development"
-    otlp_endpoint: str | None = None
-    protocol: Literal["grpc", "http/protobuf"] = "grpc"
     trace_sampling_ratio: float = Field(default=1.0, ge=0.0, le=1.0)
     extra_resource_attributes: dict[str, str] = Field(default_factory=dict)
 
@@ -71,7 +87,7 @@ class OTelSettings(EnvLoadable, BaseModel):
         return _OTelEnvSettings
 
 
-class OTelLogsSettings(EnvLoadable, BaseModel):
+class OTelLogsSettings(_BaseOTelSettings):
     """Configuration for OTLP log export.
 
     ``logs_mode`` controls where logs are sent:
@@ -81,49 +97,17 @@ class OTelLogsSettings(EnvLoadable, BaseModel):
     * ``"both"`` — local JSON **and** OTLP export (useful during migration)
     """
 
-    model_config = ConfigDict(frozen=True)
-
-    enabled: bool = False
     logs_mode: Literal["local_json", "otlp", "both"] = "local_json"
-    otlp_endpoint: str | None = None
-    protocol: Literal["grpc", "http/protobuf"] = "grpc"
-
-    @field_validator("protocol", mode="before")
-    @classmethod
-    def _normalize_protocol(cls, value: object) -> str:
-        return normalize_protocol(
-            value,
-            allowed=OTEL_PROTOCOLS,
-            default="grpc",
-            strict=False,
-            label="OTel protocol",
-        )
 
     @classmethod
     def _env_settings_class(cls) -> type[BaseSettings]:
         return _OTelLogsEnvSettings
 
 
-class OTelMetricsSettings(EnvLoadable, BaseModel):
+class OTelMetricsSettings(_BaseOTelSettings):
     """Configuration for OTLP metrics export."""
 
-    model_config = ConfigDict(frozen=True)
-
-    enabled: bool = False
-    otlp_endpoint: str | None = None
-    protocol: Literal["grpc", "http/protobuf"] = "grpc"
     export_interval_millis: int = Field(default=60_000, ge=1_000)
-
-    @field_validator("protocol", mode="before")
-    @classmethod
-    def _normalize_protocol(cls, value: object) -> str:
-        return normalize_protocol(
-            value,
-            allowed=OTEL_PROTOCOLS,
-            default="grpc",
-            strict=False,
-            label="OTel protocol",
-        )
 
     @classmethod
     def _env_settings_class(cls) -> type[BaseSettings]:
@@ -153,12 +137,20 @@ def set_trace_sampling_ratio(ratio: float) -> float:
 # ---------------------------------------------------------------------------
 
 
-class _OTelEnvSettings(BaseSettings):
-    model_config = SettingsConfigDict(
-        extra="ignore",
-        case_sensitive=False,
-        populate_by_name=True,
-    )
+class _BaseOTelEnvSettings(InternalSettingsBase):
+    @field_validator("protocol", mode="before", check_fields=False)
+    @classmethod
+    def _normalize_protocol_env_base(cls, value: object) -> str:
+        return normalize_protocol(
+            value,
+            allowed=OTEL_PROTOCOLS,
+            default="grpc",
+            strict=False,
+            label="OTel protocol",
+        )
+
+
+class _OTelEnvSettings(_BaseOTelEnvSettings):
 
     enabled: bool = Field(default=False, validation_alias="OTEL_ENABLED")
     service_name: str | None = Field(default=None, validation_alias="OTEL_SERVICE_NAME")
@@ -186,26 +178,9 @@ class _OTelEnvSettings(BaseSettings):
         validation_alias="OTEL_EXTRA_RESOURCE_ATTRIBUTES",
     )
 
-    @field_validator("protocol", mode="before")
-    @classmethod
-    def _normalize_protocol_env(cls, value: object) -> str:
-        return normalize_protocol(
-            value,
-            allowed=OTEL_PROTOCOLS,
-            default="grpc",
-            strict=False,
-            label="OTel protocol",
-        )
 
-
-class _OTelLogsEnvSettings(BaseSettings):
+class _OTelLogsEnvSettings(_BaseOTelEnvSettings):
     """Env-based settings for OTLP log export (12-factor parity)."""
-
-    model_config = SettingsConfigDict(
-        extra="ignore",
-        case_sensitive=False,
-        populate_by_name=True,
-    )
 
     enabled: bool = Field(default=False, validation_alias="OTEL_LOGS_ENABLED")
     logs_mode: Literal["local_json", "otlp", "both"] = Field(
@@ -218,17 +193,6 @@ class _OTelLogsEnvSettings(BaseSettings):
         default="grpc", validation_alias="OTEL_LOGS_PROTOCOL"
     )
 
-    @field_validator("protocol", mode="before")
-    @classmethod
-    def _normalize_protocol_env(cls, value: object) -> str:
-        return normalize_protocol(
-            value,
-            allowed=OTEL_PROTOCOLS,
-            default="grpc",
-            strict=False,
-            label="OTel protocol",
-        )
-
     @field_validator("logs_mode", mode="before")
     @classmethod
     def _normalize_logs_mode(cls, value: object) -> str:
@@ -238,12 +202,7 @@ class _OTelLogsEnvSettings(BaseSettings):
         return normalized
 
 
-class _OTelMetricsEnvSettings(BaseSettings):
-    model_config = SettingsConfigDict(
-        extra="ignore",
-        case_sensitive=False,
-        populate_by_name=True,
-    )
+class _OTelMetricsEnvSettings(_BaseOTelEnvSettings):
 
     enabled: bool = Field(default=False, validation_alias="OTEL_METRICS_ENABLED")
     otlp_endpoint: str | None = Field(
@@ -257,17 +216,6 @@ class _OTelMetricsEnvSettings(BaseSettings):
         ge=1_000,
         validation_alias="OTEL_METRICS_EXPORT_INTERVAL_MILLIS",
     )
-
-    @field_validator("protocol", mode="before")
-    @classmethod
-    def _normalize_protocol_env(cls, value: object) -> str:
-        return normalize_protocol(
-            value,
-            allowed=OTEL_PROTOCOLS,
-            default="grpc",
-            strict=False,
-            label="OTel protocol",
-        )
 
 
 # ---------------------------------------------------------------------------

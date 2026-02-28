@@ -85,10 +85,7 @@ class RequestLoggingMiddleware:
             if message["type"] == "http.response.start":
                 status_code = int(message.get("status", 500))
                 resp_headers = message.get("headers", [])
-                if (
-                    self.security_policy.log_response_body
-                    and self.security_policy.body_capture_media_types is not None
-                ):
+                if self.security_policy.log_response_body:
                     response_content_type = _get_header(resp_headers, b"content-type")
                     response_body_capture.set_enabled(
                         is_body_capturable(response_content_type, self.security_policy)
@@ -113,43 +110,69 @@ class RequestLoggingMiddleware:
             self.span_error_recorder.record_exception(exc)
             raise
         finally:
-            duration_seconds = max(0.0, time.perf_counter() - start)
-            error_type = _classify_error(status_code, captured_error)
-            safe_event = self.event_builder.build(
+            self._finalize_request(
+                scope=scope,
+                start=start,
                 method=method,
                 path=path,
-                status_code=status_code,
-                duration_seconds=duration_seconds,
                 client_ip=client_ip,
-                request_body=request_body_capture.value,
-                response_body=response_body_capture.value,
-                error_type=error_type,
-                exception=captured_error,
-            )
-            if had_error:
-                self.logger.exception("request.failed", extra={"event": safe_event})
-            elif status_code >= 500:
-                self.logger.error("request.server_error", extra={"event": safe_event})
-            elif status_code >= 400:
-                self.logger.warning("request.client_error", extra={"event": safe_event})
-            else:
-                self.logger.info("request.completed", extra={"event": safe_event})
-
-            # Prefer route template for bounded cardinality
-            route_template = _extract_route_template(scope, path)
-
-            self.metrics_recorder.observe(
-                method=method,
-                path=route_template,
                 status_code=status_code,
-                duration_seconds=duration_seconds,
-                scope=scope,
+                request_body_capture=request_body_capture,
+                response_body_capture=response_body_capture,
+                captured_error=captured_error,
+                had_error=had_error,
             )
-            self.metrics_recorder.emit_hooks(
-                scope=scope,
-                status_code=status_code,
-                duration_seconds=duration_seconds,
-            )
-            self.context_manager.cleanup()
+
+    def _finalize_request(
+        self,
+        scope: Scope,
+        start: float,
+        method: str,
+        path: str,
+        client_ip: str | None,
+        status_code: int,
+        request_body_capture: _BodyCapture,
+        response_body_capture: _BodyCapture,
+        captured_error: Exception | None,
+        had_error: bool,
+    ) -> None:
+        duration_seconds = max(0.0, time.perf_counter() - start)
+        error_type = _classify_error(status_code, captured_error)
+        safe_event = self.event_builder.build(
+            method=method,
+            path=path,
+            status_code=status_code,
+            duration_seconds=duration_seconds,
+            client_ip=client_ip,
+            request_body=request_body_capture.value,
+            response_body=response_body_capture.value,
+            error_type=error_type,
+            exception=captured_error,
+        )
+        if had_error:
+            self.logger.exception("request.failed", extra={"event": safe_event})
+        elif status_code >= 500:
+            self.logger.error("request.server_error", extra={"event": safe_event})
+        elif status_code >= 400:
+            self.logger.warning("request.client_error", extra={"event": safe_event})
+        else:
+            self.logger.info("request.completed", extra={"event": safe_event})
+
+        # Prefer route template for bounded cardinality
+        route_template = _extract_route_template(scope, path)
+
+        self.metrics_recorder.observe(
+            method=method,
+            path=route_template,
+            status_code=status_code,
+            duration_seconds=duration_seconds,
+            scope=scope,
+        )
+        self.metrics_recorder.emit_hooks(
+            scope=scope,
+            status_code=status_code,
+            duration_seconds=duration_seconds,
+        )
+        self.context_manager.cleanup()
 
 __all__ = ["RequestLoggingMiddleware"]

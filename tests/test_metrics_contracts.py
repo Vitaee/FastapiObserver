@@ -20,7 +20,7 @@ def test_metrics_registry_contract() -> None:
         def dummy_factory(**kwargs: object) -> str:
             return "dummy"
 
-        register_metrics_backend("dummy_test", dummy_factory)
+        register_metrics_backend("dummy_test", dummy_factory)  # type: ignore[arg-type]
         current = get_registered_metrics_backends()
         assert "dummy_test" in current
         assert current["dummy_test"] is dummy_factory

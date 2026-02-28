@@ -12,11 +12,13 @@ from fastapiobserver.otel.lifecycle import (
 )
 
 
+import typing
+
 def _run_shutdown_handlers(app: FastAPI) -> None:
     for handler in app.router.on_shutdown:
         result = handler()
         if inspect.isawaitable(result):
-            asyncio.run(result)
+            asyncio.run(typing.cast(typing.Coroutine[typing.Any, typing.Any, typing.Any], result))
 
 
 def test_register_shutdown_hook_is_idempotent_per_app() -> None:

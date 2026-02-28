@@ -43,8 +43,7 @@ def test_restart_queue_listener_in_child_drains_and_recreates_queue():
         assert new_listener is not mock_listener
         assert new_listener.queue is not old_queue
         assert isinstance(new_listener, logging.handlers.QueueListener)
-        # We cannot reliably assert new_listener.queue.qsize() == 2 because
-        # new_listener.start() spins up a thread that immediately begins consuming.
+        assert new_listener.queue.qsize() == 0  # Pre-fork records MUST be dropped, not replayed
 
         # Verify the managed handler got the new queue assigned to its .queue attribute
         assert mock_queue_handler.queue is new_listener.queue

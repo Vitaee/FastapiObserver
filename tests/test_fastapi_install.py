@@ -2,6 +2,10 @@ from __future__ import annotations
 
 import asyncio
 
+import typing
+from typing import Any
+import logging
+
 import pytest
 from fastapi import FastAPI
 
@@ -234,10 +238,11 @@ def test_auto_discover_excluded_routes() -> None:
         metrics_exclude_paths=("/metrics",),
     )
     
+    fastapi_module.install_observability(app, settings, metrics_enabled=False)
     fastapi_module._auto_discover_excluded_routes(app, settings)
     
     # Check that /hidden and /docs were dynamically added to the exclude tuple
-    excluded_urls = app.state._observability_excluded_urls
+    excluded_urls = app.state._observability_state.excluded_urls
     
     assert "/metrics" in excluded_urls
     assert "/hidden" in excluded_urls
@@ -258,8 +263,9 @@ def test_auto_discover_excluded_routes_normalizes_parameterized_paths() -> None:
         metrics_exclude_paths=("/metrics",),
     )
 
+    fastapi_module.install_observability(app, settings, metrics_enabled=False)
     fastapi_module._auto_discover_excluded_routes(app, settings)
-    excluded_urls = app.state._observability_excluded_urls
+    excluded_urls = app.state._observability_state.excluded_urls
     assert "/hidden/{item_id}" in excluded_urls
     assert "/hidden/:id" in excluded_urls
 
@@ -285,10 +291,51 @@ def test_auto_discover_updates_active_otel_exclusion_list() -> None:
             self.excluded_urls = parse_excluded_urls("/existing")
             self.app = object()
 
-    app.middleware_stack = OpenTelemetryMiddleware()
+    app.middleware_stack = OpenTelemetryMiddleware()  # type: ignore[assignment]
 
+    app.state._observability_state = fastapi_module.ObservabilityRuntimeState(settings=settings)
     fastapi_module._auto_discover_excluded_routes(app, settings)
 
-    otel_middleware = app.middleware_stack
+    otel_middleware = typing.cast(Any, app.middleware_stack)
     assert otel_middleware.excluded_urls.url_disabled("/existing")
     assert otel_middleware.excluded_urls.url_disabled("/hidden")
+
+
+def test_install_observability_forbids_string_db_engine() -> None:
+    app = FastAPI()
+    settings = ObservabilitySettings(app_name="test", service="svc")
+    with pytest.raises(TypeError, match="must be an SQLAlchemy Engine or sequence"):
+        fastapi_module.install_observability(
+            app, 
+            settings, 
+            db_engine="sqlite:///:memory:", 
+            otel_settings=fastapi_module.OTelSettings(enabled=True)
+        )
+
+
+def test_auto_discover_catches_and_logs_otel_exclusion_errors(
+    caplog: pytest.LogCaptureFixture, 
+    monkeypatch: pytest.MonkeyPatch
+) -> None:
+    app = FastAPI()
+    settings = ObservabilitySettings(app_name="test", service="svc")
+    
+    try:
+        from fastapiobserver.otel import exclusions
+    except ImportError:
+        pytest.skip("OTel packages not installed")
+
+    def mock_update(*args: Any, **kwargs: Any) -> None:
+        raise ValueError("Simulated update failure")
+        
+    monkeypatch.setattr(exclusions, "update_otel_middleware_exclusions", mock_update)
+    
+    # We patch sys.modules to pretend 'fastapiobserver.otel.exclusions' is loaded 
+    # and has our mocked function since it's imported dynamically inside the function
+    import sys
+    monkeypatch.setitem(sys.modules, "fastapiobserver.otel.exclusions", exclusions)
+
+    with caplog.at_level(logging.WARNING):
+        fastapi_module._auto_discover_excluded_routes(app, settings)
+        
+    assert "observability.fastapi.otel_exclusion_update_failed" in caplog.text

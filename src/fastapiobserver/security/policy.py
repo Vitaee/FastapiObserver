@@ -2,9 +2,9 @@ import os
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings
 
-from ..utils import EnvLoadable, parse_csv
+from ..utils import EnvLoadable, InternalSettingsBase, parse_csv
 from .normalize import _normalize_key, _normalize_media_type
 
 DEFAULT_REDACTED_FIELDS = (
@@ -214,12 +214,7 @@ class TrustedProxyPolicy(EnvLoadable, BaseModel):
         return _TrustedProxyPolicySettings
 
 
-class _SecurityPolicySettings(BaseSettings):
-    model_config = SettingsConfigDict(
-        extra="ignore",
-        case_sensitive=False,
-        populate_by_name=True,
-    )
+class _SecurityPolicySettings(InternalSettingsBase):
 
     redaction_preset: str | None = Field(
         default=None,
@@ -285,12 +280,7 @@ class _SecurityPolicySettings(BaseSettings):
         return parse_csv(value, optional=True)
 
 
-class _TrustedProxyPolicySettings(BaseSettings):
-    model_config = SettingsConfigDict(
-        extra="ignore",
-        case_sensitive=False,
-        populate_by_name=True,
-    )
+class _TrustedProxyPolicySettings(InternalSettingsBase):
 
     enabled: bool = Field(default=True, validation_alias="OBS_TRUSTED_PROXY_ENABLED")
     trusted_cidrs: str | tuple[str, ...] = Field(

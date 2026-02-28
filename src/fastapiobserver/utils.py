@@ -3,7 +3,7 @@ from __future__ import annotations
 import importlib
 from typing import Any, Callable, TypeVar, cast
 
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 _NULLISH_VALUES = frozenset({"none", "null", "unset"})
 TEnvLoadable = TypeVar("TEnvLoadable", bound="EnvLoadable")
@@ -17,6 +17,17 @@ def normalize_path(path: str, *, default: str = "/") -> str:
     if len(candidate) > 1:
         candidate = candidate.rstrip("/")
     return candidate
+
+
+class InternalSettingsBase(BaseSettings):
+    """Base class for all environment settings models with common configuration."""
+
+    model_config = SettingsConfigDict(
+        extra="ignore",
+        case_sensitive=False,
+        populate_by_name=True,
+    )
+
 
 
 class EnvLoadable:
