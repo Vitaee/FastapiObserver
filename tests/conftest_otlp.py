@@ -4,6 +4,7 @@ import gzip
 import threading
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import typing
 from typing import Any
 
 import pytest
@@ -66,9 +67,8 @@ class OtlpCollector:
                     spans.extend(scope_span.spans)
         return spans
 
-
 @pytest.fixture
-def otlp_collector() -> OtlpCollector:
+def otlp_collector() -> typing.Generator[OtlpCollector, None, None]:
     pytest.importorskip("opentelemetry.proto.collector.trace.v1.trace_service_pb2")
 
     collector: OtlpCollector | None = None
@@ -94,7 +94,7 @@ def otlp_collector() -> OtlpCollector:
     except PermissionError:
         pytest.skip("Local socket binding is not allowed in this environment")
     host, port = server.server_address[:2]
-    collector = OtlpCollector(host, int(port))
+    collector = OtlpCollector(str(host), int(port))
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
 

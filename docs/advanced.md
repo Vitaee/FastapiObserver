@@ -168,6 +168,23 @@ async def lifespan(app: FastAPI):
     # All background threads gracefully flushed here
 ```
 
+### Runtime Stress Harness
+
+For operational hardening after touching logging/lifecycle code paths, run:
+
+```bash
+uv run python scripts/runtime_stress.py --profile standard
+```
+
+This script validates:
+- repeated install/lifespan teardown cycles
+- queue overflow behavior (`drop_oldest`, `drop_newest`, `block`)
+- thread-contention setup/shutdown safety
+- fork replay safety (no duplicated pre-fork log records)
+- isolated subprocess execution for fork replay checks (avoids noisy multi-threaded `os.fork()` warnings in the main run)
+
+Use `--profile deep` for prolonged soak testing before major releases.
+
 ### Loguru Coexistence
 
 If your service already uses `loguru`, forward those logs into

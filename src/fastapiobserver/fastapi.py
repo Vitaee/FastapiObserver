@@ -6,6 +6,7 @@ import weakref
 import typing
 from collections.abc import Sequence
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
 from typing import Any, Literal
 
 from fastapi import FastAPI
@@ -16,6 +17,7 @@ from .logging import setup_logging, shutdown_logging
 from .profiles import apply_profile_context
 from .db_tracing import uninstrument_sqlalchemy
 from .metrics import (
+    MetricsBackend,
     build_metrics_backend,
     collapse_dynamic_segments,
     mount_backend_metrics_endpoint,
@@ -34,6 +36,13 @@ from .security import SecurityPolicy, TrustedProxyPolicy
 _LOGGER = logging.getLogger("fastapiobserver.fastapi")
 _REGISTERED_APPS: weakref.WeakSet[FastAPI] = weakref.WeakSet()
 _ROUTE_PARAM_PATTERN = re.compile(r"\{[^{}]+\}")
+
+
+@dataclass
+class ObservabilityRuntimeState:
+    settings: ObservabilitySettings
+    teardown_done: bool = False
+    excluded_urls: frozenset[str] = frozenset()
 
 
 def install_observability(
@@ -71,16 +80,65 @@ def install_observability(
         otel_metrics_settings = otel_metrics_settings or OTelMetricsSettings.from_env()
         runtime_control_settings = runtime_control_settings or RuntimeControlSettings.from_env()
 
-    # Mark a fresh install cycle so shutdown executes once per lifecycle.
+    # Legacy fallback guard
     app.state._observability_teardown_done = False
 
+    # Mark a fresh install cycle so shutdown executes once per lifecycle.
     # Ensure settings are stored on state for lifespan to access
-    app.state._observability_settings = settings
+    app.state._observability_state = ObservabilityRuntimeState(settings=settings)
 
-    # --- 1. Resolve OTLP log handler (before logging setup) ---
-    # We get the handler first so it can be routed through the
-    # QueueListener pipeline, ensuring filters and sanitization
-    # apply uniformly to both local sinks and OTLP output.
+    # --- 1 & 2. Structured logging + OTLP Logs ---
+    _setup_structured_logging(
+        app=app,
+        settings=settings,
+        otel_settings=otel_settings,
+        otel_logs_settings=otel_logs_settings,
+        security_policy=security_policy,
+        audit_key_provider=audit_key_provider,
+    )
+
+    # --- 3. Metrics backend ---
+    metrics_backend = _setup_metrics_backend(app, settings, metrics_enabled)
+
+    # --- 4. OTel tracing ---
+    if otel_settings and otel_settings.enabled:
+        install_otel(app, settings, otel_settings)
+
+    # --- 4b. Database tracing + SQLCommenter ---
+    if db_engine is not None and otel_settings and otel_settings.enabled:
+        _setup_database_tracing(db_engine, db_commenter_enabled, db_commenter_options)
+
+    # --- 5. OTel metrics ---
+    if otel_metrics_settings and otel_metrics_settings.enabled:
+        install_otel_metrics(
+            settings,
+            otel_metrics_settings,
+            app=app,
+            otel_settings=otel_settings,
+        )
+
+    # --- 6. Middleware & Security Setup ---
+    _setup_request_middleware(
+        app,
+        settings,
+        security_policy,
+        trusted_proxy_policy,
+        metrics_backend,
+    )
+
+    # --- 8. Runtime control plane ---
+    if runtime_control_settings and runtime_control_settings.enabled:
+        mount_control_plane(app, runtime_control_settings)
+
+
+def _setup_structured_logging(
+    app: FastAPI,
+    settings: ObservabilitySettings,
+    otel_settings: OTelSettings | None,
+    otel_logs_settings: OTelLogsSettings | None,
+    security_policy: SecurityPolicy,
+    audit_key_provider: object | None,
+) -> None:
     otel_log_handler = None
     logs_mode: Literal["local_json", "otlp", "both"] = "local_json"
     if otel_logs_settings and otel_logs_settings.enabled:
@@ -99,7 +157,6 @@ def install_observability(
                 "or use logs_mode='both' for local fallback."
             )
 
-    # --- 2. Structured logging ---
     extra_handlers = [otel_log_handler] if otel_log_handler else None
     setup_logging(
         settings,
@@ -110,7 +167,12 @@ def install_observability(
     )
     _register_logging_shutdown_hook(app)
 
-    # --- 3. Metrics backend ---
+
+def _setup_metrics_backend(
+    app: FastAPI,
+    settings: ObservabilitySettings,
+    metrics_enabled: bool | None,
+) -> MetricsBackend:
     enable_metrics = (
         settings.metrics_enabled if metrics_enabled is None else metrics_enabled
     )
@@ -128,46 +190,48 @@ def install_observability(
         path=settings.metrics_path,
         metrics_format=settings.metrics_format,
     )
+    return metrics_backend
 
-    # --- 4. OTel tracing ---
-    if otel_settings and otel_settings.enabled:
-        install_otel(app, settings, otel_settings)
 
-    # --- 4b. Database tracing + SQLCommenter ---
-    if db_engine is not None and otel_settings and otel_settings.enabled:
-        from .db_tracing import (
-            instrument_sqlalchemy,
-            instrument_sqlalchemy_async,
+def _setup_database_tracing(
+    db_engine: Any | Sequence[Any],
+    db_commenter_enabled: bool,
+    db_commenter_options: dict[str, bool] | None,
+) -> None:
+    from .db_tracing import (
+        instrument_sqlalchemy,
+        instrument_sqlalchemy_async,
+    )
+
+    if isinstance(db_engine, (str, bytes, bytearray)):
+        raise TypeError(
+            f"db_engine must be an SQLAlchemy Engine or sequence of Engines, "
+            f"not {type(db_engine).__name__}"
         )
 
-        # Normalize to a list so users can pass a single engine or many.
-        engines = (
-            db_engine if isinstance(db_engine, Sequence) else [db_engine]
-        )
-        for engine in engines:
-            if hasattr(engine, "sync_engine"):
-                instrument_sqlalchemy_async(
-                    engine,
-                    enable_commenter=db_commenter_enabled,
-                    commenter_options=db_commenter_options,
-                )
-            else:
-                instrument_sqlalchemy(
-                    engine,
-                    enable_commenter=db_commenter_enabled,
-                    commenter_options=db_commenter_options,
-                )
+    engines = db_engine if isinstance(db_engine, Sequence) else [db_engine]
+    for engine in engines:
+        if hasattr(engine, "sync_engine"):
+            instrument_sqlalchemy_async(
+                engine,
+                enable_commenter=db_commenter_enabled,
+                commenter_options=db_commenter_options,
+            )
+        else:
+            instrument_sqlalchemy(
+                engine,
+                enable_commenter=db_commenter_enabled,
+                commenter_options=db_commenter_options,
+            )
 
-    # --- 5. OTel metrics ---
-    if otel_metrics_settings and otel_metrics_settings.enabled:
-        install_otel_metrics(
-            settings,
-            otel_metrics_settings,
-            app=app,
-            otel_settings=otel_settings,
-        )
 
-    # --- 6. Middleware ordering check ---
+def _setup_request_middleware(
+    app: FastAPI,
+    settings: ObservabilitySettings,
+    security_policy: SecurityPolicy,
+    trusted_proxy_policy: TrustedProxyPolicy,
+    metrics_backend: MetricsBackend,
+) -> None:
     if (
         security_policy.log_request_body or security_policy.log_response_body
     ) and app.user_middleware:
@@ -188,26 +252,20 @@ def install_observability(
             },
         )
 
-    # --- 7. Request logging middleware ---
-    if not _has_request_logging_middleware(app):
-        app.add_middleware(
-            RequestLoggingMiddleware,
-            settings=settings,
-            security_policy=security_policy,
-            trusted_proxy_policy=trusted_proxy_policy,
-            metrics_backend=metrics_backend,
-        )
-
-    # --- 8. Runtime control plane ---
-    if runtime_control_settings and runtime_control_settings.enabled:
-        mount_control_plane(app, runtime_control_settings)
-
-
-def _has_request_logging_middleware(app: FastAPI) -> bool:
     for middleware in app.user_middleware:
         if middleware.cls is RequestLoggingMiddleware:
-            return True
-    return False
+            return
+
+    app.add_middleware(
+        RequestLoggingMiddleware,
+        settings=settings,
+        security_policy=security_policy,
+        trusted_proxy_policy=trusted_proxy_policy,
+        metrics_backend=metrics_backend,
+    )
+
+def _get_runtime_state(app: FastAPI) -> ObservabilityRuntimeState | None:
+    return getattr(app.state, "_observability_state", None)
 
 def _auto_discover_excluded_routes(app: FastAPI, settings: ObservabilitySettings) -> None:
     """Auto-discover routes like /docs, /openapi.json, or include_in_schema=False."""
@@ -227,36 +285,24 @@ def _auto_discover_excluded_routes(app: FastAPI, settings: ObservabilitySettings
         elif hasattr(route, "include_in_schema") and not route.include_in_schema:
             excluded.update(_build_exclude_path_variants(path))
             
-    # Save into app state, do not mutate settings
-    app.state._observability_excluded_urls = frozenset(excluded)
+    # Save into runtime state, do not mutate settings
+    state = _get_runtime_state(app)
+    if state:
+        state.excluded_urls = frozenset(excluded)
 
     # If OTel middleware is present, dynamically update its excluded URLs
-    if hasattr(app, "middleware_stack") and app.middleware_stack:
-        current = app.middleware_stack
-        while hasattr(current, "app"):
-            # Check by name since we don't want a hard dependency
-            if current.__class__.__name__ == "OpenTelemetryMiddleware":
-                try:
-                    from opentelemetry.util.http import parse_excluded_urls
-                except ImportError:
-                    break
+    try:
+        from .otel.exclusions import update_otel_middleware_exclusions
 
-                current_excluded: set[str] = set()
-                for attr_name in ("excluded_urls", "_excluded_urls"):
-                    existing_exclusions = getattr(current, attr_name, None)
-                    existing_patterns = getattr(existing_exclusions, "_excluded_urls", None)
-                    if existing_patterns:
-                        current_excluded.update(str(pattern) for pattern in existing_patterns)
-
-                current_excluded.update(excluded)
-
-                merged = parse_excluded_urls(",".join(sorted(current_excluded)))
-                if hasattr(current, "excluded_urls"):
-                    setattr(current, "excluded_urls", merged)
-                else:
-                    setattr(current, "_excluded_urls", merged)
-                break
-            current = current.app
+        update_otel_middleware_exclusions(app, excluded)
+    except ImportError:
+        pass
+    except Exception:
+        _LOGGER.warning(
+            "observability.fastapi.otel_exclusion_update_failed",
+            exc_info=True,
+            extra={"_skip_enrichers": True},
+        )
 
 
 def _build_exclude_path_variants(path: str) -> set[str]:
@@ -280,8 +326,9 @@ async def observability_lifespan(app: FastAPI) -> typing.AsyncGenerator[typing.A
         async with observability_lifespan(app):
             yield
     """
-    if hasattr(app.state, "_observability_settings"):
-        _auto_discover_excluded_routes(app, app.state._observability_settings)
+    state = _get_runtime_state(app)
+    if state:
+        _auto_discover_excluded_routes(app, state.settings)
 
     try:
         yield {}
@@ -314,12 +361,19 @@ def _register_logging_shutdown_hook(app: FastAPI) -> None:
 
 
 def _teardown_observability(app: FastAPI) -> None:
-    if getattr(app.state, "_observability_teardown_done", False):
+    state = _get_runtime_state(app)
+    if state:
+        if state.teardown_done:
+            return
+    elif getattr(app.state, "_observability_teardown_done", False):
         return
     
     shutdown_logging()
     uninstrument_sqlalchemy()
     
-    app.state._observability_teardown_done = True
+    if state:
+        state.teardown_done = True
+    else:
+        app.state._observability_teardown_done = True
 
 __all__ = ["install_observability", "observability_lifespan"]

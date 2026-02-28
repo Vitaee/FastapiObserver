@@ -33,52 +33,76 @@ def shutdown_logging() -> None:
     import fastapiobserver.logging.state as state
 
     with state._LOGGING_LOCK:
-        listener = state._QUEUE_LISTENER
-        state._QUEUE_LISTENER = None
-        if listener is not None:
-            try:
-                listener.stop()
-            except Exception:
-                _LOGGER.debug(
-                    "logging.queue_listener.stop_failed",
-                    exc_info=True,
-                    extra={"_skip_enrichers": True},
-                )
-
-        root_logger = logging.getLogger()
-        managed_handlers = [
-            handler
-            for handler in root_logger.handlers
-            if handler in state._MANAGED_HANDLERS
-        ]
-        for handler in managed_handlers:
-            root_logger.removeHandler(handler)
-            try:
-                handler.close()
-            except Exception:
-                _LOGGER.debug(
-                    "logging.managed_handler.close_failed",
-                    exc_info=True,
-                    extra={"_skip_enrichers": True},
-                )
-
-        for output_handler in state._MANAGED_OUTPUT_HANDLERS:
-            try:
-                output_handler.close()
-            except Exception:
-                _LOGGER.debug(
-                    "logging.output_handler.close_failed",
-                    exc_info=True,
-                    extra={"_skip_enrichers": True},
-                )
-        state._MANAGED_OUTPUT_HANDLERS = []
-        state._SINK_CIRCUIT_BREAKERS = []
-        state._MANAGED_HANDLERS.clear()
+        _teardown_handlers_locked(suppress_errors=True)
         _LOG_QUEUE_TELEMETRY.reset(
             log_queue=None,
             queue_capacity=0,
             overflow_policy="drop_oldest",
         )
+
+
+def _teardown_handlers_locked(suppress_errors: bool = True) -> None:
+    """Safely stop listeners, unregister managed handlers, and close outputs."""
+    import fastapiobserver.logging.state as state
+
+    errors: list[Exception] = []
+
+    listener = state._QUEUE_LISTENER
+    state._QUEUE_LISTENER = None
+    if listener is not None:
+        try:
+            listener.stop()
+        except Exception as exc:
+            if not suppress_errors:
+                errors.append(exc)
+            _LOGGER.debug(
+                "logging.queue_listener.stop_failed",
+                exc_info=True,
+                extra={"_skip_enrichers": True},
+            )
+
+    root_logger = logging.getLogger()
+    managed_handlers = [
+        handler
+        for handler in root_logger.handlers
+        if handler in state._MANAGED_HANDLERS
+    ]
+    for handler in managed_handlers:
+        root_logger.removeHandler(handler)
+        try:
+            handler.close()
+        except Exception as exc:
+            if not suppress_errors:
+                errors.append(exc)
+            _LOGGER.debug(
+                "logging.managed_handler.close_failed",
+                exc_info=True,
+                extra={"_skip_enrichers": True},
+            )
+
+    for output_handler in state._MANAGED_OUTPUT_HANDLERS:
+        try:
+            output_handler.close()
+        except Exception as exc:
+            if not suppress_errors:
+                errors.append(exc)
+            _LOGGER.debug(
+                "logging.output_handler.close_failed",
+                exc_info=True,
+                extra={"_skip_enrichers": True},
+            )
+            
+    state._MANAGED_OUTPUT_HANDLERS = []
+    state._SINK_CIRCUIT_BREAKERS = []
+    state._MANAGED_HANDLERS.clear()
+
+    if errors and not suppress_errors:
+        if len(errors) == 1:
+            raise errors[0]
+        error_details = "\n".join(f"  - {type(e).__name__}: {str(e)}" for e in errors)
+        raise RuntimeError(
+            f"Multiple errors during logging teardown:\n{error_details}"
+        ) from errors[0]
 
 
 def setup_logging(
@@ -104,18 +128,7 @@ def setup_logging(
         if managed_handlers and not force:
             return
 
-        for handler in managed_handlers:
-            root_logger.removeHandler(handler)
-            handler.close()
-
-        if state._QUEUE_LISTENER is not None:
-            state._QUEUE_LISTENER.stop()
-            state._QUEUE_LISTENER = None
-
-        for output_handler in state._MANAGED_OUTPUT_HANDLERS:
-            output_handler.close()
-        state._MANAGED_OUTPUT_HANDLERS = []
-        state._SINK_CIRCUIT_BREAKERS = []
+        _teardown_handlers_locked(suppress_errors=False)
         _LOG_QUEUE_TELEMETRY.reset(
             log_queue=None,
             queue_capacity=settings.log_queue_max_size,
@@ -235,18 +248,18 @@ def _restart_queue_listener_in_child() -> None:
     if listener is not None:
         # The inherited queue's Condition lock might be held by the parent
         # or left in an inconsistent state across the fork. To reliably resume
-        # processing, we must create a fresh queue and manually drain any
-        # inherited records from the old queue.
+        # processing, we must create a fresh queue. We explicitly drain and 
+        # DROP inherited records because the parent process's listener thread 
+        # is already processing those same records in the parent process. 
+        # Re-queuing them here causes deterministic duplicate logs.
         old_queue = cast(queue.Queue[logging.LogRecord], listener.queue)
         new_queue: queue.Queue[logging.LogRecord] = queue.Queue(maxsize=old_queue.maxsize)
 
         while not old_queue.empty():
             try:
-                record = old_queue.get_nowait()
-                new_queue.put_nowait(record)
+                # Discard the record to prevent pre-fork replay duplication
+                _ = old_queue.get_nowait()
             except queue.Empty:
-                break
-            except queue.Full:
                 break
 
         # Re-attach the new queue to the OverflowPolicyQueueHandler if present

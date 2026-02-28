@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import typing
 
 import pytest
 
@@ -14,9 +15,8 @@ from fastapiobserver.request_context import (
 
 pytest_plugins = ("tests.conftest_otlp",)
 
-
 @pytest.fixture(autouse=True)
-def reset_global_state() -> None:
+def reset_global_state() -> typing.Generator[None, None, None]:
     root = logging.getLogger()
     original_level = root.level
 

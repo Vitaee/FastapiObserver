@@ -5,9 +5,8 @@ import re
 from typing import Literal
 
 from pydantic import Field, field_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from .utils import normalize_path, parse_csv
+from .utils import InternalSettingsBase, normalize_path, parse_csv
 
 _HEADER_NAME_RE = re.compile(r"^[A-Za-z0-9-]+$")
 DEFAULT_METRICS_EXCLUDE_PATHS = (
@@ -22,12 +21,7 @@ MetricsFormat = Literal["prometheus", "openmetrics", "negotiate"]
 LogQueueOverflowPolicy = Literal["drop_oldest", "drop_newest", "block"]
 
 
-class ObservabilitySettings(BaseSettings):
-    model_config = SettingsConfigDict(
-        extra="ignore",
-        case_sensitive=False,
-        populate_by_name=True,
-    )
+class ObservabilitySettings(InternalSettingsBase):
 
     # --- identity ---
     app_name: str = Field(default="app", validation_alias="APP_NAME")

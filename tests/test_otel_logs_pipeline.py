@@ -69,4 +69,5 @@ def test_sanitizing_otlp_handler_sanitizes_custom_attributes() -> None:
 
     # Wrapper emits a cloned record so sibling handlers see the original.
     assert getattr(record, "password") == "secret"
-    assert record.event["password"] == "secret"
+    record_event = getattr(record, "event")
+    assert record_event["password"] == "secret"

@@ -96,8 +96,6 @@ import fastapiobserver
 
 ---
 
-## 5-Minute Quick Start
-
 ## 5-Minute Quick Start ("Zero-Glue")
 
 You can configure the entire library via environment variables simply by calling `install_observability(app)`.
@@ -157,16 +155,17 @@ To dramatically reduce boilerplate, you can use the `OBS_PROFILE` environment va
 
 ## Documentation Map
 
-For deep-dive documentation, please explore the official documentation site (or read the `docs/` folder directly):
-- [Security & Presets](security.md)
-- [Environment Variables](configuration.md)
-- [Runtime Control](runtime-control.md)
-- [OpenTelemetry](opentelemetry.md)
-- [Logtail Sink](logtail-sink.md)
-- [Audit Logging](audit-logging.md)
-- [Database Tracing](db-tracing.md)
-- [GraphQL Support](graphql.md)
-- [Architecture & Operations](architecture.md)
-- [Production Deployment](deployment.md)
-- [Performance Tuning](tuning.md)
-- [Advanced Operations](advanced.md)
+For deep-dive documentation, read the `docs/` folder:
+- [Security & Presets](docs/security.md)
+- [Environment Variables](docs/configuration.md)
+- [Runtime Control](docs/runtime-control.md)
+- [OpenTelemetry](docs/opentelemetry.md)
+- [Logtail Sink](docs/logtail-sink.md)
+- [Audit Logging](docs/audit-logging.md)
+- [Database Tracing](docs/db-tracing.md)
+- [GraphQL Support](docs/graphql.md)
+- [Architecture & Operations](docs/architecture.md)
+- [Production Deployment](docs/deployment.md)
+- [Performance Tuning](docs/tuning.md)
+- [Advanced Operations](docs/advanced.md)
+- [Maintenance & Contributing](docs/contributing.md) (quality gates, release flow, runtime stress harness)

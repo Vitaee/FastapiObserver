@@ -35,8 +35,9 @@ class _MetricsRecorder:
         
         if scope and "app" in scope:
             app = scope["app"]
-            if hasattr(app.state, "_observability_excluded_urls"):
-                excluded_urls = app.state._observability_excluded_urls
+            state = getattr(app.state, "_observability_state", None)
+            if state is not None:
+                excluded_urls = state.excluded_urls
 
         if (
             path in excluded_urls

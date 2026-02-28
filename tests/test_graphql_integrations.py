@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import typing
 import pytest
 from unittest.mock import MagicMock, patch
 
@@ -45,7 +46,8 @@ def test_strawberry_extension_injects_operation_name_into_log_context() -> None:
     assert final_context is not None
     assert final_context["tenant"] == "acme"
     assert "graphql" in final_context
-    assert final_context["graphql"]["operation_name"] == "GetUsersQuery"
+    graphql_info = typing.cast(dict[str, str], final_context["graphql"])
+    assert graphql_info["operation_name"] == "GetUsersQuery"
 
 
 def test_strawberry_extension_handles_missing_operation_name() -> None:
@@ -57,7 +59,8 @@ def test_strawberry_extension_handles_missing_operation_name() -> None:
     final_context = _drive_on_operation(extension)
 
     assert final_context is not None
-    assert final_context["graphql"]["operation_name"] == "AnonymousOperation"
+    graphql_info = typing.cast(dict[str, str], final_context["graphql"])
+    assert graphql_info["operation_name"] == "AnonymousOperation"
 
 
 @patch("fastapiobserver.integrations.strawberry.get_user_context")

@@ -18,6 +18,30 @@ Reproducible benchmark harness and methodology:
 
 ---
 
+## Runtime Stress Validation
+
+For high-risk changes in logging lifecycle, queue pressure behavior, fork safety,
+or FastAPI lifespan teardown, run the runtime stress harness:
+
+```bash
+uv run python scripts/runtime_stress.py --profile quick
+uv run python scripts/runtime_stress.py --profile standard --json
+```
+
+Profiles:
+- `quick`: fast local sanity pass.
+- `standard`: recommended pre-merge/pre-release validation.
+- `deep`: heavy soak run for major refactors.
+
+Implementation note:
+- Fork replay verification is executed in an isolated subprocess so the main harness run stays clean on Python versions that warn about multi-threaded `os.fork()`.
+
+CI automation:
+- Manual workflow: `.github/workflows/runtime-stress.yml` (`workflow_dispatch`)
+- Weekly scheduled quick stress run
+
+---
+
 ## Release Tracks
 
 - `0.1.x`: secure-by-default core
@@ -56,6 +80,12 @@ Manual fallback command (uses `.env` with `PYPI_TOKEN`):
 
 ```bash
 scripts/deploy_pypi.sh --tag v1.3.1 --push-tag
+```
+
+Before tagging, maintainers should run:
+
+```bash
+uv run python scripts/runtime_stress.py --profile standard
 ```
 
 ### 1) Build distributions

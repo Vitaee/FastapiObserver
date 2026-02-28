@@ -58,7 +58,7 @@ def test_observability_settings_read_from_env_automatically() -> None:
     from fastapiobserver.middleware.request_logging import RequestLoggingMiddleware
     
     middleware = next(m for m in app.user_middleware if m.cls is RequestLoggingMiddleware)
-    settings: ObservabilitySettings = middleware.kwargs["settings"]
+    settings = typing.cast(ObservabilitySettings, middleware.kwargs["settings"])
     
     assert settings.app_name == "zero-glue-test"
     assert settings.service == "magic-service"
@@ -75,7 +75,7 @@ def test_development_profile_overrides() -> None:
     
     from fastapiobserver.middleware.request_logging import RequestLoggingMiddleware
     middleware = next(m for m in app.user_middleware if m.cls is RequestLoggingMiddleware)
-    settings: ObservabilitySettings = middleware.kwargs["settings"]
+    settings = typing.cast(ObservabilitySettings, middleware.kwargs["settings"])
     
     from fastapiobserver.otel.settings import OTelSettings
     otel_settings = OTelSettings.from_env(settings)
@@ -96,7 +96,7 @@ def test_development_profile_pure_defaults() -> None:
     
     from fastapiobserver.middleware.request_logging import RequestLoggingMiddleware
     middleware = next(m for m in app.user_middleware if m.cls is RequestLoggingMiddleware)
-    settings: ObservabilitySettings = middleware.kwargs["settings"]
+    settings = typing.cast(ObservabilitySettings, middleware.kwargs["settings"])
 
     assert settings.log_level == "DEBUG"
 
@@ -110,8 +110,8 @@ def test_production_profile_enforces_strict() -> None:
     
     from fastapiobserver.middleware.request_logging import RequestLoggingMiddleware
     middleware = next(m for m in app.user_middleware if m.cls is RequestLoggingMiddleware)
-    settings: ObservabilitySettings = middleware.kwargs["settings"]
-    security_policy: SecurityPolicy = middleware.kwargs["security_policy"]
+    settings = typing.cast(ObservabilitySettings, middleware.kwargs["settings"])
+    security_policy = typing.cast(SecurityPolicy, middleware.kwargs["security_policy"])
     
     assert settings.log_level == "INFO"
     assert settings.log_queue_max_size == 20000

@@ -12,7 +12,7 @@ from fastapiobserver.security import SecurityPolicy, TrustedProxyPolicy
 def test_observability_settings_normalize_values() -> None:
     settings = ObservabilitySettings(
         log_level="debug",
-        log_queue_overflow_policy="DROP_NEWEST",
+        log_queue_overflow_policy="DROP_NEWEST",  # type: ignore[arg-type]
         sink_circuit_breaker_enabled=True,
         sink_circuit_breaker_failure_threshold=3,
         sink_circuit_breaker_recovery_timeout_seconds=15.0,
@@ -42,7 +42,7 @@ def test_observability_settings_reject_invalid_header() -> None:
 
 def test_observability_settings_reject_invalid_log_queue_policy() -> None:
     with pytest.raises(ValidationError, match="log_queue_overflow_policy"):
-        ObservabilitySettings(log_queue_overflow_policy="evict_random")
+        ObservabilitySettings(log_queue_overflow_policy="evict_random")  # type: ignore[arg-type]
 
 
 def test_observability_settings_reject_empty_metrics_backend() -> None:

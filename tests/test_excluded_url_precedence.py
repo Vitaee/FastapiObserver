@@ -15,6 +15,7 @@ def test_tier1_explicit_config_takes_priority(monkeypatch: pytest.MonkeyPatch) -
         otel_excluded_urls=("/custom/path", "/another"),
     )
     result = _build_excluded_urls_csv(settings)
+    assert result is not None
     assert "/custom/path" in result
     assert "/another" in result
 
@@ -61,7 +62,7 @@ def test_tier3_package_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_explicit_empty_exclusion_returns_empty_string() -> None:
     """Operators can set OTEL_EXCLUDED_URLS='' to mean 'no exclusions at all'."""
-    settings = ObservabilitySettings(otel_excluded_urls="")
+    settings = ObservabilitySettings(otel_excluded_urls="")  # type: ignore[arg-type]
     assert settings.otel_excluded_urls == ()  # validator converts "" → empty tuple
     result = _build_excluded_urls_csv(settings)
     assert result == ""  # empty string = trace everything, no exclusions
@@ -87,7 +88,7 @@ def test_install_otel_passes_empty_excluded_urls(
     monkeypatch.setattr(FastAPIInstrumentor, "instrument_app", spy_instrument_app)
 
     app = FastAPI()
-    settings = ObservabilitySettings(otel_excluded_urls="")
+    settings = ObservabilitySettings(otel_excluded_urls="")  # type: ignore[arg-type]
     otel_settings = OTelSettings(enabled=True, service_name="test-svc")
 
     try:
