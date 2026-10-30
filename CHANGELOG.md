@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [1.4.1] - 2026-10-31
+
 ### Added
 - Documentation site at https://vitaee.github.io/FastapiObserver/, built from `docs/` with Zensical and deployed to GitHub Pages by a new `Docs` workflow (strict build on pull requests that touch the docs).
 
