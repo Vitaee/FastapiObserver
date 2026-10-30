@@ -38,7 +38,7 @@ dependencies = [
 
 [project.urls]
 Homepage = "https://github.com/Vitaee/FastapiObserver"
-Documentation = "https://github.com/Vitaee/FastapiObserver#readme"
+Documentation = "https://vitaee.github.io/FastapiObserver/"
 Repository = "https://github.com/Vitaee/FastapiObserver.git"
 Issues = "https://github.com/Vitaee/FastapiObserver/issues"
 Funding = "https://buymeacoffee.com/FYbPCSu"

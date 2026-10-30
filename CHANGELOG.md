@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- Documentation site at https://vitaee.github.io/FastapiObserver/, built from `docs/` with Zensical and deployed to GitHub Pages by a new `Docs` workflow (strict build on pull requests that touch the docs).
+
+### Fixed
+- README documentation links are now absolute links to the docs site. The relative `docs/*.md` links returned 404 on the PyPI project page, and the `Documentation` project URL now points to the site.
+
 ## [1.4.0] - 2026-10-31
 
 ### Added

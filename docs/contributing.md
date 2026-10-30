@@ -131,6 +131,20 @@ The pre-push hook runs:
 
 ---
 
+## Documentation Site
+
+The site at [vitaee.github.io/FastapiObserver](https://vitaee.github.io/FastapiObserver/) is built from `docs/` and `mkdocs.yml` with [Zensical](https://zensical.org/). The `Docs` workflow builds it in strict mode on pull requests and deploys it to GitHub Pages on pushes to `main`.
+
+Preview locally:
+
+```bash
+uvx zensical==0.0.73 serve
+```
+
+New pages must be added to `nav` in `mkdocs.yml`.
+
+---
+
 ## Roadmap Tracking
 
 See [NEXT_STEPS.md](https://github.com/Vitaee/FastapiObserver/blob/main/NEXT_STEPS.md) for the active roadmap and release checklist.
