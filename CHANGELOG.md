@@ -4,6 +4,9 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+- `sanitize_event` now masks containers nested beyond `MAX_SANITIZE_DEPTH` instead of returning them unredacted, and the limit now also applies to nested lists and tuples.
+
 ## [1.3.2] - 2026-02-27
 
 ### Fixed
