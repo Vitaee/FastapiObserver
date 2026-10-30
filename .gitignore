@@ -27,4 +27,3 @@ release_dist_*
 #.agents/*
 
 site/
-mkdocs.yml

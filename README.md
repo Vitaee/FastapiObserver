@@ -7,6 +7,8 @@
 
 `fastapi-observer` gives you structured JSON logs, request correlation, Prometheus metrics, OpenTelemetry tracing, security redaction presets, and runtime controls in one install step and one function call.
 
+**Documentation:** [vitaee.github.io/FastapiObserver](https://vitaee.github.io/FastapiObserver/)
+
 **Supported Python versions:** `3.10` to `3.15`
 
 ---
@@ -155,17 +157,17 @@ To dramatically reduce boilerplate, you can use the `OBS_PROFILE` environment va
 
 ## Documentation Map
 
-For deep-dive documentation, read the `docs/` folder:
-- [Security & Presets](docs/security.md)
-- [Environment Variables](docs/configuration.md)
-- [Runtime Control](docs/runtime-control.md)
-- [OpenTelemetry](docs/opentelemetry.md)
-- [Logtail Sink](docs/logtail-sink.md)
-- [Audit Logging](docs/audit-logging.md)
-- [Database Tracing](docs/db-tracing.md)
-- [GraphQL Support](docs/graphql.md)
-- [Architecture & Operations](docs/architecture.md)
-- [Production Deployment](docs/deployment.md)
-- [Performance Tuning](docs/tuning.md)
-- [Advanced Operations](docs/advanced.md)
-- [Maintenance & Contributing](docs/contributing.md) (quality gates, release flow, runtime stress harness)
+Full documentation lives at [vitaee.github.io/FastapiObserver](https://vitaee.github.io/FastapiObserver/). Deep dives:
+- [Security & Presets](https://vitaee.github.io/FastapiObserver/security/)
+- [Environment Variables](https://vitaee.github.io/FastapiObserver/configuration/)
+- [Runtime Control](https://vitaee.github.io/FastapiObserver/runtime-control/)
+- [OpenTelemetry](https://vitaee.github.io/FastapiObserver/opentelemetry/)
+- [Logtail Sink](https://vitaee.github.io/FastapiObserver/logtail-sink/)
+- [Audit Logging](https://vitaee.github.io/FastapiObserver/audit-logging/)
+- [Database Tracing](https://vitaee.github.io/FastapiObserver/db-tracing/)
+- [GraphQL Support](https://vitaee.github.io/FastapiObserver/graphql/)
+- [Architecture & Operations](https://vitaee.github.io/FastapiObserver/architecture/)
+- [Production Deployment](https://vitaee.github.io/FastapiObserver/deployment/)
+- [Performance Tuning](https://vitaee.github.io/FastapiObserver/tuning/)
+- [Advanced Operations](https://vitaee.github.io/FastapiObserver/advanced/)
+- [Maintenance & Contributing](https://vitaee.github.io/FastapiObserver/contributing/) (quality gates, release flow, runtime stress harness)
