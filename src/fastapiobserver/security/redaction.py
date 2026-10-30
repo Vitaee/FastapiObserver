@@ -51,8 +51,6 @@ def _sanitize_mapping(
     header_allowlist: set[str] | None,
     event_key_allowlist: set[str] | None,
 ) -> dict[str, Any]:
-    if depth > MAX_SANITIZE_DEPTH:
-        return dict(data)
     out: dict[str, Any] = {}
     for key, value in data.items():
         normalized_key = _normalize_key(str(key))
@@ -97,6 +95,9 @@ def _sanitize_value(
     header_allowlist: set[str] | None,
     event_key_allowlist: set[str] | None,
 ) -> Any:
+    if depth > MAX_SANITIZE_DEPTH and isinstance(value, (Mapping, list, tuple)):
+        # Too deep to inspect: mask rather than pass unchecked data through.
+        return policy.mask_text
     if isinstance(value, Mapping):
         string_mapping = {str(k): v for k, v in value.items()}
         return _sanitize_mapping(

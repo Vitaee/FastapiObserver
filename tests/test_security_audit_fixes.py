@@ -111,6 +111,19 @@ def test_sanitize_event_handles_deeply_nested_payload() -> None:
     assert isinstance(result, dict)
 
 
+def test_sanitize_event_masks_data_beyond_depth_limit() -> None:
+    """Data too deep to inspect is masked, not passed through unredacted."""
+    deep_dict: dict = {"password": "secret"}
+    deep_list: list = [{"password": "secret"}]
+    for _ in range(MAX_SANITIZE_DEPTH + 20):
+        deep_dict = {"nested": deep_dict}
+        deep_list = [deep_list]
+
+    result = sanitize_event({"dict": deep_dict, "list": deep_list}, SecurityPolicy())
+
+    assert "secret" not in repr(result)
+
+
 def test_sanitize_event_still_redacts_within_depth_limit() -> None:
     """Normal nesting (within limit) still redacts correctly."""
     data: dict = {"password": "secret"}

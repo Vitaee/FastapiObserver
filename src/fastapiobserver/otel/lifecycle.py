@@ -6,6 +6,8 @@ import atexit
 import logging
 import threading
 import weakref
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
 from typing import Any, Callable
 
 from fastapi import FastAPI
@@ -43,7 +45,20 @@ def register_shutdown_hook(
     if normalized_key in app_hook_keys:
         return
 
-    app.add_event_handler("shutdown", run_once)
+    # Wrap the lifespan: Starlette 1.0 removed add_event_handler/on_shutdown.
+    original_lifespan = app.router.lifespan_context
+
+    @asynccontextmanager
+    async def lifespan_with_shutdown_hook(
+        app_inst: FastAPI,
+    ) -> AsyncGenerator[Any, None]:
+        try:
+            async with original_lifespan(app_inst) as state:
+                yield state
+        finally:
+            run_once()
+
+    app.router.lifespan_context = lifespan_with_shutdown_hook
     app_hook_keys.add(normalized_key)
 
 

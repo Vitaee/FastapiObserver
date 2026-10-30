@@ -4,6 +4,23 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-10-31
+
+### Added
+- Python 3.15 support (`requires-python` now `<3.16`, added to the CI matrix).
+
+### Changed
+- Raised minimum versions past releases with known vulnerabilities: `starlette>=1.3.1` (and `fastapi>=0.133.0`, the first release allowing Starlette 1.x), `opentelemetry-*>=1.45.1` / instrumentations `>=0.66b1`, and `cryptography>=50.0.0` for the `audit` extra.
+- Refreshed `uv.lock` to the latest releases and raised dev tooling minimums (mypy 2.x, ruff 0.17, pytest 9.2, pytest-randomly 5). Dev tests use `httpx2` on Python 3.11+, as Starlette's test client now expects.
+- Updated GitHub Actions to `actions/checkout@v7`, `actions/setup-python@v7` and `softprops/action-gh-release@v3`.
+
+### Removed
+- Unused `mkdocs-material` dependency group (the repository has no MkDocs config).
+
+### Fixed
+- Starlette 1.0 compatibility: OTel provider shutdown hooks now wrap the app lifespan instead of calling the removed `add_event_handler`, which crashed `install_observability` at startup when OTel was enabled on FastAPI with Starlette 1.x. Hooks now also run when the app defines its own `lifespan`.
+- `sanitize_event` now masks containers nested beyond `MAX_SANITIZE_DEPTH` instead of returning them unredacted, and the limit now also applies to nested lists and tuples.
+
 ## [1.3.2] - 2026-02-27
 
 ### Fixed

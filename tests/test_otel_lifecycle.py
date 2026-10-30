@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import asyncio
-import inspect
 import uuid
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
@@ -12,13 +13,12 @@ from fastapiobserver.otel.lifecycle import (
 )
 
 
-import typing
+def _run_lifespan(app: FastAPI) -> None:
+    async def _cycle() -> None:
+        async with app.router.lifespan_context(app):
+            pass
 
-def _run_shutdown_handlers(app: FastAPI) -> None:
-    for handler in app.router.on_shutdown:
-        result = handler()
-        if inspect.isawaitable(result):
-            asyncio.run(typing.cast(typing.Coroutine[typing.Any, typing.Any, typing.Any], result))
+    asyncio.run(_cycle())
 
 
 def test_register_shutdown_hook_is_idempotent_per_app() -> None:
@@ -29,11 +29,25 @@ def test_register_shutdown_hook_is_idempotent_per_app() -> None:
     register_shutdown_hook(key, lambda: calls.append("first"), app=app)
     register_shutdown_hook(key, lambda: calls.append("second"), app=app)
 
-    assert len(app.router.on_shutdown) == 1
-
-    _run_shutdown_handlers(app)
-    _run_shutdown_handlers(app)
+    _run_lifespan(app)
+    _run_lifespan(app)
     assert calls == ["first"]
+
+
+def test_register_shutdown_hook_runs_with_custom_lifespan() -> None:
+    events: list[str] = []
+
+    @asynccontextmanager
+    async def lifespan(_: FastAPI) -> AsyncGenerator[None, None]:
+        events.append("startup")
+        yield
+        events.append("shutdown")
+
+    app = FastAPI(lifespan=lifespan)
+    register_shutdown_hook(f"otel.test.{uuid.uuid4()}", lambda: events.append("hook"), app=app)
+
+    _run_lifespan(app)
+    assert events == ["startup", "shutdown", "hook"]
 
 
 def test_build_provider_shutdown_callback_flush_only() -> None:
