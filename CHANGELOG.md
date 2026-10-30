@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-10-31
+
 ### Added
 - Python 3.15 support (`requires-python` now `<3.16`, added to the CI matrix).
 
