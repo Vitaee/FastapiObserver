@@ -5,6 +5,7 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Fixed
+- Starlette 1.0 compatibility: OTel provider shutdown hooks now wrap the app lifespan instead of calling the removed `add_event_handler`, which crashed `install_observability` at startup when OTel was enabled on FastAPI with Starlette 1.x. Hooks now also run when the app defines its own `lifespan`.
 - `sanitize_event` now masks containers nested beyond `MAX_SANITIZE_DEPTH` instead of returning them unredacted, and the limit now also applies to nested lists and tuples.
 
 ## [1.3.2] - 2026-02-27
