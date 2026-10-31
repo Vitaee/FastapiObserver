@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [1.10.0] - 2026-10-31
+
 ### Added
 - `OBS_LOOP_BLOCK_THRESHOLD_MS`: when the event loop doesn't run for this long, a background thread writes `event_loop.blocked` with the stack of the call that's blocking it, such as `requests.get` or `time.sleep` inside `async def`. One line per block. The thread runs during the app's lifespan.
 - `LOG_LEVEL_ON_ERROR`: a request's lines from this level up to `LOG_LEVEL` are held in memory, at most 200, and written before its `request.failed` or `request.server_error` line only if it ends in a 5xx or an unhandled exception. With it set, the root logger runs at the lower level, so those records are created.
