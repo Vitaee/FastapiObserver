@@ -11,7 +11,7 @@ Each record says what was decided, the evidence for it and what it cost. Read th
 | [0005](0005-route-templates-as-metric-labels.md) | Route templates as metric labels | One series per route, not per URL, and scanner 404s share one `<unmatched>` label. |
 | [0006](0006-delegate-to-opentelemetry.md) | Hand work to OpenTelemetry and `prometheus_client` | Use them for what they already do, and accept that their changes reach us. |
 | [0007](0007-new-destinations-are-opt-in.md) | New destinations and controls are opt-in | Sinks from other packages, the control plane, metrics and OTLP export stay off until configured. |
-| [0008](0008-one-state-object-per-request.md) | One state object per request | Held log lines, query totals and log bytes reach the middleware from sync endpoints and span processors. Costs about 2 µs per request. |
+| [0008](0008-one-state-object-per-request.md) | One state object per request | Held log lines, user context, query totals and log bytes reach the middleware from sync endpoints and span processors. Costs about 2 µs per request. |
 
 ## Postmortems
 
