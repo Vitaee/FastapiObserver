@@ -135,7 +135,7 @@ def install_observability(
 
     # --- 8. Runtime control plane ---
     if runtime_control_settings and runtime_control_settings.enabled:
-        mount_control_plane(app, runtime_control_settings)
+        mount_control_plane(app, runtime_control_settings, trusted_proxy_policy)
 
 
 def _setup_structured_logging(

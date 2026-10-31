@@ -212,9 +212,42 @@ def test_discover_entry_point_sinks_exceptions(monkeypatch: Any) -> None:
         return []
 
     monkeypatch.setattr(importlib.metadata, "entry_points", mock_entry_points_success)
-    discover_entry_point_sinks()
+    discover_entry_point_sinks(["bad_ep"])
 
     assert len(get_registered_sinks()) == 0
+
+
+def test_entry_point_sinks_load_only_when_enabled(monkeypatch: Any, caplog: Any) -> None:
+    clear_sinks()
+    import importlib.metadata
+
+    loaded: list[str] = []
+
+    class EntryPoint:
+        def __init__(self, name: str) -> None:
+            self.name = name
+
+        def load(self) -> Any:
+            loaded.append(self.name)
+            return StdoutSink
+
+    monkeypatch.setattr(
+        importlib.metadata,
+        "entry_points",
+        lambda **kwargs: [EntryPoint("wanted"), EntryPoint("unwanted")],
+    )
+    try:
+        with caplog.at_level(logging.WARNING, logger="fastapiobserver.sinks"):
+            discover_entry_point_sinks(["wanted", "typo"])
+
+        assert loaded == ["wanted"]  # "unwanted" is never imported
+        assert "stdout" in get_registered_sinks()
+        assert {record.getMessage() for record in caplog.records} == {
+            "sinks.entry_point.not_enabled",
+            "sinks.entry_point.missing",
+        }
+    finally:
+        clear_sinks()
 
 def test_sink_registry() -> None:
     clear_sinks()

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib
+import json
 from typing import Any, Callable, TypeVar, cast
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -55,7 +56,7 @@ def parse_csv(
     normalize_fn: Callable[[str], str] | None = None,
     nullish_values: set[str] | frozenset[str] = _NULLISH_VALUES,
 ) -> tuple[str, ...] | None:
-    """Parse CSV-like values into tuples.
+    """Parse CSV-like values, or a JSON array, into tuples.
 
     Behaviour:
     - ``optional=False``: returns ``default`` on empty/invalid input.
@@ -66,6 +67,9 @@ def parse_csv(
     items: tuple[str, ...]
     if value is None:
         return None if optional else default
+    if isinstance(value, str) and value.lstrip().startswith("["):
+        # A JSON array, the format pydantic-settings expects for list settings.
+        value = json.loads(value)
 
     if isinstance(value, str):
         normalized_text = value.strip()

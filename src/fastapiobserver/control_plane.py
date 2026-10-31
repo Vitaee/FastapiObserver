@@ -6,11 +6,12 @@ import secrets
 import weakref
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, FastAPI, Header, HTTPException, status
+from fastapi import APIRouter, Depends, FastAPI, Header, HTTPException, Request, status
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from .otel import get_trace_sampling_ratio, set_trace_sampling_ratio
+from .security import TrustedProxyPolicy, is_trusted_client_ip, resolve_client_ip
 from .utils import EnvLoadable, normalize_path
 
 __all__ = [
@@ -52,7 +53,15 @@ class ControlPlanePayload(BaseModel):
     trace_sampling_ratio: float | None = Field(default=None, ge=0.0, le=1.0)
 
 
-def mount_control_plane(app: FastAPI, settings: RuntimeControlSettings) -> None:
+def mount_control_plane(
+    app: FastAPI,
+    settings: RuntimeControlSettings,
+    trusted_proxy_policy: TrustedProxyPolicy | None = None,
+) -> None:
+    """Mount the runtime control endpoint.
+
+    Callers must come from ``OBS_TRUSTED_CIDRS`` and send the bearer token.
+    """
     if not settings.enabled:
         return
     if settings.auth_mode != "token":
@@ -69,9 +78,15 @@ def mount_control_plane(app: FastAPI, settings: RuntimeControlSettings) -> None:
     if normalized_path in mounted_paths:
         return
 
+    policy = trusted_proxy_policy or TrustedProxyPolicy.from_env()
+
     def authorize(
+        request: Request,
         authorization: Annotated[str | None, Header()] = None,
     ) -> None:
+        # Checked before the token, so callers outside the network can't guess it.
+        if not _is_trusted_caller(request, policy):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
         current_token = os.getenv(settings.token_env_var)
         if not current_token:
             raise HTTPException(
@@ -105,6 +120,19 @@ def mount_control_plane(app: FastAPI, settings: RuntimeControlSettings) -> None:
 
     app.include_router(router)
     mounted_paths.add(normalized_path)
+
+
+def _is_trusted_caller(request: Request, policy: TrustedProxyPolicy) -> bool:
+    headers = request.scope["headers"]
+    if (
+        policy.enabled
+        and not policy.honor_forwarded_headers
+        and any(name.lower() == b"x-forwarded-for" for name, _ in headers)
+    ):
+        # Came through a proxy, so the peer address isn't the real caller's.
+        return False
+    peer = request.client.host if request.client else None
+    return is_trusted_client_ip(resolve_client_ip(peer, headers, policy), policy)
 
 
 def _current_runtime_settings() -> dict[str, object]:

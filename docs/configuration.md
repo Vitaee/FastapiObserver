@@ -32,6 +32,7 @@ Notes:
 | `APP_VERSION` | `0.0.0` | Service version |
 | `LOG_LEVEL` | `INFO` | Root log level |
 | `LOG_DIR` | - | Optional file log directory |
+| `OBS_LOG_SINKS` | - | Sinks from installed packages to send logs to, by entry-point name. Packages not listed are never loaded |
 | `LOG_QUEUE_MAX_SIZE` | `10000` | Max in-memory records in core log queue |
 | `LOG_QUEUE_OVERFLOW_POLICY` | `drop_oldest` | Queue overflow behavior: `drop_oldest`, `drop_newest`, `block` |
 | `LOG_QUEUE_BLOCK_TIMEOUT_SECONDS` | `1.0` | Timeout used by `block` policy before dropping newest |
@@ -48,7 +49,7 @@ Notes:
 | `METRICS_ENABLED` | `false` | Enable metrics backend |
 | `METRICS_BACKEND` | `prometheus` | Registered backend name used by `install_observability()` |
 | `METRICS_PATH` | `/metrics` | Metrics endpoint path |
-| `METRICS_EXCLUDE_PATHS` | `/metrics,/health,/healthz,/docs,/openapi.json` | Skip metrics for noisy endpoints |
+| `METRICS_EXCLUDE_PATHS` | `/metrics,/health,/healthz,/docs,/openapi.json` | Skip metrics for noisy endpoints. Comma-separated or a JSON array |
 | `METRICS_EXEMPLARS_ENABLED` | `false` | Enable exemplars where supported |
 | `METRICS_FORMAT` | `negotiate` | `negotiate` lets `prometheus_client` pick from the `Accept` header; `openmetrics` or `prometheus` always serve that format. Responses are gzipped when the scraper accepts it |
 

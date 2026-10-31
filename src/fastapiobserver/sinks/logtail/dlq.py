@@ -2,17 +2,36 @@ from __future__ import annotations
 
 import os
 import gzip
+import io
 import json
 import logging
+import logging.handlers
 import threading
-from typing import Literal, Any
+from typing import Any, Literal, cast
 from datetime import datetime, timezone
 import shutil
 
+def _owner_only(path: str, flags: int) -> int:
+    """``open()`` opener that creates files readable by their owner only."""
+    return os.open(path, flags, 0o600)
+
+
+class _OwnerOnlyRotatingFileHandler(logging.handlers.RotatingFileHandler):
+    def _open(self) -> io.TextIOWrapper:
+        stream = open(
+            self.baseFilename,
+            self.mode,
+            encoding=self.encoding,
+            errors=self.errors,
+            opener=_owner_only,
+        )
+        return cast(io.TextIOWrapper, stream)
+
+
 def _gzip_rotator(source: str, dest: str) -> None:
     try:
-        with open(source, "rb") as f_in:
-            with gzip.open(dest, "wb") as f_out:
+        with open(source, "rb") as f_in, open(dest, "wb", opener=_owner_only) as raw_out:
+            with gzip.GzipFile(fileobj=raw_out, mode="wb") as f_out:
                 shutil.copyfileobj(f_in, f_out)
         os.remove(source)
     except Exception:
@@ -38,8 +57,6 @@ class LogtailDLQ:
         backup_count: int,
         compress: bool,
     ) -> None:
-        import logging.handlers
-
         self.directory = directory
         self.filename = filename
         self.max_bytes = max_bytes
@@ -53,10 +70,11 @@ class LogtailDLQ:
         # Re-entrant because handler error callbacks can be invoked while submit() holds the lock.
         self._lock = threading.RLock()
 
-        os.makedirs(self.directory, exist_ok=True)
+        # Dropped log lines can hold user data, so keep them away from other OS users.
+        os.makedirs(self.directory, mode=0o700, exist_ok=True)
         self.filepath = os.path.join(self.directory, self.filename)
 
-        self._handler = logging.handlers.RotatingFileHandler(
+        self._handler = _OwnerOnlyRotatingFileHandler(
             self.filepath,
             maxBytes=self.max_bytes,
             backupCount=self.backup_count,

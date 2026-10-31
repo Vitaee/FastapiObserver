@@ -13,4 +13,5 @@
 
 > [!TIP]
 > The Logtail Dead Letter Queue (DLQ) provides best-effort local durability. If the internal memory queue overflows under immense API pressure (`queue.Full`), or if an external network partition completely exhausts the outbound HTTP retry backoff, the dropped log payloads are immediately salvaged into local NDJSON envelopes. You can replay these files to BetterStack later using the provided `scripts/replay_dlq.py` utility.
+> The directory is created readable by its owner only (`0700`) and DLQ files as `0600`, since dropped lines can hold user data. Files and directories that already exist keep their permissions.
 
