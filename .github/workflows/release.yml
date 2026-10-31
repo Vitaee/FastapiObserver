@@ -78,6 +78,9 @@ jobs:
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           attestations: true
+          # A re-run rebuilds with new timestamps, so files PyPI already has are skipped
+          # instead of failing the upload of the rest.
+          skip-existing: true
 
       - name: Create or update GitHub Release
         uses: softprops/action-gh-release@v3
