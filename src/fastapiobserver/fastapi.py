@@ -5,11 +5,11 @@ import os
 import re
 import weakref
 import typing
+from urllib.parse import urlsplit, urlunsplit
 from collections.abc import Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import Any, Literal
-from urllib.parse import urlsplit, urlunsplit
 
 from fastapi import FastAPI
 
