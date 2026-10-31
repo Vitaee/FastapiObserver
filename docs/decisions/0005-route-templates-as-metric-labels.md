@@ -1,6 +1,6 @@
 # 0005: Route templates, not paths, as metric labels
 
-**Status:** accepted, with a known gap · **Reviewed:** 2026-10-31
+**Status:** accepted · **Reviewed:** 2026-10-31
 
 ## Context
 
@@ -8,14 +8,23 @@ Prometheus keeps one time series per combination of label values, and the reques
 
 ## Decision
 
-The `path` label is the matched route template, such as `/orders/{order_id}`, read from `scope["route"]` ([`events.py:82`](https://github.com/Vitaee/FastapiObserver/blob/v1.8.0/src/fastapiobserver/middleware/events.py#L82)). When no route matched, the raw path is used instead. Numeric, UUID and long hexadecimal segments in it are collapsed to `:id`.
+The `path` label comes from `_extract_route_template()` ([`events.py`](https://github.com/Vitaee/FastapiObserver/blob/main/src/fastapiobserver/middleware/events.py)):
+
+- **A matched route** is labelled by its template, such as `/orders/{order_id}`, read from `scope["route"]`.
+- **A 404 with no matched route,** mostly scanners probing paths like `/.env`, gets one shared label: `<unmatched>`. The request log still records the real path.
+- **Any other request without a template** keeps its path, with numeric, UUID and long hexadecimal segments collapsed to `:id`. FastAPI doesn't record plain Starlette routes in the scope, for example ones added with `app.add_route()`.
 
 ## Evidence
 
-- **Tests:** [`test_route_template_preferred_over_raw_path`](https://github.com/Vitaee/FastapiObserver/blob/v1.8.0/tests/test_route_template_cardinality.py#L15) and the rest of that file.
-- **Matched routes, measured:** 1,000 requests to `/orders/<id>` produce one `path` label.
+- **Scanner 404s, measured.** 1,000 requests with random 404 paths used to add 1,000 `path` labels, each with its own latency histogram. They now add one, `<unmatched>`.
+- **Matched routes, measured:** 1,000 requests to `/orders/<id>` produce one label.
+- **Tests:**
+    - [`test_route_template_cardinality.py`](https://github.com/Vitaee/FastapiObserver/blob/main/tests/test_route_template_cardinality.py), including `test_scanner_404s_share_one_metrics_label`, which runs real 404s through `/metrics`;
+    - `test_plain_route_without_template_keeps_raw_path`.
 
 ## What it cost
 
-- **The known gap: unmatched paths.** Requests that match no route, mostly 404s from scanners, keep their raw path as the label. Paths like `/.env`, `/wp-admin/setup.php` or `/probe-3f9a1c2b.php` don't collapse. Measured: after 1,000 requests with random 404 paths, `http_requests_total` had 1,000 more `path` labels, each with its own latency histogram. A single scan can therefore add thousands of series. The fix is to give unmatched requests one fixed label. Until then, keep `/metrics` internal and watch your series count.
+- **No per-path breakdown of 404s in metrics.** To see what scanners probe, query the request log, which keeps the path.
+- **Plain Starlette routes keep their raw path.** That's fine for static paths, but a dynamic segment that isn't a number, UUID or long hex value still adds a series per value.
+- **Mounted sub-apps drop the mount prefix.** They're labelled by their inner template, so a mount at `/sub` with a route `/{z}` is labelled `/{z}`, and two mounts with the same inner template share a label.
 - **Different apps, different labels.** The label depends on how the app declares routes, so two apps serving the same URLs can label them differently.

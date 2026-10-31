@@ -8,7 +8,7 @@ These records explain why fastapi-observer works the way it does. Each one says 
 | [0002](0002-logs-leave-through-a-queue.md) | Logs leave through a bounded queue | A slow sink costs 19 µs per log call instead of 1.3 ms. Under overload the oldest lines are dropped and counted. |
 | [0003](0003-trust-only-known-peers.md) | Identity headers count only from known peers | Request ID, `traceparent` and client IP come only from addresses in `OBS_TRUSTED_CIDRS`. |
 | [0004](0004-redact-before-anything-leaves.md) | Redact before anything leaves the process | No handler but ours on the root logger; it's the rule behind the 1.5.0 fix. |
-| [0005](0005-route-templates-as-metric-labels.md) | Route templates as metric labels | One series per route, not per URL, with a known gap for unmatched paths. |
+| [0005](0005-route-templates-as-metric-labels.md) | Route templates as metric labels | One series per route, not per URL; scanner 404s share one `<unmatched>` label. |
 | [0006](0006-delegate-to-opentelemetry.md) | Hand work to OpenTelemetry and `prometheus_client` | 10% less code and seven bugs fixed, at the price of upstream changes reaching us. |
 | [0007](0007-new-destinations-are-opt-in.md) | Nothing new receives data without being configured | Sinks from other packages, the control plane, metrics and OTLP export are all opt-in. |
 

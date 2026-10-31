@@ -168,7 +168,7 @@ class RequestLoggingMiddleware:
             )
 
         # Prefer route template for bounded cardinality
-        route_template = _extract_route_template(scope, path)
+        route_template = _extract_route_template(scope, path, status_code)
 
         self.metrics_recorder.observe(
             method=method,
