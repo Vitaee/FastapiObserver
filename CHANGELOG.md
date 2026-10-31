@@ -4,8 +4,7 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
-### Added
-- `install_observability()` writes one `observability.configured` line at startup with the settings that took effect: profile, log level, metrics path, OpenTelemetry endpoint, protocol and sampling, OTLP logs and metrics, redaction mode, body capture, trusted networks, request ID header, control plane path and enabled sinks. Endpoint credentials, query strings and tokens are left out.
+## [1.8.0] - 2026-10-31
 
 ### Security
 - Log sinks from installed packages load only when named in the new `OBS_LOG_SINKS` setting. Before, any installed package that declared a `fastapiobserver.log_sinks` entry point was imported at startup and received every log line. Entry points that aren't listed are never imported, and a `sinks.entry_point.not_enabled` warning names them. **If you use such a sink, add its entry-point name to `OBS_LOG_SINKS`.**
@@ -14,6 +13,7 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 - Outbound calls carry the request ID, so a request keeps one ID across services, with or without tracing. `inject_trace_headers()` adds it as `REQUEST_ID_HEADER`, and with the `[otel]` extra `install_observability()` adds it to OpenTelemetry's global propagator, so instrumented `httpx` and `requests` clients send it next to `traceparent`. A request ID header already set on the call is kept. The next service accepts it only from `OBS_TRUSTED_CIDRS`, which by default includes private networks.
+- `install_observability()` writes one `observability.configured` line at startup with the settings that took effect: profile, log level, metrics path, OpenTelemetry endpoint, protocol and sampling, OTLP logs and metrics, redaction mode, body capture, trusted networks, request ID header, control plane path and enabled sinks. Endpoint credentials, query strings and tokens are left out.
 
 ### Changed
 - `instrument_httpx_client()` raises `RuntimeError` when the `httpx` package isn't installed, for example in apps that only use `httpx2`. OpenTelemetry's instrumentor used to log an error and instrument nothing. The OpenTelemetry guide shows the one-line request hook for `httpx2` and other clients.
