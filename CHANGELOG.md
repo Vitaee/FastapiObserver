@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [1.6.0] - 2026-10-31
+
 ### Added
 - `StructuredJsonFormatter()` without arguments reads its settings and security policy from the environment, like `install_observability()`. Server log configs (gunicorn's `logconfig_dict`, Granian's `--log-config`) can now build it by name, so the servers' own startup and worker lines come out as the same JSON.
 - Documentation pages for running with uvicorn, gunicorn and Granian, sending data to backends, and using fastapi-observer alongside Sentry.
