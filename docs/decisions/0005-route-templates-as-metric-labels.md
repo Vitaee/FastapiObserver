@@ -10,9 +10,9 @@ Prometheus keeps one time series per combination of label values, and the reques
 
 The `path` label comes from `_extract_route_template()` ([`events.py`](https://github.com/Vitaee/FastapiObserver/blob/main/src/fastapiobserver/middleware/events.py)):
 
-- **A matched route** is labelled by its template, such as `/orders/{order_id}`, read from `scope["route"]`.
-- **A 404 with no matched route,** mostly scanners probing paths like `/.env`, gets one shared label: `<unmatched>`. The request log still records the real path.
-- **Any other request without a template** keeps its path, with numeric, UUID and long hexadecimal segments collapsed to `:id`. FastAPI doesn't record plain Starlette routes in the scope, for example ones added with `app.add_route()`.
+- A matched route is labelled by its template, such as `/orders/{order_id}`, read from `scope["route"]`.
+- A 404 with no matched route, mostly scanners probing paths like `/.env`, gets one shared label: `<unmatched>`.
+- Any other request without a template keeps its path, with numeric, UUID and long hexadecimal segments collapsed to `:id`. FastAPI doesn't record plain Starlette routes in the scope, for example ones added with `app.add_route()`.
 
 ## Evidence
 
@@ -25,6 +25,5 @@ The `path` label comes from `_extract_route_template()` ([`events.py`](https://g
 ## What it cost
 
 - **No per-path breakdown of 404s in metrics.** To see what scanners probe, query the request log, which keeps the path.
-- **Plain Starlette routes keep their raw path.** That's fine for static paths, but a dynamic segment that isn't a number, UUID or long hex value still adds a series per value.
+- **Dynamic plain routes still add series.** On a plain Starlette route, a segment that isn't a number, UUID or long hex value adds a series per value.
 - **Mounted sub-apps drop the mount prefix.** They're labelled by their inner template, so a mount at `/sub` with a route `/{z}` is labelled `/{z}`, and two mounts with the same inner template share a label.
-- **Different apps, different labels.** The label depends on how the app declares routes, so two apps serving the same URLs can label them differently.

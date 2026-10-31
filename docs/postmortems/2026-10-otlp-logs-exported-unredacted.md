@@ -1,6 +1,6 @@
 # Postmortem: OTLP logs exported without redaction
 
-**Fixed in:** 1.5.0, released 2026-10-31 · **Severity:** high: values the redaction policy should have masked, such as passwords and tokens, reached the OTLP log backend in clear text.
+**Fixed in:** 1.5.0, released 2026-10-31 · **Severity:** high. Values the redaction policy should have masked, such as passwords and tokens, reached the OTLP log backend in clear text.
 
 ## Summary
 
@@ -16,7 +16,7 @@ All of these had to be true:
 - tracing on (`OTEL_ENABLED=true`) and OTLP log export on (`OTEL_LOGS_ENABLED=true` with `OTEL_LOGS_MODE` set to `otlp` or `both`);
 - `opentelemetry-instrumentation-logging` 0.61b0 or newer installed. fastapi-observer 1.3.x allowed it (`>=0.60b1`); 1.4.0 and 1.4.1 required it (`>=0.66b1`).
 
-The unredacted copy covered every record that reached the root logger, from any logger in the process, with its `extra` attributes. JSON logs on stdout, Prometheus metrics and traces were not affected, and neither were apps that didn't export logs over OTLP.
+The unredacted copy covered every record that reached the root logger, from any logger in the process, with its `extra` attributes. JSON logs on stdout, Prometheus metrics and traces were not affected.
 
 ## What happened
 
@@ -32,8 +32,8 @@ We checked this against the published wheels: 0.57b0 to 0.60b1 attach no handler
 |---|---|
 | 2026-02-18 | The `LoggingInstrumentor().instrument()` call is added ([`3e3770b`](https://github.com/Vitaee/FastapiObserver/commit/3e3770b)). |
 | 2026-02-19 | 0.2.1 ships OTLP log export. Upstream still attaches no handler. |
+| 2026-03-01 to 2026-10-29 | No commits to the repository. |
 | 2026-03-04 | `opentelemetry-instrumentation-logging` 0.61b0 is released and attaches a root handler by default. **Exposure starts.** |
-| 2026-03-01 to 2026-10-29 | No commits, so CI never ran against 0.61b0 or later. |
 | 2026-10-30 21:33 | fastapi-observer 1.4.0 raises the minimum to 0.66b1, so every new `[otel]` install now gets the root handler. |
 | 2026-10-30 22:03 | **Found** during a review of which modules could be handed to OpenTelemetry. Logging `{"password": "hunter2"}` with OTLP logs on exported it twice, once unmasked. |
 | 2026-10-30 22:18 | Confirmed in the upstream source: `_setup_logging_handler()` adds the handler to the root logger. |
@@ -44,7 +44,7 @@ About 240 days of exposure, and 11 hours from discovery to release.
 
 ## Why it wasn't caught
 
-- **The tests checked the wrong thing.** They checked that fastapi-observer's OTLP handler redacts, and it did. No test checked that our handler was the only way records reached the exporter. A second handler doesn't show up in tests that only look at the first one's output.
+- **The tests checked the wrong thing.** They checked that fastapi-observer's OTLP handler redacts, and it did. No test checked that our handler was the only way records reached the exporter.
 - **CI only runs on pushes.** Nothing was pushed for eight months, so the upstream change never met the test suite.
 - **We called a helper for one side effect**, trace IDs on records, and relied on that being all it did. Nothing checked whether a new upstream release made it do more.
 
@@ -54,9 +54,8 @@ About 240 days of exposure, and 11 hours from discovery to release.
 
 ## What stops it happening again
 
-- **A guard test.** [`test_otlp_logs_are_redacted_without_deprecated_or_root_handler`](https://github.com/Vitaee/FastapiObserver/blob/v1.8.0/tests/test_otel_logs_pipeline.py#L104) fails if any handler other than fastapi-observer's queue handler is on the root logger after setup, and checks that an exported `password` comes out as `***`.
-- **A written rule.** [Decision 0004](../decisions/0004-redact-before-anything-leaves.md): redact before anything leaves the process, and never attach a handler to the root logger.
-- **A nightly run against upstream.** Since 1.8.0, CI runs every night against the newest OpenTelemetry releases, pre-releases included. An upstream change now meets the tests within a day, pushes or no pushes.
+- **A rule and a test.** [Decision 0004](../decisions/0004-redact-before-anything-leaves.md): no handler other than fastapi-observer's queue handler on the root logger. Its guard test fails if one appears.
+- **A nightly CI run against the newest upstream releases**, added in 1.8.0 ([decision 0006](../decisions/0006-delegate-to-opentelemetry.md)). An upstream change now meets the tests within a day, pushes or no pushes.
 - **Visible security fixes.** This fix went out inside a commit titled `perf: cut per-request overhead and fix queued log records`, and its changelog entry named the wrong upstream version (0.66 instead of 0.61). Security fixes now ship as their own commits, under a `Security` heading in the changelog. The 1.5.0 entry has been corrected.
 
 ## If you ran an affected setup
@@ -67,4 +66,4 @@ About 240 days of exposure, and 11 hours from discovery to release.
 
 ## Not fixed
 
-Redaction applies to what fastapi-observer writes and exports. Any other handler on the root logger still sees records before redaction, whether it's Sentry's logging integration or one your app adds. See the [Sentry notes](../sentry.md).
+Other handlers on the root logger, such as Sentry's logging integration, still see records before redaction. See [decision 0004](../decisions/0004-redact-before-anything-leaves.md).

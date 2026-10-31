@@ -2,6 +2,8 @@
 
 Before changing the middleware, the log queue, redaction, the trust checks or the OpenTelemetry wiring, read the matching [design decision](decisions/index.md). Each one lists the tests that guard it.
 
+Changelog entries say what changed and what users have to do, in one or two sentences. The reasoning goes in the pull request, and for design choices in a decision record.
+
 
 ## OTel Test Coverage
 

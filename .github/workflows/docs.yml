@@ -3,9 +3,9 @@ name: Docs
 on:
   push:
     branches: ["main"]
-    paths: ["docs/**", "mkdocs.yml", ".github/workflows/docs.yml"]
+    paths: ["docs/**", "README.md", "mkdocs.yml", ".github/workflows/docs.yml"]
   pull_request:
-    paths: ["docs/**", "mkdocs.yml", ".github/workflows/docs.yml"]
+    paths: ["docs/**", "README.md", "mkdocs.yml", ".github/workflows/docs.yml"]
   workflow_dispatch:
 
 permissions:

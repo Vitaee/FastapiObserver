@@ -111,26 +111,9 @@ sum(rate(http_requests_total[5m])) by (service)
 5. Verify recovery:
    p95 + 5xx return to baseline, trace volume normalized, alert clears.
 
-### Kubernetes quickstart (copy/paste)
+### Kubernetes
 
-Use the bundled manifests:
-
-```bash
-kubectl kustomize --load-restrictor=LoadRestrictionsNone examples/k8s | kubectl apply -f -
-kubectl -n observability rollout status deployment/app-a
-kubectl -n observability rollout status deployment/app-b
-kubectl -n observability rollout status deployment/app-c
-kubectl -n observability rollout status deployment/otel-collector
-kubectl -n observability rollout status deployment/prometheus
-kubectl -n observability rollout status deployment/loki
-kubectl -n observability rollout status deployment/tempo
-kubectl -n observability rollout status deployment/grafana
-kubectl -n observability rollout status deployment/traffic-generator
-kubectl -n observability port-forward svc/grafana 3000:3000
-```
-
-Open [http://localhost:3000](http://localhost:3000).
-Full guide: [`kubernetes.md`](kubernetes.md)
+The bundled manifests in `examples/k8s` deploy this whole stack with one command. See the [Kubernetes guide](kubernetes.md).
 
 ---
 
