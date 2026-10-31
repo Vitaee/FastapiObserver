@@ -9,6 +9,12 @@ All notable changes to this project will be documented in this file.
 - The runtime control plane only accepts callers whose address is in `OBS_TRUSTED_CIDRS`, checked before the token. A request that arrives through a proxy (it has `X-Forwarded-For`) is refused unless `OBS_HONOR_FORWARDED_HEADERS=true` resolves it to a trusted address, so the endpoint can't be reached, or its token guessed, through a public ingress. `mount_control_plane()` takes an optional `trusted_proxy_policy`. Tests that call the endpoint through Starlette's `TestClient` need `TestClient(app, client=("127.0.0.1", 50000))`, since its default caller, `testclient`, isn't an address.
 - The Logtail dead-letter directory is created with mode `0700` and its files, including compressed rotations, with `0600`. They used to follow the process umask, usually world-readable. Existing files and directories keep their permissions.
 
+### Added
+- Outbound calls carry the request ID, so a request keeps one ID across services, with or without tracing. `inject_trace_headers()` adds it as `REQUEST_ID_HEADER`, and with the `[otel]` extra `install_observability()` adds it to OpenTelemetry's global propagator, so instrumented `httpx` and `requests` clients send it next to `traceparent`. A request ID header already set on the call is kept. The next service accepts it only from `OBS_TRUSTED_CIDRS`, which by default includes private networks.
+
+### Changed
+- `instrument_httpx_client()` raises `RuntimeError` when the `httpx` package isn't installed, for example in apps that only use `httpx2`. OpenTelemetry's instrumentor used to log an error and instrument nothing. The OpenTelemetry guide shows the one-line request hook for `httpx2` and other clients.
+
 ### Fixed
 - `METRICS_EXCLUDE_PATHS` set as a comma-separated list, as the configuration guide shows, no longer stops the app from starting with a `SettingsError`. A JSON array still works.
 

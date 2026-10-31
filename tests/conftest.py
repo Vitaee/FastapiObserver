@@ -27,7 +27,10 @@ def reset_global_state() -> typing.Generator[None, None, None]:
     clear_span_id()
     clear_user_context()
     _reset_otel_global_provider()
+    textmap = _global_textmap()
     yield
+    if textmap is not None:
+        importlib.import_module("opentelemetry.propagate").set_global_textmap(textmap)
     clear_plugins()
     clear_request_id()
     clear_trace_id()
@@ -35,6 +38,14 @@ def reset_global_state() -> typing.Generator[None, None, None]:
     clear_user_context()
     _reset_otel_global_provider()
     root.setLevel(original_level)
+
+
+def _global_textmap() -> typing.Any:
+    """OpenTelemetry's global propagator, which install_observability() extends."""
+    try:
+        return importlib.import_module("opentelemetry.propagate").get_global_textmap()
+    except ImportError:
+        return None
 
 
 def _reset_otel_global_provider() -> None:

@@ -16,17 +16,98 @@ Or for automatic instrumentation::
 
     from fastapiobserver.propagation import instrument_httpx_client
 
-    instrument_httpx_client()  # all httpx calls get traceparent automatically
+    instrument_httpx_client()  # all httpx calls get traceparent and the request ID
+
+``install_observability()`` sets the request ID header to forward from
+``REQUEST_ID_HEADER``.
 """
 
 from __future__ import annotations
 
+import importlib.util
 import logging
+from collections.abc import Mapping
 from typing import Any
 
+from .request_context import get_request_id
 from .utils import lazy_import
 
 _LOGGER = logging.getLogger("fastapiobserver.propagation")
+# ponytail: one header per process, the last install_observability() wins; key it
+# per app if one process ever runs apps with different REQUEST_ID_HEADER values.
+_request_id_header = "x-request-id"
+
+
+# ---------------------------------------------------------------------------
+# Request ID forwarding
+# ---------------------------------------------------------------------------
+
+
+def _request_id_to_forward(carrier: Any) -> str | None:
+    """The current request ID, unless *carrier* already has a request ID header."""
+    request_id = get_request_id()
+    if request_id is None:
+        return None
+    if isinstance(carrier, Mapping) and any(
+        str(key).lower() == _request_id_header for key in carrier
+    ):
+        return None
+    return request_id
+
+
+def install_request_id_propagation(header: str) -> None:
+    """Send the current request ID as *header* on outbound calls.
+
+    Adds a propagator next to OpenTelemetry's global one, so every client
+    OpenTelemetry instruments (httpx, requests, ...) forwards the request ID
+    alongside ``traceparent``. Without OpenTelemetry installed, only
+    ``inject_trace_headers()`` forwards it.
+    """
+    global _request_id_header
+    _request_id_header = header
+    try:
+        from opentelemetry import propagate
+        from opentelemetry.context import Context
+        from opentelemetry.propagators.composite import CompositePropagator
+        from opentelemetry.propagators.textmap import (
+            Getter,
+            Setter,
+            TextMapPropagator,
+            default_getter,
+            default_setter,
+        )
+    except ImportError:
+        return
+
+    current = propagate.get_global_textmap()
+    if header in current.fields:
+        return
+
+    class RequestIdPropagator(TextMapPropagator):
+        def inject(
+            self,
+            carrier: Any,
+            context: Context | None = None,
+            setter: Setter[Any] = default_setter,
+        ) -> None:
+            request_id = _request_id_to_forward(carrier)
+            if request_id is not None:
+                setter.set(carrier, _request_id_header, request_id)
+
+        def extract(
+            self,
+            carrier: Any,
+            context: Context | None = None,
+            getter: Getter[Any] = default_getter,
+        ) -> Context:
+            # The middleware reads incoming request IDs, and only from trusted proxies.
+            return context if context is not None else Context()
+
+        @property
+        def fields(self) -> set[str]:
+            return {_request_id_header}
+
+    propagate.set_global_textmap(CompositePropagator([current, RequestIdPropagator()]))
 
 
 # ---------------------------------------------------------------------------
@@ -35,11 +116,12 @@ _LOGGER = logging.getLogger("fastapiobserver.propagation")
 
 
 def inject_trace_headers(headers: dict[str, str] | None = None) -> dict[str, str]:
-    """Inject the current OTel trace context into *headers*.
+    """Inject the current request ID and OTel trace context into *headers*.
 
-    Returns the (mutated) *headers* dict with ``traceparent`` and
-    ``tracestate`` entries added when a valid span exists.  If OTel is
-    not installed, *headers* is returned unchanged.
+    Returns the (mutated) *headers* dict with the request ID header, and
+    ``traceparent`` and ``tracestate`` entries when a valid span exists.
+    A request ID already in *headers* is kept. If OTel is not installed,
+    only the request ID is added.
 
     Parameters
     ----------
@@ -48,6 +130,9 @@ def inject_trace_headers(headers: dict[str, str] | None = None) -> dict[str, str
     """
     if headers is None:
         headers = {}
+    request_id = _request_id_to_forward(headers)
+    if request_id is not None:
+        headers[_request_id_header] = request_id
     try:
         from opentelemetry.propagate import inject
 
@@ -78,8 +163,17 @@ def instrument_httpx_client(client: Any | None = None) -> None:
     instrumented.  When ``None``, **all** ``httpx`` clients are
     instrumented globally.
 
-    Requires ``pip install fastapi-observer[otel-httpx]``.
+    Requires ``pip install fastapi-observer[otel-httpx]`` and the ``httpx``
+    package. Other clients, ``httpx2`` included, need a request hook instead;
+    see the OpenTelemetry guide.
     """
+    # OpenTelemetry's instrumentor only logs an error and does nothing without httpx.
+    if importlib.util.find_spec("httpx") is None:
+        raise RuntimeError(
+            "instrument_httpx_client() needs the `httpx` package, which is not installed. "
+            "For other clients, such as httpx2, call "
+            "`opentelemetry.propagate.inject(request.headers)` from a request hook."
+        )
     try:
         instrumentor_module = lazy_import(
             "opentelemetry.instrumentation.httpx",
