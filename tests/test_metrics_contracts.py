@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import types
-from unittest import mock
+import os
+from pathlib import Path
 
 import pytest
 
@@ -44,16 +44,6 @@ def test_metrics_collapse_dynamic_segments_contract() -> None:
     assert collapse_dynamic_segments("/objects/0123456789abcdef012345/meta") == "/objects/:id/meta"
 
 
-def test_metrics_accepts_openmetrics_contract() -> None:
-    from fastapiobserver.metrics.endpoint import _accepts_openmetrics
-
-    assert _accepts_openmetrics("application/openmetrics-text") is True
-    assert _accepts_openmetrics("application/json, application/openmetrics-text; q=0.5") is True
-    assert _accepts_openmetrics("application/openmetrics-text; q=0") is False
-    assert _accepts_openmetrics("text/html") is False
-    assert _accepts_openmetrics("") is False
-
-
 def test_metrics_build_backend_contract() -> None:
     from fastapiobserver.metrics import (
         NoopMetricsBackend,
@@ -73,110 +63,40 @@ def test_metrics_build_backend_contract() -> None:
         build_metrics_backend(enabled=True, backend="nonexistent")
 
 
-@mock.patch(
-    "fastapiobserver.metrics.prometheus.multiprocess."
-    "_is_prometheus_multiprocess_enabled",
-    return_value=True,
-)
-@mock.patch("os.access", return_value=True)
-@mock.patch("pathlib.Path.is_dir", return_value=True)
-@mock.patch("pathlib.Path.exists", return_value=True)
-@mock.patch("os.getenv", return_value="/tmp/multiproc")
 def test_prometheus_multiprocess_validation_contract(
-    mock_getenv: mock.Mock,
-    mock_exists: mock.Mock,
-    mock_isdir: mock.Mock,
-    mock_access: mock.Mock,
-    mock_enabled: mock.Mock,
-) -> None:
-    from fastapiobserver.metrics.prometheus.multiprocess import (
-        _validate_prometheus_multiprocess_dir,
-    )
-
-    _ = (mock_getenv, mock_enabled)
-
-    _validate_prometheus_multiprocess_dir()
-
-    mock_access.return_value = False
-    with pytest.raises(RuntimeError, match="must be writable"):
-        _validate_prometheus_multiprocess_dir()
-    mock_access.return_value = True
-
-    mock_isdir.return_value = False
-    with pytest.raises(RuntimeError, match="must point to a directory"):
-        _validate_prometheus_multiprocess_dir()
-    mock_isdir.return_value = True
-
-    mock_exists.return_value = False
-    with pytest.raises(RuntimeError, match="set but does not exist"):
-        _validate_prometheus_multiprocess_dir()
-
-
-def test_prepare_prometheus_multiprocess_attaches_submodule(
+    tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from fastapiobserver.metrics.prometheus import multiprocess as multiprocess_module
+    from fastapiobserver.metrics.prometheus import _validate_multiprocess_dir
 
-    class _PromClient:
-        pass
+    monkeypatch.setenv("PROMETHEUS_MULTIPROC_DIR", str(tmp_path))
+    _validate_multiprocess_dir()
 
-    client = _PromClient()
-    fake_multiprocess = types.SimpleNamespace()
+    (tmp_path / "file.txt").write_text("")
+    for bad_dir in (tmp_path / "missing", tmp_path / "file.txt"):
+        monkeypatch.setenv("PROMETHEUS_MULTIPROC_DIR", str(bad_dir))
+        with pytest.raises(RuntimeError, match="existing, writable directory"):
+            _validate_multiprocess_dir()
 
-    def _fake_import_module(module_name: str) -> object:
-        if module_name != "prometheus_client.multiprocess":
-            raise AssertionError(f"Unexpected import: {module_name}")
-        return fake_multiprocess
-
-    monkeypatch.setenv("PROMETHEUS_MULTIPROC_DIR", "/tmp/prom")
-    monkeypatch.setattr(
-        multiprocess_module,
-        "_import_prometheus_client",
-        lambda: client,
-    )
-    monkeypatch.setattr(
-        multiprocess_module.importlib,
-        "import_module",
-        _fake_import_module,
-    )
-
-    multiprocess_module._prepare_prometheus_multiprocess()
-
-    assert hasattr(client, "multiprocess")
-    assert client.multiprocess is fake_multiprocess
+    monkeypatch.setenv("PROMETHEUS_MULTIPROC_DIR", str(tmp_path))
+    monkeypatch.setattr(os, "access", lambda *_args: False)
+    with pytest.raises(RuntimeError, match="existing, writable directory"):
+        _validate_multiprocess_dir()
 
 
-def test_mark_prometheus_process_dead_prepares_missing_submodule(
+def test_mark_prometheus_process_dead_removes_live_gauge_files(
+    tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from fastapiobserver.metrics.prometheus import multiprocess as multiprocess_module
+    from fastapiobserver import mark_prometheus_process_dead
 
-    class _PromClient:
-        pass
+    dead_gauge = tmp_path / "gauge_liveall_4321.db"
+    dead_gauge.write_bytes(b"")
+    other_worker = tmp_path / "gauge_liveall_9999.db"
+    other_worker.write_bytes(b"")
+    monkeypatch.setenv("PROMETHEUS_MULTIPROC_DIR", str(tmp_path))
 
-    marked: list[int] = []
-    client = _PromClient()
-    fake_multiprocess = types.SimpleNamespace(
-        mark_process_dead=lambda pid: marked.append(pid),
-    )
+    mark_prometheus_process_dead(4321)
 
-    def _fake_import_module(module_name: str) -> object:
-        if module_name != "prometheus_client.multiprocess":
-            raise AssertionError(f"Unexpected import: {module_name}")
-        return fake_multiprocess
-
-    monkeypatch.setenv("PROMETHEUS_MULTIPROC_DIR", "/tmp/prom")
-    monkeypatch.setattr(
-        multiprocess_module,
-        "_import_prometheus_client",
-        lambda: client,
-    )
-    monkeypatch.setattr(
-        multiprocess_module.importlib,
-        "import_module",
-        _fake_import_module,
-    )
-
-    multiprocess_module.mark_prometheus_process_dead(4321)
-
-    assert marked == [4321]
+    assert not dead_gauge.exists()
+    assert other_worker.exists()

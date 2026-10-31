@@ -8,11 +8,11 @@ from typing import Any
 from fastapi import FastAPI
 
 from ..config import ObservabilitySettings
-from .lifecycle import build_provider_shutdown_callback, register_shutdown_hook
+from .lifecycle import close_on_app_shutdown
 from .resource import (
-    build_metric_exporter,
+    build_otlp_exporter,
     create_otel_resource,
-    has_configured_meter_provider,
+    has_configured_provider,
     import_otel_module,
 )
 from .settings import OTelMetricsSettings, OTelSettings
@@ -46,34 +46,23 @@ def install_otel_metrics(
         return None
 
     meter_provider = metrics_api.get_meter_provider()
-    has_external_provider = has_configured_meter_provider(metrics_api, meter_provider)
-    provider_owned = False
+    provider_owned = not has_configured_provider(meter_provider)
 
-    if not has_external_provider:
+    if provider_owned:
         trace_otel = otel_settings or OTelSettings(
             service_name=settings.service,
             service_version=settings.version,
             environment=settings.environment,
         )
-        resource = create_otel_resource(settings, trace_otel)
         reader = metrics_export.PeriodicExportingMetricReader(
-            build_metric_exporter(otel_metrics_settings),
+            build_otlp_exporter("metrics", otel_metrics_settings),
             export_interval_millis=otel_metrics_settings.export_interval_millis,
         )
-        candidate_provider = metrics_sdk.MeterProvider(
-            resource=resource,
+        meter_provider = metrics_sdk.MeterProvider(
+            resource=create_otel_resource(settings, trace_otel),
             metric_readers=[reader],
         )
-        try:
-            metrics_api.set_meter_provider(candidate_provider)
-            meter_provider = candidate_provider
-            provider_owned = True
-        except Exception:
-            meter_provider = metrics_api.get_meter_provider()
-            _LOGGER.warning(
-                "otel.metrics.provider_already_configured",
-                extra={"_skip_enrichers": True},
-            )
+        metrics_api.set_meter_provider(meter_provider)
     elif otel_metrics_settings.otlp_endpoint:
         _LOGGER.warning(
             "otel.metrics.external_provider.detected",
@@ -86,17 +75,7 @@ def install_otel_metrics(
             },
         )
 
-    register_shutdown_hook(
-        key=f"otel.meter_provider.{id(meter_provider)}",
-        callback=build_provider_shutdown_callback(
-            meter_provider,
-            logger=_LOGGER,
-            component="meter_provider",
-            shutdown=provider_owned,
-        ),
-        app=app,
-        logger=_LOGGER,
-    )
+    close_on_app_shutdown(app, meter_provider, shutdown=provider_owned)
     _LOGGER.info(
         "otel.metrics.installed",
         extra={

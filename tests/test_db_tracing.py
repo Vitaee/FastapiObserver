@@ -5,12 +5,18 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+import fastapiobserver.db_tracing as db_tracing
 from fastapiobserver.db_tracing import (
     _DEFAULT_COMMENTER_OPTIONS,
     instrument_sqlalchemy,
     instrument_sqlalchemy_async,
     uninstrument_sqlalchemy,
 )
+
+
+@pytest.fixture(autouse=True)
+def _fresh_engine_registry(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(db_tracing, "_ENGINES", [])
 
 
 # ---------------------------------------------------------------------------
@@ -51,7 +57,7 @@ class TestInstrumentSQLAlchemy:
         instrument_sqlalchemy(engine)
 
         mock_module.SQLAlchemyInstrumentor().instrument.assert_called_once_with(
-            engine=engine,
+            engines=[engine],
             enable_commenter=True,
             commenter_options=_DEFAULT_COMMENTER_OPTIONS,
         )
@@ -68,7 +74,7 @@ class TestInstrumentSQLAlchemy:
         instrument_sqlalchemy(engine, commenter_options=custom_opts)
 
         mock_module.SQLAlchemyInstrumentor().instrument.assert_called_once_with(
-            engine=engine,
+            engines=[engine],
             enable_commenter=True,
             commenter_options=custom_opts,
         )
@@ -84,10 +90,40 @@ class TestInstrumentSQLAlchemy:
         instrument_sqlalchemy(engine, enable_commenter=False)
 
         mock_module.SQLAlchemyInstrumentor().instrument.assert_called_once_with(
-            engine=engine,
+            engines=[engine],
             enable_commenter=False,
             commenter_options=_DEFAULT_COMMENTER_OPTIONS,
         )
+
+    @patch("fastapiobserver.db_tracing.lazy_import")
+    def test_second_engine_reinstruments_both(
+        self, mock_lazy_import: MagicMock,
+    ) -> None:
+        # The OTel instrumentor is a singleton that ignores a second instrument()
+        # call, so the second engine must be instrumented together with the first.
+        instrumentor = mock_lazy_import.return_value.SQLAlchemyInstrumentor.return_value
+        orders, users = _make_mock_engine("sqlite://orders"), _make_mock_engine("sqlite://users")
+
+        instrument_sqlalchemy(orders)
+        instrument_sqlalchemy(users)
+
+        instrumentor.uninstrument.assert_called()
+        assert instrumentor.instrument.call_args.kwargs["engines"] == [orders, users]
+
+    @patch("fastapiobserver.db_tracing.lazy_import")
+    def test_warns_when_opentelemetry_refuses_to_instrument(
+        self, mock_lazy_import: MagicMock, caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        # e.g. an SQLAlchemy version outside the instrumentation's supported range
+        instrumentor = mock_lazy_import.return_value.SQLAlchemyInstrumentor.return_value
+        instrumentor.is_instrumented_by_opentelemetry = False
+
+        with caplog.at_level("INFO", logger="fastapiobserver.db_tracing"):
+            instrument_sqlalchemy(_make_mock_engine())
+
+        messages = [record.getMessage() for record in caplog.records]
+        assert "db_tracing.not_instrumented" in messages
+        assert "db_tracing.instrumented" not in messages
 
 
 # ---------------------------------------------------------------------------
@@ -107,7 +143,7 @@ class TestInstrumentAsyncEngine:
         instrument_sqlalchemy_async(async_engine)
 
         mock_module.SQLAlchemyInstrumentor().instrument.assert_called_once_with(
-            engine=async_engine.sync_engine,
+            engines=[async_engine.sync_engine],
             enable_commenter=True,
             commenter_options=_DEFAULT_COMMENTER_OPTIONS,
         )
@@ -161,6 +197,5 @@ class TestMissingDependency:
 
 def test_default_commenter_options_include_traceparent() -> None:
     assert _DEFAULT_COMMENTER_OPTIONS["opentelemetry_values"] is True
-    assert _DEFAULT_COMMENTER_OPTIONS["route"] is True
     assert _DEFAULT_COMMENTER_OPTIONS["db_driver"] is True
     assert _DEFAULT_COMMENTER_OPTIONS["db_framework"] is False

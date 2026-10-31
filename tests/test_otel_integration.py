@@ -124,7 +124,7 @@ def test_otel_settings_parse_extra_resource_attributes_from_env(
 
 
 def test_normalize_http_otlp_endpoint_adds_default_trace_path() -> None:
-    normalized = otel_module._normalize_otlp_endpoint(  # type: ignore[attr-defined]
+    normalized = otel_module.normalize_otlp_endpoint(
         "http://127.0.0.1:4318",
         "http/protobuf",
     )
@@ -132,7 +132,7 @@ def test_normalize_http_otlp_endpoint_adds_default_trace_path() -> None:
 
 
 def test_normalize_http_otlp_endpoint_keeps_explicit_path() -> None:
-    normalized = otel_module._normalize_otlp_endpoint(  # type: ignore[attr-defined]
+    normalized = otel_module.normalize_otlp_endpoint(
         "http://127.0.0.1:4318/custom/path",
         "http/protobuf",
     )
@@ -141,14 +141,14 @@ def test_normalize_http_otlp_endpoint_keeps_explicit_path() -> None:
 
 def test_normalize_grpc_otlp_endpoint_rejects_http_trace_path() -> None:
     with pytest.raises(ValueError, match=r"must not include '/v1/traces'"):
-        otel_module._normalize_otlp_endpoint(  # type: ignore[attr-defined]
+        otel_module.normalize_otlp_endpoint(
             "http://127.0.0.1:4317/v1/traces",
             "grpc",
         )
 
 
 def test_normalize_grpc_otlp_endpoint_keeps_valid_endpoint() -> None:
-    normalized = otel_module._normalize_otlp_endpoint(  # type: ignore[attr-defined]
+    normalized = otel_module.normalize_otlp_endpoint(
         "http://127.0.0.1:4317",
         "grpc",
     )
@@ -156,7 +156,7 @@ def test_normalize_grpc_otlp_endpoint_keeps_valid_endpoint() -> None:
 
 
 def test_normalize_http_otlp_metrics_endpoint_adds_default_metrics_path() -> None:
-    normalized = otel_module._normalize_otlp_metrics_endpoint(  # type: ignore[attr-defined]
+    normalized = otel_module.normalize_otlp_metrics_endpoint(
         "http://127.0.0.1:4318",
         "http/protobuf",
     )
@@ -165,7 +165,82 @@ def test_normalize_http_otlp_metrics_endpoint_adds_default_metrics_path() -> Non
 
 def test_normalize_grpc_otlp_metrics_endpoint_rejects_http_metrics_path() -> None:
     with pytest.raises(ValueError, match=r"must not include '/v1/metrics'"):
-        otel_module._normalize_otlp_metrics_endpoint(  # type: ignore[attr-defined]
+        otel_module.normalize_otlp_metrics_endpoint(
             "http://127.0.0.1:4317/v1/metrics",
             "grpc",
         )
+
+
+def test_http_logs_endpoint_gets_default_logs_path() -> None:
+    pytest.importorskip("opentelemetry.exporter.otlp.proto.http._log_exporter")
+    from fastapiobserver.otel import OTelLogsSettings
+    from fastapiobserver.otel.resource import build_otlp_exporter
+
+    exporter = build_otlp_exporter(
+        "logs",
+        OTelLogsSettings(protocol="http/protobuf", otlp_endpoint="http://127.0.0.1:4318"),
+    )
+    assert exporter._endpoint == "http://127.0.0.1:4318/v1/logs"
+
+
+def test_install_otel_metrics_replaces_default_proxy_provider(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    metrics_api = pytest.importorskip("opentelemetry.metrics")
+    sdk_metrics = pytest.importorskip("opentelemetry.sdk.metrics")
+    sdk_export = pytest.importorskip("opentelemetry.sdk.metrics.export")
+    import io
+
+    import fastapiobserver.otel.metrics as otel_metrics_module
+
+    monkeypatch.setattr(
+        otel_metrics_module,
+        "build_otlp_exporter",
+        lambda *_: sdk_export.ConsoleMetricExporter(out=io.StringIO()),
+    )
+
+    provider = install_otel_metrics(
+        ObservabilitySettings(),
+        OTelMetricsSettings(enabled=True, otlp_endpoint="http://127.0.0.1:4317"),
+    )
+
+    assert isinstance(provider, sdk_metrics.MeterProvider)
+    assert metrics_api.get_meter_provider() is provider
+
+
+def test_hidden_routes_added_after_install_are_not_traced(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    in_memory = pytest.importorskip("opentelemetry.sdk.trace.export.in_memory_span_exporter")
+    from fastapi.testclient import TestClient
+    from opentelemetry import trace as trace_api
+
+    from fastapiobserver import install_observability
+    import fastapiobserver.otel.tracing as otel_tracing_module
+
+    exporter = in_memory.InMemorySpanExporter()
+    monkeypatch.setattr(otel_tracing_module, "build_otlp_exporter", lambda *_: exporter)
+
+    app = FastAPI()
+    install_observability(
+        app,
+        ObservabilitySettings(app_name="test", service="svc"),
+        metrics_enabled=False,
+        otel_settings=OTelSettings(enabled=True),
+    )
+
+    @app.get("/visible")
+    def visible() -> None:
+        return None
+
+    @app.get("/internal", include_in_schema=False)
+    def internal() -> None:
+        return None
+
+    with TestClient(app) as client:  # runs the lifespan, which discovers routes
+        assert client.get("/visible").status_code == 200
+        assert client.get("/internal").status_code == 200
+        trace_api.get_tracer_provider().force_flush()
+
+    server_spans = [s.name for s in exporter.get_finished_spans() if s.kind.name == "SERVER"]
+    assert server_spans == ["GET /visible"]

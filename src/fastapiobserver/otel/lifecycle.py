@@ -1,159 +1,57 @@
-"""Lifecycle helpers for OTel provider flush/shutdown hooks."""
+"""Flush OTel providers when the FastAPI app shuts down.
+
+Process exit needs nothing from us: SDK providers register their own
+``atexit`` shutdown (``shutdown_on_exit=True``).
+"""
 
 from __future__ import annotations
 
-import atexit
 import logging
-import threading
 import weakref
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from typing import Any, Callable
+from typing import Any
 
 from fastapi import FastAPI
 
 _LOGGER = logging.getLogger("fastapiobserver.otel")
-_ATEXIT_LOCK = threading.Lock()
-_ATEXIT_KEYS: set[str] = set()
-_APP_HOOK_KEYS: weakref.WeakKeyDictionary[FastAPI, set[str]] = weakref.WeakKeyDictionary()
+_HOOKED: weakref.WeakKeyDictionary[FastAPI, set[int]] = weakref.WeakKeyDictionary()
 
 
-def register_shutdown_hook(
-    key: str,
-    callback: Callable[[], None],
-    *,
-    app: FastAPI | None = None,
-    logger: logging.Logger | None = None,
-) -> None:
-    """Register an idempotent shutdown hook on app shutdown and atexit."""
-    normalized_key = key.strip()
-    if not normalized_key:
-        raise ValueError("Shutdown hook key cannot be empty")
-
-    log = logger or _LOGGER
-    run_once = _build_run_once(callback, log, normalized_key)
-
-    with _ATEXIT_LOCK:
-        if normalized_key not in _ATEXIT_KEYS:
-            atexit.register(run_once)
-            _ATEXIT_KEYS.add(normalized_key)
-
+def close_on_app_shutdown(app: FastAPI | None, provider: Any, *, shutdown: bool) -> None:
+    """Once ``app``'s lifespan ends, shut ``provider`` down (``shutdown=True``,
+    for providers we created) or just flush it (providers owned by someone else).
+    """
     if app is None:
         return
-
-    app_hook_keys = _APP_HOOK_KEYS.setdefault(app, set())
-    if normalized_key in app_hook_keys:
+    hooked = _HOOKED.setdefault(app, set())
+    if id(provider) in hooked:
         return
+    hooked.add(id(provider))
 
     # Wrap the lifespan: Starlette 1.0 removed add_event_handler/on_shutdown.
     original_lifespan = app.router.lifespan_context
+    done = False
 
     @asynccontextmanager
-    async def lifespan_with_shutdown_hook(
-        app_inst: FastAPI,
-    ) -> AsyncGenerator[Any, None]:
+    async def lifespan(app_inst: FastAPI) -> AsyncGenerator[Any, None]:
+        nonlocal done
         try:
             async with original_lifespan(app_inst) as state:
                 yield state
         finally:
-            run_once()
+            if not done:
+                done = True
+                try:
+                    if shutdown:  # SDK shutdown() exports pending data first
+                        provider.shutdown()
+                    else:
+                        provider.force_flush()
+                except Exception:
+                    _LOGGER.debug(
+                        "otel.provider.lifecycle.failed",
+                        exc_info=True,
+                        extra={"_skip_enrichers": True},
+                    )
 
-    app.router.lifespan_context = lifespan_with_shutdown_hook
-    app_hook_keys.add(normalized_key)
-
-
-def build_provider_shutdown_callback(
-    provider: Any,
-    *,
-    logger: logging.Logger | None = None,
-    component: str,
-    shutdown: bool,
-) -> Callable[[], None]:
-    """Build callback that flushes provider and optionally shuts it down."""
-
-    log = logger or _LOGGER
-    normalized_component = component.strip() or "provider"
-
-    def _callback() -> None:
-        _invoke_provider_method(
-            provider,
-            method_name="force_flush",
-            logger=log,
-            component=normalized_component,
-        )
-        if shutdown:
-            _invoke_provider_method(
-                provider,
-                method_name="shutdown",
-                logger=log,
-                component=normalized_component,
-            )
-
-    return _callback
-
-
-def _build_run_once(
-    callback: Callable[[], None],
-    logger: logging.Logger,
-    key: str,
-) -> Callable[[], None]:
-    lock = threading.Lock()
-    ran = False
-
-    def _run_once() -> None:
-        nonlocal ran
-        with lock:
-            if ran:
-                return
-            ran = True
-        try:
-            callback()
-        except Exception:
-            logger.debug(
-                "otel.shutdown_hook.failed",
-                exc_info=True,
-                extra={
-                    "event": {"hook_key": key},
-                    "_skip_enrichers": True,
-                },
-            )
-
-    return _run_once
-
-
-def _invoke_provider_method(
-    provider: Any,
-    *,
-    method_name: str,
-    logger: logging.Logger,
-    component: str,
-) -> None:
-    method = getattr(provider, method_name, None)
-    if not callable(method):
-        return
-    try:
-        method()
-    except TypeError:
-        # Some OTel providers accept timeout_millis for force_flush.
-        if method_name != "force_flush":
-            raise
-        try:
-            method(timeout_millis=30_000)
-        except Exception:
-            logger.debug(
-                "otel.provider.lifecycle.failed",
-                exc_info=True,
-                extra={
-                    "event": {"component": component, "method": method_name},
-                    "_skip_enrichers": True,
-                },
-            )
-    except Exception:
-        logger.debug(
-            "otel.provider.lifecycle.failed",
-            exc_info=True,
-            extra={
-                "event": {"component": component, "method": method_name},
-                "_skip_enrichers": True,
-            },
-        )
+    app.router.lifespan_context = lifespan

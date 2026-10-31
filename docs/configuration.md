@@ -50,7 +50,7 @@ Notes:
 | `METRICS_PATH` | `/metrics` | Metrics endpoint path |
 | `METRICS_EXCLUDE_PATHS` | `/metrics,/health,/healthz,/docs,/openapi.json` | Skip metrics for noisy endpoints |
 | `METRICS_EXEMPLARS_ENABLED` | `false` | Enable exemplars where supported |
-| `METRICS_FORMAT` | `negotiate` | `prometheus`, `openmetrics`, or `negotiate` |
+| `METRICS_FORMAT` | `negotiate` | `negotiate` lets `prometheus_client` pick from the `Accept` header; `openmetrics` or `prometheus` always serve that format. Responses are gzipped when the scraper accepts it |
 
 > [!CAUTION]
 > The `/metrics` endpoint is **unauthenticated by default**. In production it should be restricted to internal networks (e.g. behind a Kubernetes `NetworkPolicy`, VPC security group, or ingress rule that only allows your Prometheus scraper). Exposing it publicly leaks service topology, error rates, and request patterns.
@@ -92,7 +92,7 @@ Notes:
 | `OTEL_EXCLUDED_URLS` | auto-derived | CSV excluded paths for tracing |
 | `OTEL_LOGS_ENABLED` | `false` | Enable OTLP log export |
 | `OTEL_LOGS_MODE` | `local_json` | `local_json`, `otlp`, `both` |
-| `OTEL_LOGS_ENDPOINT` | - | OTLP logs endpoint |
+| `OTEL_LOGS_ENDPOINT` | - | OTLP logs endpoint. With `http/protobuf`, `/v1/logs` is appended to a bare host such as `http://collector:4318` |
 | `OTEL_LOGS_PROTOCOL` | `grpc` | `grpc` or `http/protobuf` |
 | `OTEL_METRICS_ENABLED` | `false` | Enable OTLP metrics export |
 | `OTEL_METRICS_ENDPOINT` | - | OTLP metrics endpoint |

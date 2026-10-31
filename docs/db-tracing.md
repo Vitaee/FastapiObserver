@@ -44,7 +44,7 @@ When enabled:
 Example SQL comment shape:
 
 ```sql
-SELECT * FROM users /*traceparent='00-<trace-id>-<span-id>-01',route='/users',db_driver='asyncpg'*/
+SELECT * FROM users /*db_driver='asyncpg',traceparent='00-<trace-id>-<span-id>-01'*/
 ```
 
 ## Recommended Setup (via `install_observability`)
@@ -125,10 +125,11 @@ Default options:
 {
     "opentelemetry_values": True,
     "db_driver": True,
-    "route": True,
     "db_framework": False,
 }
 ```
+
+These are the only keys OpenTelemetry's SQLCommenter supports.
 
 Custom options:
 
@@ -137,14 +138,15 @@ instrument_sqlalchemy(
     engine,
     commenter_options={
         "opentelemetry_values": True,
-        "db_driver": True,
-        "route": False,
+        "db_driver": False,
         "db_framework": True,
     },
 )
 ```
 
-Use `route=False` when route-level metadata creates unnecessary SQL text churn.
+To instrument several engines, call `instrument_sqlalchemy()` once per engine (or pass a list as `db_engine` to `install_observability()`); every engine stays instrumented. The commenter options of the latest call apply to all of them.
+
+OpenTelemetry's SQLAlchemy instrumentation only supports the SQLAlchemy versions listed by `opentelemetry-instrumentation-sqlalchemy` (currently below 2.1). On other versions nothing is instrumented and fastapi-observer logs `db_tracing.not_instrumented` instead of `db_tracing.instrumented`.
 
 ## Verification Checklist
 

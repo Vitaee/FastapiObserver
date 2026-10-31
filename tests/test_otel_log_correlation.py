@@ -47,8 +47,7 @@ def test_trace_and_span_ids_are_correlated_in_logs(
     )
     trace_api = pytest.importorskip("opentelemetry.trace")
     exporter = in_memory_export.InMemorySpanExporter()
-    monkeypatch.setattr(otel_tracing_module, "build_span_exporter", lambda _: exporter)
-    monkeypatch.setattr(otel_tracing_module, "has_configured_tracer_provider", lambda *_: False)
+    monkeypatch.setattr(otel_tracing_module, "build_otlp_exporter", lambda *_: exporter)
 
     # Force a clean provider so this test does not depend on global OTel state.
     if hasattr(trace_api, "_TRACER_PROVIDER"):

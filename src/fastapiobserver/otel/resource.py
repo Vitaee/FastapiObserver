@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import logging
 import os
 from types import ModuleType
 from typing import Any, Literal
@@ -11,20 +10,12 @@ from urllib.parse import urlparse, urlunparse
 from ..config import ObservabilitySettings
 from ..utils import lazy_import
 from .settings import OTelLogsSettings, OTelMetricsSettings, OTelSettings
-from .types import (
-    LogExporterLike,
-    MetricExporterLike,
-    OTelResourceLike,
-    SpanExporterLike,
-)
-
-_LOGGER = logging.getLogger("fastapiobserver.otel")
 
 
 def create_otel_resource(
     settings: ObservabilitySettings,
     otel_settings: OTelSettings,
-) -> OTelResourceLike:
+) -> Any:
     resources_module = import_otel_module("opentelemetry.sdk.resources")
     resource_attrs = {
         "service.name": otel_settings.service_name or settings.service,
@@ -71,76 +62,28 @@ def build_excluded_urls_csv(settings: ObservabilitySettings) -> str | None:
     return ",".join(sorted(urls)) or None
 
 
-# ---------------------------------------------------------------------------
-# Span exporter builder
-# ---------------------------------------------------------------------------
+_OTLP_EXPORTERS = {
+    "traces": ("trace_exporter", "OTLPSpanExporter"),
+    "metrics": ("metric_exporter", "OTLPMetricExporter"),
+    "logs": ("_log_exporter", "OTLPLogExporter"),
+}
 
 
-def build_span_exporter(otel_settings: OTelSettings) -> SpanExporterLike:
-    endpoint = normalize_otlp_endpoint(
-        otel_settings.otlp_endpoint,
-        otel_settings.protocol,
+def build_otlp_exporter(
+    signal: Literal["traces", "metrics", "logs"],
+    settings: OTelSettings | OTelLogsSettings | OTelMetricsSettings,
+) -> Any:
+    """Build the OTLP exporter for ``signal`` over the configured protocol."""
+    module_name, class_name = _OTLP_EXPORTERS[signal]
+    transport = "http" if settings.protocol == "http/protobuf" else "grpc"
+    exporter_cls = getattr(
+        import_otel_module(f"opentelemetry.exporter.otlp.proto.{transport}.{module_name}"),
+        class_name,
     )
-
-    if otel_settings.protocol == "http/protobuf":
-        exporter_module = import_otel_module(
-            "opentelemetry.exporter.otlp.proto.http.trace_exporter"
-        )
-    else:
-        exporter_module = import_otel_module(
-            "opentelemetry.exporter.otlp.proto.grpc.trace_exporter"
-        )
-
-    if endpoint:
-        return exporter_module.OTLPSpanExporter(endpoint=endpoint)
-    return exporter_module.OTLPSpanExporter()
-
-
-# ---------------------------------------------------------------------------
-# Log exporter builder
-# ---------------------------------------------------------------------------
-
-
-def build_log_exporter(otel_logs_settings: OTelLogsSettings) -> LogExporterLike:
-    """Build the OTLP log exporter based on protocol."""
-    endpoint = otel_logs_settings.otlp_endpoint
-    if otel_logs_settings.protocol == "http/protobuf":
-        exporter_module = import_otel_module(
-            "opentelemetry.exporter.otlp.proto.http._log_exporter"
-        )
-    else:
-        exporter_module = import_otel_module(
-            "opentelemetry.exporter.otlp.proto.grpc._log_exporter"
-        )
-    if endpoint:
-        return exporter_module.OTLPLogExporter(endpoint=endpoint)
-    return exporter_module.OTLPLogExporter()
-
-
-# ---------------------------------------------------------------------------
-# Metric exporter builder
-# ---------------------------------------------------------------------------
-
-
-def build_metric_exporter(
-    otel_metrics_settings: OTelMetricsSettings,
-) -> MetricExporterLike:
-    endpoint = normalize_otlp_metrics_endpoint(
-        otel_metrics_settings.otlp_endpoint,
-        otel_metrics_settings.protocol,
+    endpoint = _normalize_otlp_endpoint_for_signal(
+        settings.otlp_endpoint, settings.protocol, http_path=f"/v1/{signal}"
     )
-    if otel_metrics_settings.protocol == "http/protobuf":
-        exporter_module = import_otel_module(
-            "opentelemetry.exporter.otlp.proto.http.metric_exporter"
-        )
-    else:
-        exporter_module = import_otel_module(
-            "opentelemetry.exporter.otlp.proto.grpc.metric_exporter"
-        )
-
-    if endpoint:
-        return exporter_module.OTLPMetricExporter(endpoint=endpoint)
-    return exporter_module.OTLPMetricExporter()
+    return exporter_cls(endpoint=endpoint) if endpoint else exporter_cls()
 
 
 # ---------------------------------------------------------------------------
@@ -157,53 +100,26 @@ def import_otel_module(name: str) -> ModuleType:
         ) from exc
 
 
-def has_configured_tracer_provider(trace_api: Any, provider: Any) -> bool:
-    proxy_provider = getattr(trace_api, "ProxyTracerProvider", None)
-    if proxy_provider is not None and isinstance(provider, proxy_provider):
-        return False
-    if provider.__class__.__name__ in {"ProxyTracerProvider", "NoOpTracerProvider"}:
-        return False
-    return hasattr(provider, "add_span_processor")
-
-
-def has_configured_logger_provider(log_api: Any, provider: Any) -> bool:
-    proxy_provider = getattr(log_api, "ProxyLoggerProvider", None)
-    if proxy_provider is not None and isinstance(provider, proxy_provider):
-        return False
-    if provider.__class__.__name__ in {"ProxyLoggerProvider", "NoOpLoggerProvider"}:
-        return False
-    return hasattr(provider, "get_logger")
-
-
-def has_configured_meter_provider(metrics_api: Any, provider: Any) -> bool:
-    proxy_provider = getattr(metrics_api, "ProxyMeterProvider", None)
-    if proxy_provider is not None and isinstance(provider, proxy_provider):
-        return False
-    if provider.__class__.__name__ in {"ProxyMeterProvider", "NoOpMeterProvider"}:
-        return False
-    return hasattr(provider, "get_meter")
+def has_configured_provider(provider: Any) -> bool:
+    """False while a global OTel provider is still the API's proxy/no-op default."""
+    return not any(
+        cls.__name__.lstrip("_").startswith(("Proxy", "NoOp"))
+        for cls in type(provider).__mro__
+    )
 
 
 def normalize_otlp_endpoint(
     endpoint: str | None,
     protocol: Literal["grpc", "http/protobuf"],
 ) -> str | None:
-    return _normalize_otlp_endpoint_for_signal(
-        endpoint,
-        protocol,
-        http_path="/v1/traces",
-    )
+    return _normalize_otlp_endpoint_for_signal(endpoint, protocol, http_path="/v1/traces")
 
 
 def normalize_otlp_metrics_endpoint(
     endpoint: str | None,
     protocol: Literal["grpc", "http/protobuf"],
 ) -> str | None:
-    return _normalize_otlp_endpoint_for_signal(
-        endpoint,
-        protocol,
-        http_path="/v1/metrics",
-    )
+    return _normalize_otlp_endpoint_for_signal(endpoint, protocol, http_path="/v1/metrics")
 
 
 def _normalize_otlp_endpoint_for_signal(

@@ -69,10 +69,22 @@ class SinkCircuitBreakerHandler(logging.Handler):
         self._half_open_total = 0
         self._closes_total = 0
 
+        # Stdlib handlers catch their own write errors and only report them
+        # through handleError(), so count those reports as failures too.
+        self._delegate_failed = False
+        report_error = delegate.handleError
+
+        def _count_and_report(record: logging.LogRecord) -> None:
+            self._delegate_failed = True
+            report_error(record)
+
+        delegate.handleError = _count_and_report  # type: ignore[method-assign]
+
     def emit(self, record: logging.LogRecord) -> None:
         if self._should_skip():
             return
 
+        self._delegate_failed = False
         try:
             self._delegate.handle(record)
         except Exception:
@@ -80,7 +92,10 @@ class SinkCircuitBreakerHandler(logging.Handler):
             self.handleError(record)
             return
 
-        self._record_success()
+        if self._delegate_failed:
+            self._record_failure()
+        else:
+            self._record_success()
 
     def setFormatter(self, fmt: logging.Formatter | None) -> None:  # noqa: N802
         super().setFormatter(fmt)

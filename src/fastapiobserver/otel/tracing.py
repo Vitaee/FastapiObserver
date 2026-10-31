@@ -9,12 +9,12 @@ from typing import Any
 from fastapi import FastAPI
 
 from ..config import ObservabilitySettings
-from .lifecycle import build_provider_shutdown_callback, register_shutdown_hook
+from .lifecycle import close_on_app_shutdown
 from .resource import (
     build_excluded_urls_csv,
-    build_span_exporter,
+    build_otlp_exporter,
     create_otel_resource,
-    has_configured_tracer_provider,
+    has_configured_provider,
     import_otel_module,
 )
 from .settings import OTelSettings, get_trace_sampling_ratio, set_trace_sampling_ratio
@@ -42,9 +42,8 @@ def install_otel(
     )
 
     set_trace_sampling_ratio(otel_settings.trace_sampling_ratio)
-    current_provider = trace_api.get_tracer_provider()
-    has_external_provider = has_configured_tracer_provider(trace_api, current_provider)
-    provider_owned = False
+    tracer_provider = trace_api.get_tracer_provider()
+    provider_owned = not has_configured_provider(tracer_provider)
 
     class DynamicTraceIdRatioSampler(sampling.Sampler): # type: ignore
         def should_sample(
@@ -71,30 +70,15 @@ def install_otel(
         def get_description(self) -> str:
             return "DynamicTraceIdRatioSampler"
 
-    tracer_provider = current_provider
-    if not has_external_provider:
-        sampler = sampling.ParentBased(DynamicTraceIdRatioSampler())
-        resource = create_otel_resource(settings, otel_settings)
-        tracer_provider = trace_sdk.TracerProvider(resource=resource, sampler=sampler)
-
-        exporter = build_span_exporter(otel_settings)
-        tracer_provider.add_span_processor(trace_export.BatchSpanProcessor(exporter))
-
-        try:
-            trace_api.set_tracer_provider(tracer_provider)
-            provider_owned = True
-        except Exception:
-            tracer_provider = trace_api.get_tracer_provider()
-            _LOGGER.warning(
-                "otel.tracer_provider.already_configured",
-                extra={
-                    "event": {
-                        "provider_class": tracer_provider.__class__.__name__,
-                    },
-                    "_skip_enrichers": True,
-                },
-            )
-            provider_owned = False
+    if provider_owned:
+        tracer_provider = trace_sdk.TracerProvider(
+            resource=create_otel_resource(settings, otel_settings),
+            sampler=sampling.ParentBased(DynamicTraceIdRatioSampler()),
+        )
+        tracer_provider.add_span_processor(
+            trace_export.BatchSpanProcessor(build_otlp_exporter("traces", otel_settings))
+        )
+        trace_api.set_tracer_provider(tracer_provider)
     elif otel_settings.otlp_endpoint:
         _LOGGER.warning(
             "otel.external_provider.detected",
@@ -120,16 +104,6 @@ def install_otel(
     )
 
     if provider_owned:
-        register_shutdown_hook(
-            key=f"otel.tracer_provider.{id(tracer_provider)}",
-            callback=build_provider_shutdown_callback(
-                tracer_provider,
-                logger=_LOGGER,
-                component="tracer_provider",
-                shutdown=True,
-            ),
-            app=app,
-            logger=_LOGGER,
-        )
+        close_on_app_shutdown(app, tracer_provider, shutdown=True)
 
     _OTEL_INSTALLED_APPS.add(app)

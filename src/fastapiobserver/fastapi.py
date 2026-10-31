@@ -146,6 +146,9 @@ def _setup_structured_logging(
     security_policy: SecurityPolicy,
     audit_key_provider: object | None,
 ) -> None:
+    # Hook the lifespan before install_otel_logs does, so on shutdown the log
+    # queue drains into the OTLP handler before its provider is shut down.
+    _register_logging_shutdown_hook(app)
     otel_log_handler = None
     logs_mode: Literal["local_json", "otlp", "both"] = "local_json"
     if otel_logs_settings and otel_logs_settings.enabled:
@@ -172,7 +175,6 @@ def _setup_structured_logging(
         extra_handlers=extra_handlers,
         audit_key_provider=audit_key_provider,
     )
-    _register_logging_shutdown_hook(app)
 
 
 def _setup_metrics_backend(

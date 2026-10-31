@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import sys
 import tempfile
 import importlib
 
@@ -24,28 +25,15 @@ def test_metrics_backend_disabled_returns_noop() -> None:
     assert isinstance(backend, NoopMetricsBackend)
 
 
-def test_metrics_backend_missing_dependency_raises() -> None:
-    import fastapiobserver.metrics.prometheus.client as prometheus_client_module
-    original_lazy_import = prometheus_client_module.lazy_import
-
-    def fake_lazy_import(
-        module_path: str,
-        attr: str | None = None,
-        *,
-        package_hint: str | None = None,
+def test_metrics_backend_missing_dependency_raises(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("PROMETHEUS_MULTIPROC_DIR", raising=False)
+    monkeypatch.setitem(sys.modules, "prometheus_client", None)
+    with pytest.raises(
+        RuntimeError, match=r"pip install fastapi-observer\[prometheus\]"
     ):
-        if module_path == "prometheus_client":
-            raise ModuleNotFoundError("No module named 'prometheus_client'")
-        return original_lazy_import(module_path, attr=attr, package_hint=package_hint)
-
-    prometheus_client_module.lazy_import = fake_lazy_import
-    try:
-        with pytest.raises(
-            RuntimeError, match=r"pip install fastapi-observer\[prometheus\]"
-        ):
-            build_metrics_backend(True)
-    finally:
-        prometheus_client_module.lazy_import = original_lazy_import
+        build_metrics_backend(True)
 
 
 def test_metrics_backend_labels_include_service_and_environment(

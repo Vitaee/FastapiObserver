@@ -51,7 +51,7 @@ Design details:
 - Supports runtime sampling updates through the control plane.
 - Sends OTel logs in OTLP mode with the same sanitization policy.
 - Supports optional OTLP metrics export for unified OTel backends.
-- Registers graceful shutdown hooks to flush provider buffers on app exit.
+- Flushes and shuts down its providers when the app's lifespan ends, after the log queue has drained; on process exit the SDK's own `atexit` hook takes over.
 
 ### Baggage propagation
 

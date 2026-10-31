@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib
 import logging
 import typing
 
@@ -37,24 +38,23 @@ def reset_global_state() -> typing.Generator[None, None, None]:
 
 
 def _reset_otel_global_provider() -> None:
-    try:
-        from opentelemetry import trace as trace_api  # type: ignore
-    except Exception:
-        return
-
-    try:
-        provider = trace_api.get_tracer_provider()
-        shutdown = getattr(provider, "shutdown", None)
-        if callable(shutdown):
-            shutdown()
-    except Exception:
-        pass
-
-    try:
-        if hasattr(trace_api, "_TRACER_PROVIDER"):
-            trace_api._TRACER_PROVIDER = None  # type: ignore[attr-defined]
-        set_once = getattr(trace_api, "_TRACER_PROVIDER_SET_ONCE", None)
+    """Shut down and unset the global tracer, logger and meter providers."""
+    for module_name, attr in (
+        ("opentelemetry.trace", "_TRACER_PROVIDER"),
+        ("opentelemetry._logs._internal", "_LOGGER_PROVIDER"),
+        ("opentelemetry.metrics._internal", "_METER_PROVIDER"),
+    ):
+        try:
+            module = importlib.import_module(module_name)
+        except Exception:
+            continue
+        provider = getattr(module, attr, None)
+        try:
+            if callable(getattr(provider, "shutdown", None)):
+                provider.shutdown()  # type: ignore[union-attr]
+        except Exception:
+            pass
+        setattr(module, attr, None)
+        set_once = getattr(module, f"{attr}_SET_ONCE", None)
         if set_once is not None and hasattr(set_once, "_done"):
-            set_once._done = False  # type: ignore[attr-defined]
-    except Exception:
-        pass
+            set_once._done = False
