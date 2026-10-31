@@ -60,7 +60,7 @@ class StrawberryObservabilityExtension:
 
         # 2. Update OpenTelemetry Trace if active
         try:
-            from opentelemetry import trace as otel_trace  # type: ignore
+            from opentelemetry import trace as otel_trace
 
             span = otel_trace.get_current_span()
             if span and span.is_recording():

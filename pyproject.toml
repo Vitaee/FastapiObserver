@@ -115,7 +115,10 @@ src = ["src", "tests"]
 select = ["E", "F"]
 
 [tool.mypy]
+strict = true
 ignore_missing_imports = false
+# prometheus_client's multiprocess module has no annotations.
+untyped_calls_exclude = ["prometheus_client.multiprocess"]
 
 [[tool.mypy.overrides]]
 module = ["orjson", "orjson.*"]

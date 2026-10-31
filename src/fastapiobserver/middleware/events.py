@@ -82,7 +82,7 @@ def _extract_route_template(scope: Scope, raw_path: str) -> str:
     route = scope.get("route")
     if route is not None:
         template = getattr(route, "path", None)
-        if template:
+        if isinstance(template, str) and template:
             return template
     return raw_path
 

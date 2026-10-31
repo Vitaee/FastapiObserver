@@ -48,9 +48,9 @@ class TraceContextFilter(logging.Filter):
                 )
 
         if trace_id:
-            record.trace_id = trace_id  # type: ignore[attr-defined]
+            record.trace_id = trace_id
         if span_id:
-            record.span_id = span_id  # type: ignore[attr-defined]
+            record.span_id = span_id
         return True
 
 

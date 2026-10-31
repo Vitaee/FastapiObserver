@@ -122,7 +122,7 @@ def _as_dict(value: Mapping[str, Any]) -> dict[str, Any]:
 
 def _json_dumps(payload: dict[str, Any]) -> str:
     if orjson is not None:
-        return orjson.dumps(payload).decode("utf-8")
+        return str(orjson.dumps(payload), "utf-8")
     return json.dumps(payload, ensure_ascii=True, default=str)
 
 

@@ -108,7 +108,7 @@ What it costs: with default settings, about 43 µs of CPU per request on an Appl
 
 ## Why you can trust it
 
-- Tested in CI on Python 3.11 to 3.15, fully typed, and used in production by its maintainer.
+- Tested in CI on Python 3.11 to 3.15, type-checked with `mypy --strict`, tested nightly against the newest OpenTelemetry releases, and used in production by its maintainer.
 - Releases are published with PyPI Trusted Publishing and signed attestations. CI runs `pip-audit` and generates an SBOM.
 - Security fixes are called out in the [changelog](https://github.com/Vitaee/FastapiObserver/blob/main/CHANGELOG.md). To report a vulnerability, see [SECURITY.md](https://github.com/Vitaee/FastapiObserver/blob/main/SECURITY.md).
 - Benchmarks are reproducible from [`examples/benchmarks`](https://github.com/Vitaee/FastapiObserver/tree/main/examples/benchmarks).
