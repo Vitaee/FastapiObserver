@@ -45,6 +45,9 @@ nav:
       - OpenTelemetry: opentelemetry.md
       - Runtime Control: runtime-control.md
   - Integrations:
+      - Servers (uvicorn, gunicorn, Granian): servers.md
+      - Backends: backends.md
+      - Sentry: sentry.md
       - Database Tracing: db-tracing.md
       - GraphQL: graphql.md
       - Loguru: loguru.md

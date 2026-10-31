@@ -1,0 +1,27 @@
+name: Bug report
+description: Something doesn't work as documented.
+labels: ["bug"]
+body:
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What you did, what you expected, and what happened instead. Logs or tracebacks help.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: How to reproduce
+      description: A minimal app and the `install_observability()` call or environment variables you use.
+      render: python
+    validations:
+      required: true
+  - type: input
+    id: versions
+    attributes:
+      label: Versions
+      description: fastapi-observer, Python, FastAPI and server (uvicorn, gunicorn or Granian).
+      placeholder: fastapi-observer 1.5.0, Python 3.14, FastAPI 0.162, uvicorn 0.54
+    validations:
+      required: true

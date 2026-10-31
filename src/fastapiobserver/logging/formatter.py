@@ -29,11 +29,16 @@ class StructuredJsonFormatter(logging.Formatter):
     Fields include service identity, request ID, trace/span IDs for
     correlation, and user context.  Plugin enrichers are applied unless
     the record has ``_skip_enrichers`` set.
+
+    Without ``settings``, settings and security policy are read from the
+    environment, so ``logging.config.dictConfig`` can build it by name
+    (``{"()": "fastapiobserver.StructuredJsonFormatter"}``), as server log
+    configs for gunicorn and Granian do.
     """
 
     def __init__(
         self,
-        settings: ObservabilitySettings,
+        settings: ObservabilitySettings | None = None,
         security_policy: SecurityPolicy | None = None,
         *,
         enrich_event: (
@@ -45,6 +50,9 @@ class StructuredJsonFormatter(logging.Formatter):
         ) = None,
     ) -> None:
         super().__init__()
+        if settings is None:
+            settings = ObservabilitySettings.from_env()
+            security_policy = security_policy or SecurityPolicy.from_env()
         self.settings = settings
         self.security_policy = security_policy or SecurityPolicy()
         self._enrich_event = enrich_event or apply_log_enrichers

@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import json
 import logging
+import logging.config
 import time
+
+import pytest
 
 from fastapiobserver import LOG_SCHEMA_VERSION, ObservabilitySettings, SecurityPolicy
 from fastapiobserver import __version__ as package_version
@@ -335,3 +338,32 @@ def test_trace_context_filter_standalone() -> None:
     f.filter(record)
     # trace_id/span_id should not be set if there is no context
     assert not hasattr(record, "trace_id")
+
+
+def test_formatter_built_by_dictconfig_reads_settings_from_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Server log configs (gunicorn logconfig_dict, Granian --log-config) build the
+    # formatter by name, without arguments.
+    monkeypatch.setenv("APP_NAME", "orders-api")
+    monkeypatch.setenv("SERVICE_NAME", "orders")
+    logging.config.dictConfig({
+        "version": 1,
+        "disable_existing_loggers": False,
+        "formatters": {"json": {"()": "fastapiobserver.StructuredJsonFormatter"}},
+        "handlers": {"server": {"class": "logging.NullHandler", "formatter": "json"}},
+        "loggers": {"tests.server": {"handlers": ["server"], "propagate": False}},
+    })
+    server_logger = logging.getLogger("tests.server")
+    try:
+        formatter = server_logger.handlers[0].formatter
+        assert formatter is not None
+        record = server_logger.makeRecord(
+            "tests.server", logging.INFO, __file__, 1, "Listening", (), None
+        )
+        payload = json.loads(formatter.format(record))
+    finally:
+        server_logger.handlers.clear()
+    assert payload["app_name"] == "orders-api"
+    assert payload["service"] == "orders"
+    assert payload["message"] == "Listening"

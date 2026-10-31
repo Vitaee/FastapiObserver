@@ -147,4 +147,4 @@ New pages must be added to `nav` in `mkdocs.yml`.
 
 ## Roadmap Tracking
 
-See [NEXT_STEPS.md](https://github.com/Vitaee/FastapiObserver/blob/main/NEXT_STEPS.md) for the active roadmap and release checklist.
+See [ROADMAP.md](https://github.com/Vitaee/FastapiObserver/blob/main/ROADMAP.md) for planned work.

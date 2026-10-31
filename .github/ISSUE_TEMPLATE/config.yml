@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/Vitaee/FastapiObserver/security/advisories/new
+    about: Please report vulnerabilities privately, not as a public issue.
+  - name: Documentation
+    url: https://vitaee.github.io/FastapiObserver/
+    about: Guides for configuration, security presets, OpenTelemetry and deployment.
