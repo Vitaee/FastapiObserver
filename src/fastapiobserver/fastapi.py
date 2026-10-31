@@ -148,6 +148,21 @@ def install_observability(
     if runtime_control_settings and runtime_control_settings.enabled:
         mount_control_plane(app, runtime_control_settings, trusted_proxy_policy)
 
+    if security_policy.redaction_mode == "hash" and security_policy.hash_key is None:
+        _LOGGER.warning(
+            "observability.redaction.hash_key_missing",
+            extra={
+                "event": {
+                    "message": (
+                        "Hashed values use a random key picked at startup, so they differ "
+                        "between processes and after a restart. Set OBS_REDACTION_HASH_KEY "
+                        "to keep them stable."
+                    ),
+                },
+                "_skip_enrichers": True,
+            },
+        )
+
     # --- 9. One line with the settings that took effect ---
     _LOGGER.info(
         "observability.configured",

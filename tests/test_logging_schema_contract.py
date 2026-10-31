@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import logging.config
+import sys
 import time
 
 import pytest
@@ -285,40 +286,26 @@ def test_structured_formatter_emits_structured_error_payload() -> None:
     assert "fingerprint" in payload["error"]
 
 
-def test_error_fingerprint_is_stable_across_transient_noise() -> None:
-    settings = ObservabilitySettings(app_name="test", service="test", environment="test")
+def test_error_fingerprint_groups_by_where_it_was_raised_not_by_message() -> None:
+    formatter = StructuredJsonFormatter(
+        ObservabilitySettings(app_name="test", service="test", environment="test")
+    )
 
-    def _simulated_error(noise: str) -> logging.LogRecord:
+    def fingerprint(user_id: int, other_site: bool = False) -> str:
         try:
-            # The line number and this arbitrary noise will be stripped by the fingerprinter
-            raise ValueError(f"Some business logic failed {noise}")
-        except ValueError as e:
-            # We purposely monkeypatch the exception string to inject fake memory addresses
-            # to simulate two different object lifetimes.
-            fake_tb = f'File "app.py", line 42, in <module>\n  <MyObject object at {noise}>'
-            exc_info = (e.__class__, e, e.__traceback__)
+            if other_site:
+                raise LookupError(f"user {user_id} not found")
+            raise LookupError(f"user {user_id} not found at 0x{id(object()):x}")
+        except LookupError:
             record = logging.LogRecord(
                 name="test", level=logging.ERROR, pathname="", lineno=0,
-                msg="error", args=(), exc_info=exc_info
+                msg="error", args=(), exc_info=sys.exc_info(),
             )
-            # Override the traceback formatting via a mock class for the test
-            class MockFormatter(StructuredJsonFormatter):
-                def formatException(self, exc_info):
-                    return fake_tb
+        return str(json.loads(formatter.format(record))["error"]["fingerprint"])
 
-            mock_formatter = MockFormatter(settings)
-
-            payload = json.loads(mock_formatter.format(record))
-            return payload["error"]["fingerprint"]
-
-    # Even though the simulated memory addresses differ completely, the fingerprint
-    # must remain identical since it's the same error type and file location.
-    fingerprint_a = _simulated_error("0x10a2b3c4d")
-    fingerprint_b = _simulated_error("0x7f8e9d0c1b2a")
-
-    assert fingerprint_a == fingerprint_b
-    assert isinstance(fingerprint_a, str)
-    assert len(fingerprint_a) == 32  # MD5 hex length
+    assert fingerprint(1) == fingerprint(2)
+    assert fingerprint(1) != fingerprint(1, other_site=True)
+    assert len(fingerprint(1)) == 32
 
 def test_request_id_filter_standalone() -> None:
     from fastapiobserver.logging import RequestIdFilter

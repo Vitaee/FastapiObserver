@@ -77,6 +77,7 @@ Notes:
 | `OBS_REDACTED_HEADERS` | built-in list | CSV headers to redact |
 | `OBS_REDACTION_MODE` | `mask` | `mask`, `hash`, `drop` |
 | `OBS_MASK_TEXT` | `***` | Mask replacement text |
+| `OBS_REDACTION_HASH_KEY` | random per process | HMAC key for `hash` mode. Set it so the same value gets the same hash in every worker and after restarts |
 | `OBS_LOG_REQUEST_BODY` | `false` | Enable request body logging |
 | `OBS_LOG_RESPONSE_BODY` | `false` | Enable response body logging |
 | `OBS_MAX_BODY_LENGTH` | `256` | Max captured body bytes |

@@ -1,7 +1,7 @@
 import os
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator
+from pydantic import BaseModel, ConfigDict, Field, SecretStr, ValidationInfo, field_validator
 from pydantic_settings import BaseSettings
 
 from ..utils import EnvLoadable, InternalSettingsBase, parse_csv
@@ -88,6 +88,7 @@ _SECURITY_POLICY_ENV_MAP = {
     "redacted_headers": "OBS_REDACTED_HEADERS",
     "redaction_mode": "OBS_REDACTION_MODE",
     "mask_text": "OBS_MASK_TEXT",
+    "hash_key": "OBS_REDACTION_HASH_KEY",
     "log_request_body": "OBS_LOG_REQUEST_BODY",
     "log_response_body": "OBS_LOG_RESPONSE_BODY",
     "max_body_length": "OBS_MAX_BODY_LENGTH",
@@ -112,6 +113,9 @@ class SecurityPolicy(EnvLoadable, BaseModel):
     redacted_headers: tuple[str, ...] = DEFAULT_REDACTED_HEADERS
     redaction_mode: RedactionMode = "mask"
     mask_text: str = "***"
+    # HMAC key for the hash mode. Without one, a random key is picked at import,
+    # so the same value hashes differently in other processes and after a restart.
+    hash_key: SecretStr | None = None
     log_request_body: bool = False
     log_response_body: bool = False
     max_body_length: int = Field(default=256, gt=0)
@@ -233,6 +237,7 @@ class _SecurityPolicySettings(InternalSettingsBase):
         validation_alias="OBS_REDACTION_MODE",
     )
     mask_text: str | None = Field(default=None, validation_alias="OBS_MASK_TEXT")
+    hash_key: SecretStr | None = Field(default=None, validation_alias="OBS_REDACTION_HASH_KEY")
     log_request_body: bool | None = Field(
         default=None,
         validation_alias="OBS_LOG_REQUEST_BODY",

@@ -1,5 +1,7 @@
 import functools
 import hashlib
+import hmac
+import secrets
 from collections.abc import Mapping
 from typing import Any
 
@@ -8,6 +10,7 @@ from .policy import _DROP, SecurityPolicy
 
 MAX_SANITIZE_DEPTH = 32
 _SCALAR_TYPES = frozenset({str, int, float, bool})
+_PROCESS_KEY = secrets.token_bytes(32)  # for policies without a hash_key
 
 
 @functools.lru_cache(maxsize=64)
@@ -33,8 +36,11 @@ def _redact_value(value: Any, policy: SecurityPolicy) -> Any:
     if policy.redaction_mode == "drop":
         return _DROP
     if policy.redaction_mode == "hash":
-        digest = hashlib.sha256(str(value).encode("utf-8")).hexdigest()
-        return f"sha256:{digest}"
+        # Keyed: a plain hash of an email or phone number is reversed by
+        # hashing candidates until one matches.
+        key = policy.hash_key.get_secret_value().encode() if policy.hash_key else _PROCESS_KEY
+        digest = hmac.new(key, str(value).encode("utf-8"), hashlib.sha256).hexdigest()
+        return f"hmac-sha256:{digest}"
     return policy.mask_text
 
 

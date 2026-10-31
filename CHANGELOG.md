@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Security
+- `hash` redaction, used by the `gdpr` preset, hashed values with plain SHA-256. Emails, phone numbers and IP addresses hashed that way can be recovered by hashing candidates until one matches. Values are now HMAC-SHA256 with the key in `OBS_REDACTION_HASH_KEY` or `SecurityPolicy(hash_key=...)`, written as `hmac-sha256:<hex>` instead of `sha256:<hex>`. Without a key, a random one is picked at startup and `observability.redaction.hash_key_missing` is logged. **Hashes change once on upgrade; queries that match `sha256:` need updating.** Affected: every earlier release that used the `gdpr` preset or `OBS_REDACTION_MODE=hash`.
+
+### Fixed
+- A request cancelled before it finished, because the client left, the server shut down or a timeout fired, was logged as `request.server_error` with status 500 and counted as a 500 in metrics. It is now `request.cancelled` at `WARNING`, with status 499 when no response had started.
+- `error.fingerprint` included the exception message, so the same bug with different IDs in its message got a different fingerprint each time. It now hashes the exception type and each frame's file, function and source line. **Fingerprints change once on upgrade.**
+- After a fork, the child could deadlock writing logs: restarting the log listener drained the inherited queue, whose lock another thread of the parent could have held at the moment of the fork, and the queue-statistics and sink circuit-breaker locks were inherited the same way. The child now gets fresh locks and a fresh queue without touching the old one.
+
 ## [1.13.0] - 2026-11-01
 
 ### Added

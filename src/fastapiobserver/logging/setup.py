@@ -4,6 +4,7 @@ import atexit
 import logging
 import logging.handlers
 import queue
+import threading
 from typing import Literal, cast
 
 from ..config import ObservabilitySettings
@@ -289,21 +290,15 @@ def _restart_queue_listener_in_child() -> None:
 
     listener = state._QUEUE_LISTENER
     if listener is not None:
-        # The inherited queue's Condition lock might be held by the parent
-        # or left in an inconsistent state across the fork. To reliably resume
-        # processing, we must create a fresh queue. We explicitly drain and 
-        # DROP inherited records because the parent process's listener thread 
-        # is already processing those same records in the parent process. 
-        # Re-queuing them here causes deterministic duplicate logs.
+        # Another thread of the parent may have held any lock at the moment of
+        # the fork, and no thread in the child will release it. So don't touch
+        # the inherited queue, not even to drain it: its records are the
+        # parent's to write. Give the child fresh locks and a fresh queue.
+        _LOG_QUEUE_TELEMETRY._lock = threading.Lock()
+        for breaker in state._SINK_CIRCUIT_BREAKERS:
+            breaker._lock = threading.Lock()
         old_queue = cast(queue.Queue[logging.LogRecord], listener.queue)
         new_queue: queue.Queue[logging.LogRecord] = queue.Queue(maxsize=old_queue.maxsize)
-
-        while not old_queue.empty():
-            try:
-                # Discard the record to prevent pre-fork replay duplication
-                _ = old_queue.get_nowait()
-            except queue.Empty:
-                break
 
         # Re-attach the new queue to the OverflowPolicyQueueHandler if present
         for handler in state._MANAGED_HANDLERS:

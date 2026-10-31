@@ -25,6 +25,8 @@ pci_policy = SecurityPolicy.from_preset("pci")
 gdpr_policy = SecurityPolicy.from_preset("gdpr")
 ```
 
+The `hash` mode, used by `gdpr`, writes `hmac-sha256:<hex>`: an HMAC keyed with `OBS_REDACTION_HASH_KEY` (or `SecurityPolicy(hash_key=...)`). Keep the key secret. Without one, a random key is picked at startup, so hashes differ between processes and after a restart, and a warning says so.
+
 Use a preset in installation:
 
 ```python
