@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [1.11.1] - 2026-10-31
+
 ### Fixed
 - Metric `path` labels, `fastapiobserver_log_bytes_total` routes and `db.n_plus_one` routes keep the prefixes of routers added with `include_router(router, prefix=...)` and of outer routers. Since FastAPI 0.137, `scope["route"].path` leaves them out ([fastapi/fastapi#16051](https://github.com/fastapi/fastapi/discussions/16051)), so `/v1/items/{item_id}` and `/v2/items/{item_id}` shared the label `/items/{item_id}`. **Dashboards and alerts that filter on the shortened paths need updating.**
 
