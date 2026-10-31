@@ -17,7 +17,7 @@ Log records carry request data. Passwords, tokens, cookies and API keys end up i
 
 ## Evidence
 
-- **The leak this rule prevents.** [Postmortem: OTLP logs exported without redaction](../postmortems/2026-10-otlp-logs-exported-unredacted.md). From March to October 2026, an OpenTelemetry handler on the root logger exported every record a second time without redaction.
+- **The leak this rule prevents.** From March to October 2026, an OpenTelemetry handler on the root logger exported every record a second time without redaction. It was fixed in [1.5.0](https://github.com/Vitaee/FastapiObserver/blob/main/CHANGELOG.md#150---2026-10-31).
 - **The guard test.** [`test_otlp_logs_are_redacted_without_deprecated_or_root_handler`](https://github.com/Vitaee/FastapiObserver/blob/v1.8.0/tests/test_otel_logs_pipeline.py#L104) fails if another handler sits on the root logger after setup, and checks that an exported `password` comes out as `***`.
 
 ## What it cost

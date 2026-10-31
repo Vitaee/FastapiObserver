@@ -15,10 +15,6 @@ Each record says what was decided, the evidence for it and what it cost. Read th
 | [0009](0009-sample-logs-per-request-by-trace-id.md) | Sample logs per request, by trace ID | A request's `INFO` lines are kept or dropped together, the same way as its trace in every service. Failed and slow requests are always kept. |
 | [0010](0010-trace-with-fastapis-own-opentelemetry.md) | Trace with FastAPI's own OpenTelemetry | On FastAPI 0.142+, FastAPI traces requests itself, and its own log export stays off so error logs go through redaction. |
 
-## Postmortems
-
-- [OTLP logs exported without redaction](../postmortems/2026-10-otlp-logs-exported-unredacted.md) (fixed in 1.5.0)
-
 ## Writing a new record
 
 - Use the next number, and the same four parts: Context, Decision, Evidence, What it cost.

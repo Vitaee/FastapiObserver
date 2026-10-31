@@ -77,5 +77,4 @@ nav:
       - 0008 One state object per request: decisions/0008-one-state-object-per-request.md
       - 0009 Sample logs by trace ID: decisions/0009-sample-logs-per-request-by-trace-id.md
       - 0010 Trace with FastAPI's OpenTelemetry: decisions/0010-trace-with-fastapis-own-opentelemetry.md
-      - "Postmortem: unredacted OTLP logs": postmortems/2026-10-otlp-logs-exported-unredacted.md
   - Contributing: contributing.md
