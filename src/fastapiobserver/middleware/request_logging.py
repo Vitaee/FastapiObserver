@@ -9,6 +9,7 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 from ..config import ObservabilitySettings
 from ..logging.held import keep_request_logs
 from ..metrics import MetricsBackend, NoopMetricsBackend
+from ..pools import check_pools
 from ..request_context import get_request_state
 from ..security import (
     SecurityPolicy,
@@ -62,6 +63,7 @@ class RequestLoggingMiddleware:
             await self.app(scope, receive, send)
             return
 
+        check_pools()
         start = time.perf_counter()
         raw_headers = scope.get("headers", [])
         client_ip, trusted_source = self.ip_resolver.resolve(scope, raw_headers)

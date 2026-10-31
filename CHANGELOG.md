@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- A `threadpool.saturated` warning when every thread in AnyIO's pool, which runs sync endpoints and dependencies, is busy and calls are waiting. A `db.pool_exhausted` warning when every connection in a SQLAlchemy `QueuePool` passed as `db_engine` is checked out. Both are checked as each request starts and written at most once a minute per pool, so a deadlock between the two pools is reported too. With metrics on, `/metrics` has `fastapiobserver_threadpool_busy`, `_limit` and `_waiting`, and `fastapiobserver_db_pool_checked_out{engine}` and `fastapiobserver_db_pool_limit{engine}`. The check costs about 0.3 µs per request, plus 0.2 µs per database pool.
+
+### Changed
+- `db_engine` is used without tracing too, to watch connection pools. A string passed as `db_engine` now raises `TypeError` even with tracing off.
+
 ## [1.12.0] - 2026-10-31
 
 ### Security

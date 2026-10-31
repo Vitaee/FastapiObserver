@@ -47,6 +47,10 @@ Example SQL comment shape:
 SELECT * FROM users /*db_driver='asyncpg',traceparent='00-<trace-id>-<span-id>-01'*/
 ```
 
+## Connection pool usage
+
+Engines passed as `db_engine` are also watched for a full connection pool, with or without tracing. A `db.pool_exhausted` warning is written when every connection is checked out, and with metrics on there are pool gauges. See [full thread and database pools](logging.md#full-thread-and-database-pools).
+
 ## Query count and time on the request line
 
 With tracing on, each request line counts the request's database queries and outbound HTTP calls, from the client spans OpenTelemetry records for them:

@@ -35,6 +35,7 @@ from .otel import (
     install_otel_metrics,
 )
 from .otel.native import keep_native_logs_out
+from .pools import watch_db_pool, watch_thread_pool
 from .propagation import install_request_id_propagation
 from .security import SecurityPolicy, TrustedProxyPolicy
 
@@ -109,9 +110,13 @@ def install_observability(
     if otel_settings and otel_settings.enabled:
         install_otel(app, settings, otel_settings)
 
-    # --- 4b. Database tracing + SQLCommenter ---
-    if db_engine is not None and otel_settings and otel_settings.enabled:
-        _setup_database_tracing(db_engine, db_commenter_enabled, db_commenter_options)
+    # --- 4b. Database pools, tracing + SQLCommenter ---
+    if db_engine is not None:
+        engines = _as_engine_list(db_engine)
+        for engine in engines:
+            watch_db_pool(getattr(engine, "sync_engine", engine))
+        if otel_settings and otel_settings.enabled:
+            _setup_database_tracing(engines, db_commenter_enabled, db_commenter_options)
 
     # --- 5. OTel metrics ---
     if otel_metrics_settings and otel_metrics_settings.enabled:
@@ -262,8 +267,17 @@ def _setup_metrics_backend(
     return metrics_backend
 
 
+def _as_engine_list(db_engine: Any | Sequence[Any]) -> list[Any]:
+    if isinstance(db_engine, (str, bytes, bytearray)):
+        raise TypeError(
+            f"db_engine must be an SQLAlchemy Engine or sequence of Engines, "
+            f"not {type(db_engine).__name__}"
+        )
+    return list(db_engine) if isinstance(db_engine, Sequence) else [db_engine]
+
+
 def _setup_database_tracing(
-    db_engine: Any | Sequence[Any],
+    engines: list[Any],
     db_commenter_enabled: bool,
     db_commenter_options: dict[str, bool] | None,
 ) -> None:
@@ -272,13 +286,6 @@ def _setup_database_tracing(
         instrument_sqlalchemy_async,
     )
 
-    if isinstance(db_engine, (str, bytes, bytearray)):
-        raise TypeError(
-            f"db_engine must be an SQLAlchemy Engine or sequence of Engines, "
-            f"not {type(db_engine).__name__}"
-        )
-
-    engines = db_engine if isinstance(db_engine, Sequence) else [db_engine]
     for engine in engines:
         if hasattr(engine, "sync_engine"):
             instrument_sqlalchemy_async(
@@ -400,6 +407,7 @@ async def observability_lifespan(app: FastAPI) -> typing.AsyncGenerator[typing.A
     watchdog = None
     if state:
         _auto_discover_excluded_routes(app, state.settings)
+        watch_thread_pool()
         if state.settings.loop_block_threshold_ms:
             watchdog = EventLoopWatchdog(state.settings.loop_block_threshold_ms / 1000)
             watchdog.start()
