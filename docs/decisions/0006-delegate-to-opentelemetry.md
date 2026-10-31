@@ -23,7 +23,7 @@ The [1.7.0 changelog](https://github.com/Vitaee/FastapiObserver/blob/main/CHANGE
 
 ## What it cost
 
-- **Upstream changes reach users directly.** That's the risk this decision accepts. The [1.5.0 leak](../postmortems/2026-10-otlp-logs-exported-unredacted.md), which came earlier, shows what one looks like.
+- **Upstream changes reach users directly.** That's the risk this decision accepts. The [1.5.0 leak](https://github.com/Vitaee/FastapiObserver/blob/main/CHANGELOG.md#150---2026-10-31), which came earlier, shows what one looks like.
 - **Some internals are still involved:**
     - the logs SDK, which lives in a private module, `opentelemetry.sdk._logs` ([`otel/logs.py:90`](https://github.com/Vitaee/FastapiObserver/blob/v1.8.0/src/fastapiobserver/otel/logs.py#L90));
     - a check on provider class names ([`resource.py:104`](https://github.com/Vitaee/FastapiObserver/blob/v1.8.0/src/fastapiobserver/otel/resource.py#L104)).
