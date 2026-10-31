@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import importlib
 import json
-from typing import Any, Callable, TypeVar, cast
+from typing import Any, Callable, TypeVar
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -45,7 +45,7 @@ class EnvLoadable:
 
     @classmethod
     def from_env(cls: type[TEnvLoadable]) -> TEnvLoadable:
-        return cast(TEnvLoadable, cls(**cls._env_values()))
+        return cls(**cls._env_values())
 
 
 def parse_csv(

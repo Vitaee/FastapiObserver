@@ -88,8 +88,8 @@ class LogtailDLQ:
         self._handler.handleError = _handle_error  # type: ignore[method-assign]
         
         if self.compress:
-            self._handler.rotator = _gzip_rotator  # type: ignore[assignment]
-            self._handler.namer = _gzip_namer  # type: ignore[assignment]
+            self._handler.rotator = _gzip_rotator
+            self._handler.namer = _gzip_namer
 
     def submit(self, payload: str, reason: Literal["queue_overflow", "send_failed"]) -> None:
         with self._lock:

@@ -93,7 +93,8 @@ def build_otlp_exporter(
 
 def import_otel_module(name: str) -> ModuleType:
     try:
-        return lazy_import(name, package_hint="fastapi-observer[otel]")
+        module: ModuleType = lazy_import(name, package_hint="fastapi-observer[otel]")
+        return module
     except RuntimeError as exc:
         raise RuntimeError(
             "OpenTelemetry support requires `pip install fastapi-observer[otel]`"

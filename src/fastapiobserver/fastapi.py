@@ -7,7 +7,7 @@ import typing
 from collections.abc import Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 from fastapi import FastAPI
 
@@ -262,7 +262,8 @@ def _setup_request_middleware(
         )
 
     for middleware in app.user_middleware:
-        if middleware.cls is RequestLoggingMiddleware:
+        # Starlette types `cls` as a middleware factory protocol, which mypy can't compare.
+        if cast(object, middleware.cls) is RequestLoggingMiddleware:
             return
 
     app.add_middleware(
