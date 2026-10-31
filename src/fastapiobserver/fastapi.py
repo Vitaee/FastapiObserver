@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import logging
+import os
 import re
 import weakref
 import typing
+from urllib.parse import urlsplit, urlunsplit
 from collections.abc import Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
@@ -138,6 +140,54 @@ def install_observability(
     # --- 8. Runtime control plane ---
     if runtime_control_settings and runtime_control_settings.enabled:
         mount_control_plane(app, runtime_control_settings, trusted_proxy_policy)
+
+    # --- 9. One line with the settings that took effect ---
+    _LOGGER.info(
+        "observability.configured",
+        extra={
+            "event": {
+                "profile": os.getenv("OBS_PROFILE", "").strip().lower() or None,
+                "log_level": settings.log_level,
+                "metrics_path": (
+                    settings.metrics_path
+                    if (settings.metrics_enabled if metrics_enabled is None else metrics_enabled)
+                    else None
+                ),
+                "tracing": otel_settings.enabled,
+                "otlp_endpoint": _endpoint_for_log(otel_settings.otlp_endpoint),
+                "otlp_protocol": otel_settings.protocol,
+                "trace_sampling_ratio": otel_settings.trace_sampling_ratio,
+                "otel_logs_mode": (
+                    otel_logs_settings.logs_mode if otel_logs_settings.enabled else None
+                ),
+                "otel_metrics": otel_metrics_settings.enabled,
+                "redaction_mode": security_policy.redaction_mode,
+                "body_capture": (
+                    security_policy.log_request_body or security_policy.log_response_body
+                ),
+                "trusted_cidrs": (
+                    list(trusted_proxy_policy.trusted_cidrs)
+                    if trusted_proxy_policy.enabled
+                    else None
+                ),
+                "honor_forwarded_headers": trusted_proxy_policy.honor_forwarded_headers,
+                "request_id_header": settings.request_id_header,
+                "control_plane": (
+                    runtime_control_settings.path if runtime_control_settings.enabled else None
+                ),
+                "log_sinks": list(settings.log_sinks),
+            },
+            "_skip_enrichers": True,
+        },
+    )
+
+
+def _endpoint_for_log(endpoint: str | None) -> str | None:
+    """*endpoint* without credentials, query or fragment, which can carry tokens."""
+    if not endpoint:
+        return None
+    parts = urlsplit(endpoint)
+    return urlunsplit((parts.scheme, parts.netloc.rpartition("@")[2], parts.path, "", ""))
 
 
 def _setup_structured_logging(

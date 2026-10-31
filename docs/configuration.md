@@ -4,6 +4,14 @@
 
 The library supports configuration from code and env vars. Below are the most relevant env vars by area.
 
+To see what took effect, look for the `observability.configured` line that `install_observability()` writes at startup. It lists the active profile, log level, metrics path, OpenTelemetry endpoint and sampling, redaction mode, trusted networks, control plane path and enabled sinks. Endpoint credentials, query strings and tokens are left out.
+
+```json
+{"message": "observability.configured", "event": {"profile": "production", "log_level": "INFO", "metrics_path": null, "tracing": true, "otlp_endpoint": "http://collector:4317", "trace_sampling_ratio": 0.1, "redaction_mode": "drop", "trusted_cidrs": ["10.0.0.0/8", "..."], "control_plane": null, "log_sinks": []}}
+```
+
+The line is written at `INFO`, so it's hidden when `LOG_LEVEL` is `WARNING` or higher.
+
 ### Environment Profiles (`OBS_PROFILE`)
 
 `OBS_PROFILE` is an optional profile switch for zero-glue configuration (`install_observability(app)` with env-based settings).
