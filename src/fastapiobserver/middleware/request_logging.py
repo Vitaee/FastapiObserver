@@ -4,6 +4,7 @@ import logging
 import re
 import time
 
+from anyio import get_cancelled_exc_class
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from ..config import ObservabilitySettings
@@ -86,6 +87,8 @@ class RequestLoggingMiddleware:
             max_length=self.security_policy.max_body_length,
         )
         had_error = False
+        cancelled = False
+        response_started = False
 
         async def receive_wrapper() -> Message:
             message = await receive()
@@ -93,8 +96,9 @@ class RequestLoggingMiddleware:
             return message
 
         async def send_wrapper(message: Message) -> None:
-            nonlocal status_code
+            nonlocal status_code, response_started
             if message["type"] == "http.response.start":
+                response_started = True
                 status_code = int(message.get("status", 500))
                 resp_headers = message.get("headers", [])
                 if self.security_policy.log_response_body:
@@ -124,6 +128,13 @@ class RequestLoggingMiddleware:
             captured_error = exc
             status_code = 500
             raise
+        except get_cancelled_exc_class():
+            # The client left, the server is shutting down or a timeout fired.
+            # Not a server error: without a response, use nginx's 499.
+            cancelled = True
+            if not response_started:
+                status_code = 499
+            raise
         finally:
             self._finalize_request(
                 scope=scope,
@@ -136,6 +147,7 @@ class RequestLoggingMiddleware:
                 response_body_capture=response_body_capture,
                 captured_error=captured_error,
                 had_error=had_error,
+                cancelled=cancelled,
             )
 
     def _finalize_request(
@@ -150,10 +162,13 @@ class RequestLoggingMiddleware:
         response_body_capture: _BodyCapture,
         captured_error: Exception | None,
         had_error: bool,
+        cancelled: bool,
     ) -> None:
         duration_seconds = max(0.0, time.perf_counter() - start)
         if had_error:
             level, message = logging.ERROR, "request.failed"
+        elif cancelled:
+            level, message = logging.WARNING, "request.cancelled"
         elif status_code >= 500:
             level, message = logging.ERROR, "request.server_error"
         elif status_code >= 400:

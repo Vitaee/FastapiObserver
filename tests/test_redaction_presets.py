@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import hashlib
+import hmac
+
 import pytest
 
 import fastapiobserver
@@ -49,9 +52,9 @@ def test_gdpr_preset_hashes_pii_fields() -> None:
 
     sanitized = sanitize_event(payload, policy)
 
-    assert sanitized["email"].startswith("sha256:")
-    assert sanitized["phone"].startswith("sha256:")
-    assert sanitized["address"].startswith("sha256:")
+    assert sanitized["email"].startswith("hmac-sha256:")
+    assert sanitized["phone"].startswith("hmac-sha256:")
+    assert sanitized["address"].startswith("hmac-sha256:")
 
 
 def test_preset_can_be_overridden_by_env(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -69,3 +72,18 @@ def test_preset_constants_are_available_in_public_api() -> None:
     assert "strict" in fastapiobserver.SECURITY_POLICY_PRESETS
     assert fastapiobserver.PCI_REDACTED_FIELDS
     assert fastapiobserver.GDPR_REDACTED_FIELDS
+
+
+def test_hash_mode_is_keyed_so_values_cannot_be_recovered_by_guessing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    phone = "+1234567890"
+    monkeypatch.setenv("OBS_REDACTION_PRESET", "gdpr")
+    monkeypatch.setenv("OBS_REDACTION_HASH_KEY", "k1")
+    from_env = sanitize_event({"phone": phone}, SecurityPolicy.from_env())["phone"]
+    keyed = hmac.new(b"k1", phone.encode(), hashlib.sha256).hexdigest()
+
+    assert from_env == f"hmac-sha256:{keyed}"
+    assert hashlib.sha256(phone.encode()).hexdigest() not in from_env
+    other_key = SecurityPolicy(redaction_mode="hash", redacted_fields=("phone",), hash_key="k2")
+    assert sanitize_event({"phone": phone}, other_key)["phone"] != from_env

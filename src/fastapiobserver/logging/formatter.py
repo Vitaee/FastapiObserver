@@ -3,8 +3,9 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-import re
+import traceback
 from datetime import datetime, timezone
+from types import TracebackType
 from typing import Any, Callable, Mapping
 
 from .._version import __version__
@@ -144,11 +145,11 @@ def _build_structured_error(
             "stacktrace": "",
         }
 
-    exc_type, exc_value, _exc_tb = exc_info
+    exc_type, exc_value, exc_tb = exc_info
     error_type = exc_type.__name__ if exc_type is not None else "Exception"
     error_message = str(exc_value) if exc_value is not None else ""
     stacktrace = formatter.formatException(exc_info)
-    fingerprint = _generate_error_fingerprint(error_type, stacktrace)
+    fingerprint = _generate_error_fingerprint(error_type, exc_tb)
 
     return {
         "type": error_type,
@@ -158,16 +159,13 @@ def _build_structured_error(
     }
 
 
-def _generate_error_fingerprint(error_type: str, stacktrace: str) -> str:
-    """Hash stack trace after stripping out environment-specific noise."""
-    if not stacktrace:
-        return hashlib.sha256(error_type.encode("utf-8")).hexdigest()[:32]
+def _generate_error_fingerprint(error_type: str, exc_tb: TracebackType | None) -> str:
+    """Hash the exception type and the file, function and source of each frame.
 
-    # Strip hexadecimal memory addresses
-    sanitized = re.sub(r"0x[0-9a-fA-F]+", "0x<ptr>", stacktrace)
-    # Strip exact line numbers to survive minor file refactoring
-    sanitized = re.sub(r"line \d+", "line <N>", sanitized)
-    
-    # Combine error type and sanitized trace to ensure distinct groupings
-    payload = f"{error_type}:{sanitized}"
-    return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:32]
+    The message is left out, since it often holds IDs that differ each time the
+    same bug is hit, and so are line numbers, which shift with unrelated edits.
+    """
+    frames = "".join(
+        f"{frame.filename}:{frame.name}:{frame.line}\n" for frame in traceback.extract_tb(exc_tb)
+    )
+    return hashlib.sha256(f"{error_type}\n{frames}".encode("utf-8")).hexdigest()[:32]

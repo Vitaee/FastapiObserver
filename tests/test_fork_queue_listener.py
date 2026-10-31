@@ -1,12 +1,14 @@
 import logging
 import queue
+import threading
 from unittest.mock import Mock
 from fastapiobserver.logging.setup import _restart_queue_listener_in_child
 import fastapiobserver.logging.state as state
-from fastapiobserver.logging.queueing import OverflowPolicyQueueHandler
+from fastapiobserver.logging.circuit_breaker import SinkCircuitBreakerHandler
+from fastapiobserver.logging.queueing import _LOG_QUEUE_TELEMETRY, OverflowPolicyQueueHandler
 
 
-def test_restart_queue_listener_in_child_drains_and_recreates_queue():
+def test_restart_queue_listener_in_child_recreates_queue():
     # Setup mock state
     old_queue = queue.Queue(maxsize=10)
     old_queue.put_nowait(
@@ -36,8 +38,6 @@ def test_restart_queue_listener_in_child_drains_and_recreates_queue():
         _restart_queue_listener_in_child()
 
         # Assertions
-        assert old_queue.empty()
-        
         # Verify the new listener was created and started
         new_listener = state._QUEUE_LISTENER
         assert new_listener is not mock_listener
@@ -58,3 +58,36 @@ def test_restart_queue_listener_in_child_drains_and_recreates_queue():
             
         state._QUEUE_LISTENER = original_listener
         state._MANAGED_HANDLERS = original_handlers
+
+
+def test_restart_in_child_ignores_locks_held_at_fork():
+    # In the parent, the listener or a request thread can hold these locks at the
+    # moment of the fork. Nothing in the child releases them.
+    old_queue = queue.Queue(maxsize=10)
+    breaker = SinkCircuitBreakerHandler(
+        sink_name="stdout",
+        delegate=logging.NullHandler(),
+        failure_threshold=1,
+        recovery_timeout_seconds=1,
+    )
+    held = [old_queue.mutex, _LOG_QUEUE_TELEMETRY._lock, breaker._lock]
+    listener = Mock(queue=old_queue, handlers=[], respect_handler_level=True)
+    saved = (state._QUEUE_LISTENER, state._SINK_CIRCUIT_BREAKERS, _LOG_QUEUE_TELEMETRY._lock)
+    state._QUEUE_LISTENER = listener
+    state._SINK_CIRCUIT_BREAKERS = [breaker]
+    for lock in held:
+        lock.acquire()
+    try:
+        child = threading.Thread(target=_restart_queue_listener_in_child, daemon=True)
+        child.start()
+        child.join(timeout=2)
+
+        assert not child.is_alive()
+        assert not _LOG_QUEUE_TELEMETRY._lock.locked()
+        assert not breaker._lock.locked()
+    finally:
+        for lock in held:
+            lock.release()
+        if isinstance(state._QUEUE_LISTENER, logging.handlers.QueueListener):
+            state._QUEUE_LISTENER.stop()
+        state._QUEUE_LISTENER, state._SINK_CIRCUIT_BREAKERS, _LOG_QUEUE_TELEMETRY._lock = saved

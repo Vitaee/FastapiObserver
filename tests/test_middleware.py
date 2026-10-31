@@ -202,3 +202,41 @@ def test_extract_route_template_contract() -> None:
         "route": type("Route", (), {"path": "/users/{user_id}"})(),
     }
     assert _extract_route_template(scope, "/raw", 404) == "/users/{user_id}"
+
+
+def test_cancelled_request_is_logged_as_cancelled_not_as_a_server_error(caplog) -> None:
+    import asyncio
+
+    from fastapiobserver.middleware import RequestLoggingMiddleware
+
+    async def cancelled_before_response(scope, receive, send) -> None:
+        raise asyncio.CancelledError()
+
+    async def cancelled_mid_stream(scope, receive, send) -> None:
+        await send({"type": "http.response.start", "status": 200, "headers": []})
+        raise asyncio.CancelledError()
+
+    async def no_op_send(message) -> None:
+        pass
+
+    async def run(app) -> None:
+        middleware = RequestLoggingMiddleware(
+            app, ObservabilitySettings(app_name="test", service="svc", environment="test")
+        )
+        scope = {"type": "http", "method": "GET", "path": "/slow", "headers": []}
+        with pytest.raises(asyncio.CancelledError):
+            await middleware(scope, None, no_op_send)
+
+    with caplog.at_level(logging.INFO, logger="fastapiobserver.middleware"):
+        asyncio.run(run(cancelled_before_response))
+        asyncio.run(run(cancelled_mid_stream))
+
+    lines = [
+        (record.getMessage(), record.levelno, record.event["status_code"])
+        for record in caplog.records
+        if record.name == "fastapiobserver.middleware"
+    ]
+    assert lines == [
+        ("request.cancelled", logging.WARNING, 499),
+        ("request.cancelled", logging.WARNING, 200),
+    ]

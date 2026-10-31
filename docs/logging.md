@@ -26,6 +26,7 @@ Request middleware emits one primary event per request:
 | `request.client_error` | `WARNING` | Client-side HTTP errors (`4xx`) |
 | `request.server_error` | `ERROR` | Server-side HTTP errors (`5xx` without exception) |
 | `request.failed` | `ERROR` + traceback | Unhandled exception in request path |
+| `request.cancelled` | `WARNING` | Cancelled before it finished: the client left, the server shut down or a timeout fired. `status_code` is `499` if no response had started |
 
 Standard request event fields include:
 - `method`
@@ -176,8 +177,9 @@ Exception payload:
 }
 ```
 
-`error.fingerprint` is stable for grouping recurring failures because transient noise
-(for example memory addresses and exact line numbers) is normalized before hashing.
+`error.fingerprint` groups recurring failures: it hashes the exception type and the file,
+function and source line of each frame. The message and line numbers are left out, so
+`user 1 not found` and `user 2 not found` from the same place share one fingerprint.
 
 ## Minimal Setup
 

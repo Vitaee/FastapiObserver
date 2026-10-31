@@ -28,7 +28,7 @@ def test_gdpr_preset_redacts_client_ip() -> None:
     policy = SecurityPolicy.from_preset("gdpr")
     event = {"client_ip": "203.0.113.42", "method": "GET"}
     sanitized = sanitize_event(event, policy)
-    assert sanitized["client_ip"].startswith("sha256:")
+    assert sanitized["client_ip"].startswith("hmac-sha256:")
     assert sanitized["method"] == "GET"
 
 
@@ -36,7 +36,7 @@ def test_gdpr_preset_redacts_client_ip_inside_nested_dict() -> None:
     policy = SecurityPolicy.from_preset("gdpr")
     event = {"nested": {"client_ip": "10.0.0.1"}}
     sanitized = sanitize_event(event, policy)
-    assert sanitized["nested"]["client_ip"].startswith("sha256:")
+    assert sanitized["nested"]["client_ip"].startswith("hmac-sha256:")
 
 
 # ---------------------------------------------------------------------------
