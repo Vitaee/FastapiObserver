@@ -124,7 +124,7 @@ install_observability(app, settings)
 - Local JSON logs go to `stdout` by default.
 - Set `LOG_DIR` to also enable rotating file logs.
 - With OTel logs enabled, `logs_mode` can be `local_json`, `otlp`, or `both`.
-- Uvicorn loggers are routed into the same structured pipeline.
+- Uvicorn loggers are routed into the same structured pipeline. `install_observability()` drops uvicorn's access log line, the same way `uvicorn --no-access-log` does, because `request.completed` carries the same fields. To keep it anyway, set `logging.getLogger("uvicorn.access").propagate = True` after `install_observability()`.
 - Logging shutdown is handled on FastAPI lifespan shutdown and `atexit`.
 
 ## Queue and Sink Resilience Controls

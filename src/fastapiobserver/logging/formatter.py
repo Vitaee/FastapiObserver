@@ -52,7 +52,7 @@ class StructuredJsonFormatter(logging.Formatter):
 
     def format(self, record: logging.LogRecord) -> str:
         payload: dict[str, Any] = {
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.fromtimestamp(record.created, timezone.utc).isoformat(),
             "level": record.levelname,
             "logger": record.name,
             "message": record.getMessage(),
@@ -77,7 +77,7 @@ class StructuredJsonFormatter(logging.Formatter):
         if span_id:
             payload["span_id"] = span_id
 
-        user_context = get_user_context()
+        user_context = getattr(record, "user_context", None) or get_user_context()
         if user_context:
             payload["user_context"] = user_context
 
@@ -96,15 +96,20 @@ class StructuredJsonFormatter(logging.Formatter):
         else:
             candidate_payload = self._enrich_event(dict(payload))
             if isinstance(candidate_payload, Mapping):
-                enriched_payload = dict(candidate_payload)
+                enriched_payload = _as_dict(candidate_payload)
             else:
                 enriched_payload = payload
         sanitized_candidate = self._sanitize_payload(enriched_payload, self.security_policy)
         if isinstance(sanitized_candidate, Mapping):
-            sanitized_payload = dict(sanitized_candidate)
+            sanitized_payload = _as_dict(sanitized_candidate)
         else:
             sanitized_payload = enriched_payload
         return _json_dumps(sanitized_payload)
+
+
+def _as_dict(value: Mapping[str, Any]) -> dict[str, Any]:
+    # Both steps already return fresh dicts; only copy other mapping types.
+    return value if type(value) is dict else dict(value)
 
 
 def _json_dumps(payload: dict[str, Any]) -> str:

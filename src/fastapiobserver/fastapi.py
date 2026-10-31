@@ -126,6 +126,13 @@ def install_observability(
         metrics_backend,
     )
 
+    # --- 7. Uvicorn access log ---
+    # The middleware's `request.completed` line carries the same fields, so drop
+    # uvicorn's duplicate line the same way `uvicorn --no-access-log` does.
+    uvicorn_access_logger = logging.getLogger("uvicorn.access")
+    uvicorn_access_logger.handlers = []
+    uvicorn_access_logger.propagate = False
+
     # --- 8. Runtime control plane ---
     if runtime_control_settings and runtime_control_settings.enabled:
         mount_control_plane(app, runtime_control_settings)

@@ -116,6 +116,34 @@ def test_structured_formatter_supports_injected_dependencies() -> None:
     assert payload["sanitized_by"] == "custom"
 
 
+def test_queued_records_keep_exception_and_user_context() -> None:
+    class _CollectingHandler(logging.Handler):
+        def __init__(self) -> None:
+            super().__init__()
+            self.messages: list[str] = []
+
+        def emit(self, record: logging.LogRecord) -> None:
+            self.messages.append(self.format(record))
+
+    settings = ObservabilitySettings(app_name="test", service="test", environment="test")
+    collector = _CollectingHandler()
+    setup_logging(settings, force=True, logs_mode="otlp", extra_handlers=[collector])
+
+    set_user_context({"user_id": "42"})
+    try:
+        raise RuntimeError("boom")
+    except RuntimeError:
+        logging.getLogger("tests.queued").exception("request failed")
+    finally:
+        clear_user_context()
+    shutdown_logging()
+
+    payload = next(json.loads(m) for m in collector.messages if '"tests.queued"' in m)
+    assert payload["message"] == "request failed"
+    assert payload["error"]["type"] == "RuntimeError"
+    assert payload["user_context"] == {"user_id": "42"}
+
+
 def test_setup_logging_is_idempotent_with_force_mode() -> None:
     settings = ObservabilitySettings(app_name="test", service="test", environment="test")
     root = logging.getLogger()

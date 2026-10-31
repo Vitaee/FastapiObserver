@@ -74,6 +74,8 @@ def clear_plugins() -> None:
 
 
 def apply_log_enrichers(event: dict[str, object]) -> dict[str, object]:
+    if not _LOG_ENRICHERS:
+        return event
     with _LOCK:
         enrichers = list(_LOG_ENRICHERS.items())
 
@@ -92,7 +94,7 @@ def apply_log_enrichers(event: dict[str, object]) -> dict[str, object]:
 
 
 def apply_log_filters(record: logging.LogRecord) -> bool:
-    if getattr(record, "_skip_log_filters", False):
+    if not _LOG_FILTERS or getattr(record, "_skip_log_filters", False):
         return True
 
     with _LOCK:

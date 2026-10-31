@@ -3,8 +3,8 @@ from __future__ import annotations
 import logging
 
 from ..config import ObservabilitySettings
-from ..metrics import MetricsBackend, collapse_dynamic_segments
-from ..plugins import emit_metric_hooks
+from ..metrics import MetricsBackend, NoopMetricsBackend, collapse_dynamic_segments
+from ..plugins import _METRIC_HOOKS, emit_metric_hooks
 from starlette.requests import Request
 from starlette.responses import Response
 from starlette.types import Scope
@@ -30,6 +30,8 @@ class _MetricsRecorder:
         duration_seconds: float,
         scope: Scope | None = None,
     ) -> None:
+        if isinstance(self.metrics_backend, NoopMetricsBackend):
+            return
         collapsed_path = collapse_dynamic_segments(path)
         excluded_urls = self.settings.metrics_exclude_paths
         
@@ -67,6 +69,8 @@ class _MetricsRecorder:
         status_code: int,
         duration_seconds: float,
     ) -> None:
+        if not _METRIC_HOOKS:
+            return
         request = Request(scope)
         response = Response(status_code=status_code)
         emit_metric_hooks(request, response, duration_seconds)

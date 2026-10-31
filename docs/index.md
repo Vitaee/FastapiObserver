@@ -7,7 +7,7 @@
 
 `fastapi-observer` gives you structured JSON logs, request correlation, Prometheus metrics, OpenTelemetry tracing, security redaction presets, and runtime controls in one install step and one function call.
 
-**Supported Python versions:** `3.10` to `3.15`
+**Supported Python versions:** `3.11` and newer (CI-tested on `3.11` to `3.15`)
 
 ---
 
@@ -16,7 +16,7 @@
 
 | Component | Supported / Tested |
 |---|---|
-| Python | `3.10` to `3.15` (CI matrix) |
+| Python | `>=3.11` (CI matrix: `3.11` to `3.15`) |
 | FastAPI | `>=0.133.0` |
 | Starlette | `>=1.3.1` |
 | pydantic-settings | `>=2.10.1` |

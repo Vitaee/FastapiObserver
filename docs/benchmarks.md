@@ -1,51 +1,63 @@
-# Developer Experience & Benchmarks
+# Benchmarks
 
-`fastapi-observer` is designed to provide massive developer experience (DX) improvements and reduce the "Maintenance Tax" of microservices without incurring significant runtime overhead.
+This page answers two questions: how much code `fastapi-observer` saves compared with wiring the same observability by hand, and how much CPU it adds to each request.
 
-## The Boilerplate Benchmark (Developer Time Saved)
+## Code you don't write
 
-To achieve strict parity in OpenTelemetry tracing, Prometheus histogram exposition (without cardinality explosion), and structured JSON logging, we compared the baseline requirements.
+`examples/time_saved/` contains the same service built twice: once by hand (`the_hard_way.py`) and once with `install_observability()` (`the_easy_way.py`). Both produce JSON logs with request IDs, Prometheus request metrics and OpenTelemetry traces. `tests/test_dx_parity.py` checks that the two produce equivalent log fields, trace context and metrics.
 
-See the complete working examples in `examples/time_saved/`.
+| | Hand-wired | `fastapi-observer` |
+| :--- | :--- | :--- |
+| Lines of code | 161 | 29 |
+| Direct dependencies to pin | 6 (`prometheus-client`, `opentelemetry-sdk`, ...) | 1 |
 
-| Metric | The Hard Way (Manual) | The Easy Way (`fastapi-observer`) | Reduction |
-| :--- | :--- | :--- | :--- |
-| **SLOC (Source Lines)** | ~160 lines | ~30 lines | **~80% less code** |
-| **Direct Dependencies** | 6 (`prometheus-client`, `opentelemetry-sdk`, etc) | 1 (`fastapi-observer`) | **~83% fewer pins** |
-| **Complexity Surface** | Thread-pools, ASGIMiddleware, ContextVars | Declarative `ObservabilitySettings` | **Massive** |
+The hand-wired version also has to get these details right, which the library handles for you:
 
-**Functional Equivalence**: The `tests/test_dx_parity.py` automated test suite asserts that both approaches yield functionally equivalent JSON logging structures, trace context propagation, and Prometheus exposition metrics.
+1. **Metric cardinality.** Labelling metrics with `request.url.path` creates a new series for every `/users/123`. The library labels with the route template (`/users/{user_id}`).
+2. **Context cleanup.** Request IDs stored in context variables have to be reset in a `finally` block, or they leak into the next request's logs.
+3. **Blocking writes.** Writing log lines to stdout from the request path blocks the event loop when the reader is slow (for example a container log driver under load). The library queues records and writes them from a background thread with `logging.handlers.QueueListener`.
 
-## Risk Reduction & Maintenance Tax
+## Per-request overhead
 
-Building observability tooling by hand often leads to specific operational failure modes. `fastapi-observer` systematically prevents these common bugs out-of-the-box:
+### Setup
 
-1.  **Prometheus Cardinality Explosions**: The naive `request.url.path` exposes `/users/123/profile`, creating infinite prometheus labels that crash scraping agents. `fastapi-observer` safely extracts the ASGI route template (`/users/{id}/profile`).
-2.  **ContextVar Leaks**: Hand-rolled `ContextVars` inside ASGI middleware missing tight `try...finally` resource cleanups easily contaminate asynchronous traces across unrelated requests holding the same event loop.
-3.  **Logging Thread-Safety**: Emitting structured logs directly to `stdout` blocks the async event loop under load. `fastapi-observer` automatically implements Python 3.12+ `logging.handlers.QueueListener` on a background thread.
-4.  **OTel Transport Deadlocks**: Manual `opentelemetry-sdk` setups often fail to register the `BatchSpanProcessor` atexit shutdown hooks. `fastapiobserver` binds gracefully to the FastAPI lifespan events.
+- Apple M1 (8 cores), Python 3.13.15, FastAPI 0.162.0, Starlette 1.10.0, uvicorn 0.54.0 with 1 worker.
+- Load from ApacheBench on the same machine: `ab -k -c 200`, `POST /items` with a small JSON body. The handler validates the body and awaits `asyncio.sleep(0.015)` to stand in for I/O.
+- Tracing scenarios export spans over OTLP/gRPC to the Jaeger all-in-one container from `examples/time_saved/docker-compose.yml`.
+- Each scenario: 3 s warm-up, then 5 runs of 5 s. Values are the median (± standard deviation) of the 5 runs. `ab` reports latency in whole milliseconds.
 
-## Latency Overhead (Execution Speed)
+Reproduce with the command below. The tracing scenarios (S3, S4, S5, H4) start and stop the collector with Docker; pass scenario names, for example `S0 S1 S2`, to run without Docker.
 
-To provide a rigorous, repeatable, and statistical approach to benchmarking, we separate the base framework overhead from incremental feature costs (Metrics, Tracing, Body Capture) and network resilience (Collector Up vs Down).
+```bash
+python examples/benchmarks/harness.py
+```
 
-This repository includes a reproducible `hey` benchmark harness (`examples/benchmarks/harness.py`) which runs 5 iterations of 5-second sustained loads (at concurrency 200) for each scenario.
+### Results
 
-### The Scenario Matrix Results
+| Scenario | What is enabled | Requests/s | p50 | p95 | p99 |
+| :--- | :--- | ---: | ---: | ---: | ---: |
+| S0 | Plain FastAPI (uvicorn's default plain-text access log) | 5,411 (±81) | 36 ms | 47 ms | 56 ms |
+| S1 | `fastapi-observer`, defaults (JSON request logs, request IDs, redaction) | 4,393 (±12) | 44 ms | 56 ms | 63 ms |
+| S2 | S1 + Prometheus metrics | 4,249 (±21) | 46 ms | 59 ms | 66 ms |
+| S3 | S1 + OpenTelemetry tracing | 2,076 (±45) | 96 ms | 125 ms | 136 ms |
+| S4 | All features: metrics, tracing, request and response body capture | 2,020 (±27) | 97 ms | 123 ms | 136 ms |
+| S5 | S4 with the collector stopped | 2,135 (±59) | 91 ms | 119 ms | 128 ms |
+| H4 | Hand-wired logs, metrics and tracing (`the_hard_way.py`) | 1,544 (±33) | 123 ms | 152 ms | 181 ms |
 
-*Tested on Apple M-Series Silicon, Python 3.13.9, Uvicorn (1 worker).*
+### Reading the numbers
 
-| Scenario | Description | Throughput (Req/sec) | p50 Latency | p95 Latency | p99 Latency |
-| :--- | :--- | :--- | :--- | :--- | :--- |
-| **S0** | **Baseline FastAPI** (No observer) | 7,579 (±14) | 25.9ms (±0.1) | 29.6ms (±0.8) | 35.3ms (±2.9) |
-| **S1** | **Observer Minimal** (Features Off) | 4,266 (±34) | 46.3ms (±0.2) | 53.8ms (±0.6) | 56.0ms (±7.0) |
-| **S2** | **Observer + Metrics** | 4,165 (±26) | 47.3ms (±0.3) | 55.7ms (±0.6) | 61.8ms (±7.8) |
-| **S3** | **Observer + Tracing** | 2,228 (±10) | 90.0ms (±0.3) | 103.4ms (±1.0) | 124.3ms (±13.2) |
-| **S4** | **Observer + All Features** | 2,145 (±17) | 93.2ms (±0.3) | 107.2ms (±1.1) | 120.0ms (±15.6) |
-| **S5** | **Observer All (Collector Down)** | 2,395 (±24) | 81.5ms (±0.5) | 97.4ms (±1.3) | 104.5ms (±7.7) |
+The handler spends its time waiting, so a single worker is limited by CPU, and requests per second is the inverse of CPU time per request:
 
-### Analysis
+| Scenario | CPU per request | Added over S0 |
+| :--- | ---: | ---: |
+| S0 | 185 µs | — |
+| S1 | 228 µs | 43 µs |
+| S2 | 235 µs | 51 µs |
+| S3 | 482 µs | 297 µs |
+| S4 | 495 µs | 310 µs |
+| H4 | 648 µs | 463 µs |
 
-1.  **Middleware Overhead (S0 vs S1/S2)**: Injecting any `BaseHTTPMiddleware` into FastAPI creates a measurable throughput drop natively in `starlette`. `fastapiobserver` mitigates this via aggressive `lru_cache` and `RLock` isolation, keeping the P50 overhead to just ~21ms.
-2.  **Tracking Overhead (S3/S4)**: OpenTelemetry context propagation and synchronous trace tracking natively impacts throughput when managing highly concurrent simulated I/O. However, even with *every* feature enabled (S4), the single-core `uvicorn` worker comfortably manages >2,100 Req/sec.
-3.  **Resilience (S4 vs S5)**: If the backend Jaeger/OTLP collector crashes, the `fastapiobserver` resilient logging queues and OpenTelemetry circuit breakers immediately degrade gracefully. Notice that **S5 (Collector Down) is actually faster than S4**, proving that the application effectively mitigates blocking or catastrophic timeouts due to a telemetry infrastructure outage.
+- **The added time is a fixed cost per request, not a percentage.** A handler that spends 5 ms on database calls still pays about 45 µs for logging, under 1%. Most of it is building, redacting and serializing the JSON log line. S0 is not free of logging either: uvicorn's plain-text access line, which the library replaces with `request.completed`, costs about 20 µs per request on its own.
+- **Tracing is the expensive part, and most of it is OpenTelemetry itself.** Its FastAPI instrumentation creates three spans per request (the server span plus ASGI receive and send spans) and the SDK serializes and exports them. A hand-wired OpenTelemetry setup pays the same cost.
+- **With every feature on, the library handles 31% more requests than the hand-wired example** (S4 vs H4), even though S4 also captures request and response bodies. The hand-wired example uses `@app.middleware("http")`, which runs each request through extra tasks and memory streams and writes log lines synchronously. The library uses a plain ASGI middleware and writes logs from a background thread.
+- **A stopped collector does not stall requests** (S5). Throughput goes up slightly because spans that cannot be delivered are dropped instead of being sent.
