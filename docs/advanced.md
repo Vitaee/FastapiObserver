@@ -117,6 +117,7 @@ settings = ObservabilitySettings(
 Queue pressure metrics exposed on `/metrics` (Prometheus mode):
 - `fastapiobserver_log_queue_size`
 - `fastapiobserver_log_queue_capacity`
+- `fastapiobserver_log_queue_overflow_policy_info`
 - `fastapiobserver_log_queue_enqueued_total`
 - `fastapiobserver_log_queue_dropped_total{reason="drop_oldest|drop_newest"}`
 - `fastapiobserver_log_queue_blocked_total`

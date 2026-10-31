@@ -134,25 +134,9 @@ The logging pipeline uses a bounded in-memory queue and configurable overflow po
 - `drop_newest`: preserve older queued records.
 - `block`: wait for queue space up to timeout, then drop newest.
 
-Relevant settings:
-- `LOG_QUEUE_MAX_SIZE`
-- `LOG_QUEUE_OVERFLOW_POLICY`
-- `LOG_QUEUE_BLOCK_TIMEOUT_SECONDS`
-- `LOG_SINK_CIRCUIT_BREAKER_ENABLED`
-- `LOG_SINK_CIRCUIT_BREAKER_FAILURE_THRESHOLD`
-- `LOG_SINK_CIRCUIT_BREAKER_RECOVERY_TIMEOUT_SECONDS`
+A circuit breaker around each sink stops a failing sink from slowing the others.
 
-Prometheus queue/sink health metrics:
-- `fastapiobserver_log_queue_size`
-- `fastapiobserver_log_queue_capacity`
-- `fastapiobserver_log_queue_overflow_policy_info`
-- `fastapiobserver_log_queue_enqueued_total`
-- `fastapiobserver_log_queue_dropped_total`
-- `fastapiobserver_log_queue_blocked_total`
-- `fastapiobserver_log_queue_block_timeouts_total`
-- `fastapiobserver_sink_circuit_breaker_state_info`
-- `fastapiobserver_sink_circuit_breaker_failures_total`
-- `fastapiobserver_sink_circuit_breaker_skipped_total`
+The settings are in the [configuration guide](configuration.md#identity-and-logging). The queue and breaker metrics are listed under [bounded queue](advanced.md#bounded-queue-and-overflow-policy) and [sink circuit breaker](advanced.md#sink-circuit-breaker). Why the queue drops instead of blocking is in [decision 0002](decisions/0002-logs-leave-through-a-queue.md).
 
 ## Security and Data Hygiene
 

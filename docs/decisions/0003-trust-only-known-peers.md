@@ -28,4 +28,4 @@
 
 - **Request IDs from an untrusted proxy are ignored.** If your edge proxy is outside the default ranges, its request IDs don't count until you add it to `OBS_TRUSTED_CIDRS`. It's the most likely surprise on day one.
 - **The defaults trust every private address.** In a shared network that includes machines you don't control. Narrow the list in production.
-- **Honouring forwarded headers needs care.** `OBS_TRUSTED_CIDRS` must list only your proxies, and the library logs a warning when the setting is on.
+- **With forwarded headers honoured, `OBS_TRUSTED_CIDRS` must list only your proxies.** The library logs a warning when the setting is on.

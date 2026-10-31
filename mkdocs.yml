@@ -30,6 +30,10 @@ markdown_extensions:
   - toc:
       permalink: true
   - pymdownx.highlight
+  # docs/index.md includes README.md, so the home page has one source.
+  - pymdownx.snippets:
+      base_path: ["."]
+      check_paths: true
   - pymdownx.superfences:
       custom_fences:
         - name: mermaid
@@ -69,6 +73,6 @@ nav:
       - 0004 Redact before anything leaves: decisions/0004-redact-before-anything-leaves.md
       - 0005 Route templates as labels: decisions/0005-route-templates-as-metric-labels.md
       - 0006 Delegate to OpenTelemetry: decisions/0006-delegate-to-opentelemetry.md
-      - 0007 New destinations are opt-in: decisions/0007-new-destinations-are-opt-in.md
+      - 0007 Opt-in destinations and controls: decisions/0007-new-destinations-are-opt-in.md
       - "Postmortem: unredacted OTLP logs": postmortems/2026-10-otlp-logs-exported-unredacted.md
   - Contributing: contributing.md

@@ -12,7 +12,7 @@ The request middleware runs on every request. It has to see the status code, the
 
 ## Evidence
 
-Each middleware passes the request through and does nothing else. Measured with [`examples/benchmarks/middleware_overhead.py`](https://github.com/Vitaee/FastapiObserver/blob/main/examples/benchmarks/middleware_overhead.py): Starlette 1.10.0, Python 3.14.7, Apple silicon, 20,000 in-process requests × 5 rounds, median shown.
+The two middlewares in [`examples/benchmarks/middleware_overhead.py`](https://github.com/Vitaee/FastapiObserver/blob/main/examples/benchmarks/middleware_overhead.py) only pass the request through. Measured on Starlette 1.10.0, Python 3.14.7, Apple silicon, 20,000 in-process requests × 5 rounds, median shown:
 
 | | Per request |
 |---|---:|
@@ -20,11 +20,11 @@ Each middleware passes the request through and does nothing else. Measured with 
 | Pure ASGI | 5.7 µs |
 | `BaseHTTPMiddleware` | 158.4 µs |
 
-`BaseHTTPMiddleware` adds about 153 µs before doing any work. That's more than three times fastapi-observer's whole default cost per request, which is about 43 µs (see [benchmarks](../benchmarks.md)).
+`BaseHTTPMiddleware` adds about 153 µs before doing any work.
 
 The same script checks context visibility. An async endpoint sets a context variable, and each request runs in a fresh context. Afterwards, pure ASGI middleware sees the value and `BaseHTTPMiddleware` sees `None`, because it runs the endpoint in a separate task. That's why `user_context` set in an async endpoint appears on the `request.completed` line.
 
 ## What it cost
 
 - **Harder code to read.** Wrapping `send` and reading raw header bytes is harder to follow than `Request` and `Response` objects.
-- **A limit it doesn't fix.** Sync (`def`) endpoints run in a thread pool with a copy of the context, so `set_user_context()` inside one doesn't reach `request.completed`. Fixing that would need a mutable holder that the middleware creates and the endpoint fills in.
+- **Sync endpoints still lose context.** Sync (`def`) endpoints run in a thread pool with a copy of the context, so `set_user_context()` inside one doesn't reach `request.completed`. Fixing that would need a mutable holder that the middleware creates and the endpoint fills in.
