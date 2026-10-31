@@ -35,6 +35,12 @@ class ObservabilitySettings(InternalSettingsBase):
     # Records from this level up to log_level are held per request and written
     # only if the request fails.
     log_level_on_error: str | None = Field(default=None, validation_alias="LOG_LEVEL_ON_ERROR")
+    # Share of requests whose INFO and lower lines are written, chosen by trace ID.
+    log_sample_rate: float = Field(default=1.0, ge=0.0, le=1.0, validation_alias="LOG_SAMPLE_RATE")
+    # Requests at least this slow are written in full, sampled or not.
+    log_slow_request_ms: float = Field(
+        default=1000.0, gt=0, validation_alias="LOG_SLOW_REQUEST_MS"
+    )
     log_dir: str | None = Field(default=None, validation_alias="LOG_DIR")
     log_queue_max_size: int = Field(default=10_000, gt=0, validation_alias="LOG_QUEUE_MAX_SIZE")
     log_queue_overflow_policy: LogQueueOverflowPolicy = Field(

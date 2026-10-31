@@ -40,6 +40,8 @@ Notes:
 | `APP_VERSION` | `0.0.0` | Service version |
 | `LOG_LEVEL` | `INFO` | Root log level |
 | `LOG_LEVEL_ON_ERROR` | - | A lower level, such as `DEBUG`, for requests that fail: their lines at this level are held and written only if the request ends in a 5xx or an unhandled exception. See [debug logs for failed requests](logging.md#debug-logs-for-failed-requests) |
+| `LOG_SAMPLE_RATE` | `1.0` | Share of requests whose `INFO` and lower lines are written, chosen by trace ID. Failed and slow requests, and `WARNING` and higher lines, are always written. See [sampling request logs](logging.md#sampling-request-logs) |
+| `LOG_SLOW_REQUEST_MS` | `1000` | With sampling, requests that take at least this long are written in full |
 | `OBS_LOOP_BLOCK_THRESHOLD_MS` | - | Write `event_loop.blocked`, with the stack of the blocking call, when the event loop doesn't run for this many milliseconds. See [calls that block the event loop](logging.md#calls-that-block-the-event-loop) |
 | `LOG_DIR` | - | Optional file log directory |
 | `OBS_LOG_SINKS` | - | Sinks from installed packages to send logs to, by entry-point name. Packages not listed are never loaded |

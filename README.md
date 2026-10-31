@@ -76,7 +76,7 @@ Explicit variables and Python arguments always win over profile defaults. Every 
 - **Prometheus metrics** labelled by route template (`/orders/{order_id}`), and 404s for paths no route matches share one `<unmatched>` label, so neither IDs nor scanners explode cardinality.
 - **OpenTelemetry traces** with `trace_id` and `span_id` in every log line, and optional log export over OTLP.
 - **Non-blocking log writes.** Lines are written from a background thread, so a slow stdout never stalls the event loop.
-- **Help finding what slows a request down.** Opt-in: a warning with the stack of any sync call that blocks the event loop, and `DEBUG` lines written only for requests that fail. With tracing on, each request line counts its queries and outbound HTTP calls, and a query run once per item (N+1) gets a warning. With metrics on, `/metrics` shows how many bytes of logs each route writes.
+- **Help finding what slows a request down.** Opt-in: a warning with the stack of any sync call that blocks the event loop, and `DEBUG` lines written only for requests that fail. With tracing on, each request line counts its queries and outbound HTTP calls, and a query run once per item (N+1) gets a warning. With metrics on, `/metrics` shows how many bytes of logs each route writes, and `LOG_SAMPLE_RATE` keeps a share of successful requests, chosen by trace ID, while failed and slow requests are always written in full.
 
 Optional extras: runtime log-level control, a tamper-evident audit log, SQLAlchemy, `httpx` and `requests` tracing, Strawberry GraphQL and a Loguru bridge. See the [documentation](https://vitaee.github.io/FastapiObserver/).
 

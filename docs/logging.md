@@ -54,6 +54,24 @@ LOG_LEVEL_ON_ERROR=DEBUG
 
 What it costs: the root logger is set to the lower level, so every `DEBUG` call in the process creates a record, and other handlers on the root logger receive them. Loggers you set below `LOG_LEVEL` yourself are held too.
 
+## Sampling request logs
+
+Successful requests write most log lines. To keep a share of them:
+
+```bash
+LOG_SAMPLE_RATE=0.1         # INFO and lower lines of 10% of requests
+LOG_SLOW_REQUEST_MS=1000    # the default
+```
+
+- A request is kept or dropped as a whole, its `request.completed` line included.
+- A request that fails (a 5xx or an unhandled exception) or takes `LOG_SLOW_REQUEST_MS` or longer is always written in full.
+- `WARNING` and higher lines are always written, `request.client_error` included. Lines outside a request aren't sampled.
+- Metrics still count every request.
+
+Requests are chosen by trace ID, with the rule OpenTelemetry's `TraceIdRatioBased` sampler uses for `OTEL_TRACE_SAMPLING_RATIO`. If every service samples traces that way at the same ratio, a request's lines are written exactly when its trace is kept, in every service. You get whole requests across services, not scattered lines. A lower log ratio keeps a subset of the traced requests. Without a trace ID, the request ID is hashed instead. Services forward it, so they still agree.
+
+The lines of a request that isn't sampled are held until it ends, at most the last 200. In [`request_cpu.py`](https://github.com/Vitaee/FastapiObserver/blob/main/examples/benchmarks/request_cpu.py), `LOG_SAMPLE_RATE=0.1` took CPU per request from 51 to 38 µs.
+
 ## Calls that block the event loop
 
 A sync call inside `async def`, such as `requests.get`, `time.sleep` or a sync database driver, stops every request on the worker until it returns. Set a threshold to find them:

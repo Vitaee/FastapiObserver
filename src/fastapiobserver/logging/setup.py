@@ -197,12 +197,15 @@ def setup_logging(
         )
         _configure_queue_handler(queue_handler)
         level = logging.getLevelName(settings.log_level)
+        lowest_level = level
         if settings.log_level_on_error is not None:
-            lowest_level = logging.getLevelName(settings.log_level_on_error)
-            if lowest_level < level:
-                held_filter = HeldLogFilter(queue_handler, level, lowest_level)
-                queue_handler.addFilter(held_filter)
-                state._HELD_LOG_FILTER = held_filter
+            lowest_level = min(level, logging.getLevelName(settings.log_level_on_error))
+        if lowest_level < level or settings.log_sample_rate < 1:
+            held_filter = HeldLogFilter(
+                queue_handler, level, lowest_level, settings.log_sample_rate
+            )
+            queue_handler.addFilter(held_filter)
+            state._HELD_LOG_FILTER = held_filter
         set_log_level(level)
         root_logger.addHandler(queue_handler)
 
