@@ -10,6 +10,7 @@ All notable changes to this project will be documented in this file.
 - `SECURITY.md` with the private reporting process, and GitHub issue templates.
 
 ### Changed
+- README rewritten: the one-call quick start and a real log line come first, followed by a comparison with structlog, loguru, OpenTelemetry and Logfire, and when not to use the library. The docs home page is generated from it.
 - `NEXT_STEPS.md` is now `ROADMAP.md`, listing only open work. The scratch files `main.py` and `test_middleware.py` were removed from the repository root.
 
 ## [1.5.0] - 2026-10-31
