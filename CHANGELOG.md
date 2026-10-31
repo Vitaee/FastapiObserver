@@ -14,6 +14,11 @@ All notable changes to this project will be documented in this file.
 - `install_observability()` drops uvicorn's access log line, as `uvicorn --no-access-log` does. The middleware's `request.completed` line carries the same fields, so every request was logged twice. To keep uvicorn's line, set `logging.getLogger("uvicorn.access").propagate = True` after `install_observability()`.
 - Lower per-request overhead. Redaction builds its key sets once per policy instead of once per record and skips scalar values sooner. The request event is not built when the log level would drop it. Without the `otel` extra, the trace-context filter no longer retries a failing `import opentelemetry` on every record. Metric hooks no longer build a `Request` and `Response` when none are registered. Body-capture wrappers, metrics bookkeeping, log filters and enrichers are skipped when they are off or empty. Together with dropping the duplicate access line, throughput in the benchmark with default settings went from 3,541 to 4,393 requests/s.
 - The benchmark harness uses ApacheBench (`ab`) instead of `hey`, takes scenario names as arguments, needs Docker only for tracing scenarios, and adds a hand-wired comparison scenario (`H4`). `docs/benchmarks.md` was rewritten with the new results.
+- `requires-python` no longer has an upper bound (was `<3.16`). With a cap, installers on a newer Python fall back to an old release without one instead of the current version.
+- Development and CI tooling run on Python 3.14: `.python-version`, the CI quality job and the runtime stress workflow (previously 3.12 or 3.13). The test matrix covers 3.11 to 3.15.
+
+### Removed
+- Python 3.10 support. Python 3.10 reached end of life in October 2026; on 3.10, installers keep resolving fastapi-observer 1.4.1.
 
 ## [1.4.1] - 2026-10-31
 
