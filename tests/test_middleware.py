@@ -183,10 +183,11 @@ def test_resolve_request_id_contract() -> None:
 def test_extract_route_template_contract() -> None:
     from fastapiobserver.middleware import _extract_route_template
 
-    assert _extract_route_template({}, "/raw") == "/raw"
+    assert _extract_route_template({}, "/raw", 200) == "/raw"
+    assert _extract_route_template({}, "/raw", 404) == "<unmatched>"
 
     scope = {
         "endpoint": lambda: None,
         "route": type("Route", (), {"path": "/users/{user_id}"})(),
     }
-    assert _extract_route_template(scope, "/raw") == "/users/{user_id}"
+    assert _extract_route_template(scope, "/raw", 404) == "/users/{user_id}"

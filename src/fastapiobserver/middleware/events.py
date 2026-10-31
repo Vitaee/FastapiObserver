@@ -68,23 +68,28 @@ def _classify_error(status_code: int, error: Exception | None) -> str:
     return "ok"
 
 
-def _extract_route_template(scope: Scope, raw_path: str) -> str:
-    """Return the matched route template for bounded metric cardinality.
+UNMATCHED_ROUTE = "<unmatched>"
 
-    After Starlette's router runs, ``scope["route"]`` contains the matched
-    ``Route`` object whose ``.path`` is the template string
-    (e.g. ``/users/{user_id}``).
 
-    Falls back to *raw_path* when:
-    * No route matched (404 / unmatched sub-apps)
-    * ``scope["route"]`` is not a Starlette ``Route`` with a ``path`` attr
+def _extract_route_template(scope: Scope, raw_path: str, status_code: int) -> str:
+    """Return the metrics ``path`` label: the matched route template if known.
+
+    After routing, ``scope["route"]`` holds the matched route, whose ``.path``
+    is the template (e.g. ``/users/{user_id}``). Without one, a 404 means no
+    route matched, mostly scanners, so those share ``UNMATCHED_ROUTE`` instead
+    of adding a time series per URL. Other requests without a template keep
+    *raw_path*: FastAPI doesn't record plain Starlette routes, such as ones
+    added with ``app.add_route()``, in the scope.
     """
-    route = scope.get("route")
-    if route is not None:
-        template = getattr(route, "path", None)
-        if isinstance(template, str) and template:
-            return template
-    return raw_path
+    template = getattr(scope.get("route"), "path", None)
+    if isinstance(template, str) and template:
+        return template
+    return UNMATCHED_ROUTE if status_code == 404 else raw_path
 
-__all__ = ["_RequestEventBuilder", "_classify_error", "_extract_route_template", 
-           "_sanitize_exception_message"]
+__all__ = [
+    "UNMATCHED_ROUTE",
+    "_RequestEventBuilder",
+    "_classify_error",
+    "_extract_route_template",
+    "_sanitize_exception_message",
+]

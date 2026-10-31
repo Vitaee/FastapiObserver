@@ -38,12 +38,16 @@ class _MetricsRecorder:
         if scope and "app" in scope:
             app = scope["app"]
             state = getattr(app.state, "_observability_state", None)
-            if state is not None:
+            # Filled when the app starts; without a lifespan, keep the settings' list.
+            if state is not None and state.excluded_urls:
                 excluded_urls = state.excluded_urls
 
+        # Also check the request's own path: unmatched requests share one label.
+        raw_path = scope.get("path") if scope else None
         if (
             path in excluded_urls
             or collapsed_path in excluded_urls
+            or raw_path in excluded_urls
         ):
             return
         try:

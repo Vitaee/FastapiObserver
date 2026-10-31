@@ -71,7 +71,7 @@ Explicit variables and Python arguments always win over profile defaults. Every 
 - **One JSON line per request** with method, path, status, duration and client IP, and your service's name, environment and version on every line, including your own `logging` calls.
 - **Request IDs** taken from `X-Request-ID` when the caller is a trusted proxy, generated otherwise, returned in the response and passed on to the services you call, so one ID finds a request's logs in every service.
 - **Redaction on by default.** Passwords, tokens, API keys, `Authorization` and cookies are masked before anything is written. Presets cover stricter needs (`strict`, `pci`, `gdpr`).
-- **Prometheus metrics** labelled by route template (`/orders/{order_id}`), so URLs with IDs don't explode cardinality.
+- **Prometheus metrics** labelled by route template (`/orders/{order_id}`), and 404s for paths no route matches share one `<unmatched>` label, so neither IDs nor scanners explode cardinality.
 - **OpenTelemetry traces** with `trace_id` and `span_id` in every log line, and optional log export over OTLP.
 - **Non-blocking log writes.** Lines are written from a background thread, so a slow stdout never stalls the event loop.
 

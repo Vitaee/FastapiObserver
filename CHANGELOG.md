@@ -8,6 +8,10 @@ All notable changes to this project will be documented in this file.
 - Design decision records in the docs: what was decided about the middleware, the log queue, the trust checks, redaction, metric labels, delegating to OpenTelemetry, and opt-in destinations, with the evidence for each and what it cost. Two measurement scripts back them: `examples/benchmarks/middleware_overhead.py` and `examples/benchmarks/slow_sink.py`.
 - A postmortem of the unredacted OTLP log export fixed in 1.5.0. It affected releases 0.2.1 to 1.4.1 with tracing and OTLP logs on, from 2026-03-04, when `opentelemetry-instrumentation-logging` 0.61b0 started adding a root handler. The 1.5.0 entry below said 0.66 and has been corrected.
 
+### Fixed
+- Requests that match no route no longer get a metrics series of their own. A 404 for a path no route matches, such as a scanner probing `/.env` or `/wp-admin/setup.php`, used its raw path as the `path` label, so every probed URL added a series and a latency histogram. 1,000 random 404 paths added 1,000 labels; they now share one `path="<unmatched>"` label. The request log still records the real path. Plain Starlette routes, which FastAPI doesn't record a template for, keep their path as before.
+- `METRICS_EXCLUDE_PATHS` applies when the app runs without a lifespan (`uvicorn --lifespan off`, some serverless adapters). The excluded paths were only filled in at startup, so `/metrics` scrapes and health probes were counted.
+
 ## [1.8.0] - 2026-10-31
 
 ### Security
