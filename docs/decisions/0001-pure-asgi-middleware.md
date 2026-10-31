@@ -27,4 +27,4 @@ The same script checks context visibility. An async endpoint sets a context vari
 ## What it cost
 
 - **Harder code to read.** Wrapping `send` and reading raw header bytes is harder to follow than `Request` and `Response` objects.
-- **Sync endpoints still lose context.** Sync (`def`) endpoints run in a thread pool with a copy of the context, so `set_user_context()` inside one doesn't reach `request.completed`. Fixing that would need a mutable holder that the middleware creates and the endpoint fills in.
+- **Sync endpoints run in a copy of the context.** Sync (`def`) endpoints run in a thread pool with a copy of the context, so a context variable they set doesn't reach `request.completed`. `set_user_context()` used to be lost this way. Since [0008](0008-one-state-object-per-request.md) it also stores its value on a holder that the middleware creates, so it arrives. Context variables of your own still don't.

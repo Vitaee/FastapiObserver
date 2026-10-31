@@ -53,6 +53,7 @@ class RequestState:
     """
 
     scope: Mapping[str, Any]
+    user_context: dict[str, Any] | None = None
     held_logs: deque[logging.LogRecord] | None = None
     calls: dict[str, list[float]] = field(default_factory=dict)  # kind -> [count, seconds]
     statements: dict[str, int] = field(default_factory=dict)
@@ -118,11 +119,20 @@ def clear_span_id() -> None:
 
 def set_user_context(value: dict[str, Any] | None) -> None:
     _user_context_var.set(value)
+    request_state = _request_state_var.get()
+    if request_state is not None:
+        # Also on the request, which the middleware sees even when a sync
+        # endpoint sets it from the thread pool.
+        request_state.user_context = value
 
 
 def get_user_context() -> dict[str, Any] | None:
+    request_state = _request_state_var.get()
+    if request_state is not None and request_state.user_context is not None:
+        return request_state.user_context
+    # Set outside the request, for example by middleware added after ours.
     return _user_context_var.get()
 
 
 def clear_user_context() -> None:
-    _user_context_var.set(None)
+    set_user_context(None)
