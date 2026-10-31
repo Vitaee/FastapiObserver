@@ -53,6 +53,36 @@ Design details:
 - Supports optional OTLP metrics export for unified OTel backends.
 - Flushes and shuts down its providers when the app's lifespan ends, after the log queue has drained; on process exit the SDK's own `atexit` hook takes over.
 
+### Request ID forwarding
+
+Outbound calls carry the current request ID, so a request keeps one ID across every service it passes through, and searching your logs for that ID finds all of them. This works without tracing turned on.
+
+- `inject_trace_headers()` adds it as `REQUEST_ID_HEADER` (`x-request-id` by default). Without OpenTelemetry installed, that is the only header it adds.
+- With the `[otel]` extra, `install_observability()` adds the request ID to OpenTelemetry's global propagator, so clients it instruments, such as `instrument_httpx_client()` and `instrument_requests_session()`, send it next to `traceparent`.
+- A request ID header you set yourself is kept.
+
+The next service accepts the forwarded ID only from addresses in `OBS_TRUSTED_CIDRS`. The default list includes the private ranges that pod and VPC networks use; if your services call each other from other addresses, add them there. Like `traceparent`, the header is also sent to third-party APIs you call through an instrumented client.
+
+### Other HTTP clients
+
+`instrument_httpx_client()` and `instrument_requests_session()` wrap OpenTelemetry's instrumentations for `httpx` and `requests`. For another client, install OpenTelemetry's instrumentation for it, such as `opentelemetry-instrumentation-aiohttp-client` or `opentelemetry-instrumentation-urllib3`. Every OpenTelemetry instrumentation reads the same global propagator, so it sends `traceparent` and the request ID too.
+
+A client without one, such as `httpx2`, needs a request hook:
+
+```python
+import httpx2
+from opentelemetry import propagate
+
+
+async def forward_context(request: httpx2.Request) -> None:
+    propagate.inject(request.headers)
+
+
+client = httpx2.AsyncClient(event_hooks={"request": [forward_context]})
+```
+
+A synchronous `httpx2.Client` takes the same hook as a plain function. Without the `[otel]` extra, pass `headers=inject_trace_headers({})` on each call instead.
+
 ### Baggage propagation
 
 `inject_trace_headers()` uses OpenTelemetry propagation, so it forwards

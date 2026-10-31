@@ -31,6 +31,7 @@ from .otel import (
     install_otel_logs,
     install_otel_metrics,
 )
+from .propagation import install_request_id_propagation
 from .security import SecurityPolicy, TrustedProxyPolicy
 
 _LOGGER = logging.getLogger("fastapiobserver.fastapi")
@@ -125,6 +126,7 @@ def install_observability(
         trusted_proxy_policy,
         metrics_backend,
     )
+    install_request_id_propagation(settings.request_id_header)
 
     # --- 7. Uvicorn access log ---
     # The middleware's `request.completed` line carries the same fields, so drop

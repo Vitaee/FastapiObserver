@@ -39,7 +39,7 @@ Notes:
 | `LOG_SINK_CIRCUIT_BREAKER_ENABLED` | `true` | Enable sink circuit-breaker protection |
 | `LOG_SINK_CIRCUIT_BREAKER_FAILURE_THRESHOLD` | `5` | Consecutive sink failures before opening circuit |
 | `LOG_SINK_CIRCUIT_BREAKER_RECOVERY_TIMEOUT_SECONDS` | `30.0` | Open-state cooldown before half-open probe |
-| `REQUEST_ID_HEADER` | `x-request-id` | Incoming request ID header |
+| `REQUEST_ID_HEADER` | `x-request-id` | Request ID header read from incoming requests and sent on outbound calls |
 | `RESPONSE_REQUEST_ID_HEADER` | `x-request-id` | Response request ID header |
 
 ### Metrics
