@@ -16,10 +16,14 @@ app = FastAPI()
 # S3: Tracing Only
 # S4: ALL (Metrics + Tracing + BodyCapture)
 # S5: ALL (Collector Down) - Handled by the orchestrator shutting down Jaeger
+# H4: Hand-wired logs + metrics + tracing (examples/time_saved/the_hard_way.py)
 
 SCENARIO = os.getenv("BENCHMARK_SCENARIO", "S0")
 
-if SCENARIO != "S0":
+if SCENARIO == "H4":
+    from examples.time_saved.the_hard_way import app  # noqa: F811
+
+elif SCENARIO != "S0":
     from fastapiobserver import (
         ObservabilitySettings,
         OTelSettings,

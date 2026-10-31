@@ -80,6 +80,13 @@ def test_trace_and_span_ids_are_correlated_in_logs(
         ),
     )
 
+    # OTel's LoggingInstrumentor would add its own root handler that bypasses
+    # the queue and redaction; tracing must not install one.
+    assert not any(
+        type(root_handler).__module__.startswith("opentelemetry")
+        for root_handler in logging.getLogger().handlers
+    )
+
     provider = trace_api.get_tracer_provider()
     if not hasattr(provider, "add_span_processor"):
         pytest.skip("Active tracer provider does not support span processors")

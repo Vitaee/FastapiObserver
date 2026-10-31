@@ -4,10 +4,14 @@ import os
 import re
 import statistics
 import subprocess
+import sys
+import tempfile
 import time
 from typing import TypedDict
 
-# Requirements: Expects `hey` and `docker` and `uv` to be installed.
+# Requirements: `ab` (ApacheBench; preinstalled on macOS, `apache2-utils` on Debian/Ubuntu)
+# and `uv`. Docker is only needed for the tracing scenarios (S3, S4, S5, H4).
+# Usage: python examples/benchmarks/harness.py [SCENARIO ...]
 
 SCENARIOS = [
     "S0", # Baseline
@@ -15,8 +19,10 @@ SCENARIOS = [
     "S2", # Observer + Metrics
     "S3", # Observer + Tracing (Collector Up)
     "S4", # Observer + All Features (Collector Up)
-    "S5"  # Observer + All Features (Collector Down)
+    "S5", # Observer + All Features (Collector Down)
+    "H4", # Hand-wired logs + metrics + tracing (Collector Up)
 ]
+TRACING_SCENARIOS = {"S3", "S4", "S5", "H4"}
 
 RUNS_PER_SCENARIO = 5
 WARMUP_DURATION_SEC = 3
@@ -38,34 +44,42 @@ class BenchmarkResult(TypedDict):
     p99: list[float]
 
 
-def run_hey(duration: int) -> dict[str, float]:
-    """Runs `hey` and parses the stdout for latencies and RPS."""
+def run_ab(duration: int) -> dict[str, float]:
+    """Runs ApacheBench (`ab`) and parses requests/sec and latency percentiles."""
+    with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as payload:
+        payload.write(DATA_PAYLOAD)
     cmd = [
-        "hey",
-        "-z", f"{duration}s",
+        "ab", "-q", "-k",
+        "-t", str(duration),
+        "-n", "10000000",
         "-c", str(CONCURRENCY),
-        "-m", METHOD,
+        "-p", payload.name,
         "-T", CONTENT_TYPE,
-        "-d", DATA_PAYLOAD,
-        ENDPOINT
+        ENDPOINT,
     ]
-    
-    result = subprocess.run(cmd, capture_output=True, text=True)
+
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True)
+    finally:
+        os.unlink(payload.name)
     if result.returncode != 0:
-        raise RuntimeError(f"Hey failed: {result.stderr}")
-        
+        raise RuntimeError(f"ab failed: {result.stderr}")
+
     out = result.stdout
+    if "Non-2xx responses" in out:
+        raise RuntimeError(f"ab saw non-2xx responses:\n{out}")
     metrics = {}
-    
-    rps_match = re.search(r"Requests/sec:\s+([\d\.]+)", out)
+
+    rps_match = re.search(r"Requests per second:\s+([\d\.]+)", out)
     if rps_match:
         metrics["rps"] = float(rps_match.group(1))
-        
-    for p_level, key in [("50%", "p50"), ("90%", "p90"), ("95%", "p95"), ("99%", "p99")]:
-        p_match = re.search(fr"{p_level}%? in\s+([\d\.]+)\s+secs", out)
+
+    # ab reports latency percentiles in whole milliseconds.
+    for p_level, key in [("50", "p50"), ("90", "p90"), ("95", "p95"), ("99", "p99")]:
+        p_match = re.search(fr"^\s+{p_level}%\s+(\d+)", out, re.MULTILINE)
         if p_match:
-            metrics[key] = float(p_match.group(1)) * 1000 # Convert to ms
-            
+            metrics[key] = float(p_match.group(1))
+
     return metrics
 
 def manage_collector(up: bool) -> None:
@@ -128,14 +142,15 @@ def main():
     print("-" * 60)
     
     results: dict[str, BenchmarkResult] = {}
-    
-    for scenario in SCENARIOS:
+    scenarios = sys.argv[1:] or SCENARIOS
+
+    for scenario in scenarios:
         print(f"\nEvaluating Scenario: {scenario}")
         # Determine collector state
         if scenario == "S5":
             print("  Bringing collector DOWN for Resilience test...")
             manage_collector(False)
-        else:
+        elif scenario in TRACING_SCENARIOS:
             manage_collector(True)
             
         print("  Starting Uvicorn...")
@@ -143,13 +158,13 @@ def main():
         
         try:
             print(f"  Warmup ({WARMUP_DURATION_SEC}s)...")
-            run_hey(WARMUP_DURATION_SEC)
+            run_ab(WARMUP_DURATION_SEC)
             
             res: BenchmarkResult = {"rps": [], "p50": [], "p90": [], "p95": [], "p99": []}
             
             for i in range(1, RUNS_PER_SCENARIO + 1):
                 print(f"  Run {i}/{RUNS_PER_SCENARIO}...", end="", flush=True)
-                metrics = run_hey(BENCH_DURATION_SEC)
+                metrics = run_ab(BENCH_DURATION_SEC)
                 print(f" {metrics.get('rps', 0):.0f} rps, p50: {metrics.get('p50', 0):.1f}ms")
                 
                 for k, v in metrics.items():
@@ -172,7 +187,7 @@ def main():
     )
     print("|-------|-----------------|--------------------|--------------------|--------------------|")
     
-    for scenario in SCENARIOS:
+    for scenario in scenarios:
         res = results[scenario]
         rps = format_stats(res['rps'], 0)
         p50 = format_stats(res['p50'], 1)
@@ -181,7 +196,12 @@ def main():
         
         print(f"| {scenario:<5} | {rps:<15} | {p50:<18} | {p95:<18} | {p99:<18} |")
         
-    with open("examples/benchmarks/results.json", "w") as f:
+    # Merge, so running a subset of scenarios keeps the others' results.
+    results_path = "examples/benchmarks/results.json"
+    if os.path.exists(results_path):
+        with open(results_path) as f:
+            results = {**json.load(f), **results}
+    with open(results_path, "w") as f:
         json.dump(results, f, indent=2)
 
 if __name__ == "__main__":

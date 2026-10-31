@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import logging
 import logging.handlers
 import queue
@@ -134,6 +135,16 @@ class OverflowPolicyQueueHandler(logging.handlers.QueueHandler):
         self.overflow_policy = overflow_policy
         self.block_timeout_seconds = block_timeout_seconds
         self.telemetry = telemetry
+
+    def prepare(self, record: logging.LogRecord) -> logging.LogRecord:
+        # The stdlib version formats the record here and drops exc_info, which
+        # loses the structured `error` field. The queue stays in-process, so keep
+        # exc_info and leave formatting to the listener thread.
+        record = copy.copy(record)
+        record.message = record.getMessage()
+        record.msg = record.message
+        record.args = None
+        return record
 
     def enqueue(self, record: logging.LogRecord) -> None:
         try:

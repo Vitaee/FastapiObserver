@@ -60,9 +60,8 @@ class RequestLoggingMiddleware:
         method = scope.get("method", "UNKNOWN")
         status_code = 500
         captured_error: Exception | None = None
-        request_content_type = _get_header(raw_headers, b"content-type")
         request_body_enabled = self.security_policy.log_request_body and is_body_capturable(
-            request_content_type,
+            _get_header(raw_headers, b"content-type"),
             self.security_policy,
         )
         request_body_capture = _BodyCapture(
@@ -102,7 +101,11 @@ class RequestLoggingMiddleware:
             await send(message)
 
         try:
-            await self.app(scope, receive_wrapper, send_wrapper)
+            await self.app(
+                scope,
+                receive_wrapper if request_body_enabled else receive,
+                send_wrapper,
+            )
         except Exception as exc:
             had_error = True
             captured_error = exc
@@ -137,26 +140,35 @@ class RequestLoggingMiddleware:
         had_error: bool,
     ) -> None:
         duration_seconds = max(0.0, time.perf_counter() - start)
-        error_type = _classify_error(status_code, captured_error)
-        safe_event = self.event_builder.build(
-            method=method,
-            path=path,
-            status_code=status_code,
-            duration_seconds=duration_seconds,
-            client_ip=client_ip,
-            request_body=request_body_capture.value,
-            response_body=response_body_capture.value,
-            error_type=error_type,
-            exception=captured_error,
-        )
         if had_error:
-            self.logger.exception("request.failed", extra={"event": safe_event})
+            level, message = logging.ERROR, "request.failed"
         elif status_code >= 500:
-            self.logger.error("request.server_error", extra={"event": safe_event})
+            level, message = logging.ERROR, "request.server_error"
         elif status_code >= 400:
-            self.logger.warning("request.client_error", extra={"event": safe_event})
+            level, message = logging.WARNING, "request.client_error"
         else:
-            self.logger.info("request.completed", extra={"event": safe_event})
+            level, message = logging.INFO, "request.completed"
+
+        # Building and redacting the event is the costliest step; skip it when
+        # the record would be dropped by the log level anyway.
+        if self.logger.isEnabledFor(level):
+            safe_event = self.event_builder.build(
+                method=method,
+                path=path,
+                status_code=status_code,
+                duration_seconds=duration_seconds,
+                client_ip=client_ip,
+                request_body=request_body_capture.value,
+                response_body=response_body_capture.value,
+                error_type=_classify_error(status_code, captured_error),
+                exception=captured_error,
+            )
+            self.logger.log(
+                level,
+                message,
+                exc_info=captured_error if had_error else None,
+                extra={"event": safe_event},
+            )
 
         # Prefer route template for bounded cardinality
         route_template = _extract_route_template(scope, path)

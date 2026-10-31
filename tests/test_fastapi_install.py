@@ -32,6 +32,18 @@ def test_install_observability_adds_request_logging_middleware_once() -> None:
     assert count == 1
 
 
+def test_install_observability_drops_duplicate_uvicorn_access_log() -> None:
+    install_observability(
+        FastAPI(),
+        ObservabilitySettings(app_name="test", service="svc", environment="test"),
+        metrics_enabled=False,
+    )
+
+    # Uvicorn writes access lines only while this logger has somewhere to send them.
+    assert not logging.getLogger("uvicorn.access").hasHandlers()
+    assert logging.getLogger("uvicorn.error").hasHandlers()
+
+
 def test_install_observability_with_metrics_enabled_requires_extra() -> None:
     app = FastAPI()
     settings = ObservabilitySettings(

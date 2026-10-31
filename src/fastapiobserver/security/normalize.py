@@ -1,3 +1,7 @@
+import functools
+
+
+@functools.lru_cache(maxsize=1024)
 def _normalize_key(key: str) -> str:
     return key.strip().lower().replace("_", "-")
 

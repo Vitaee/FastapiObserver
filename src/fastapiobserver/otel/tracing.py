@@ -40,9 +40,6 @@ def install_otel(
     fastapi_instrumentor_module = import_otel_module(
         "opentelemetry.instrumentation.fastapi"
     )
-    logging_instrumentor_module = import_otel_module(
-        "opentelemetry.instrumentation.logging"
-    )
 
     set_trace_sampling_ratio(otel_settings.trace_sampling_ratio)
     current_provider = trace_api.get_tracer_provider()
@@ -121,17 +118,6 @@ def install_otel(
     fastapi_instrumentor_module.FastAPIInstrumentor.instrument_app(
         app, **instrument_kwargs
     )
-
-    try:
-        logging_instrumentor_module.LoggingInstrumentor().instrument(
-            set_logging_format=False
-        )
-    except Exception:
-        _LOGGER.debug(
-            "otel.logging_instrumentor.failed",
-            exc_info=True,
-            extra={"_skip_enrichers": True},
-        )
 
     if provider_owned:
         register_shutdown_hook(

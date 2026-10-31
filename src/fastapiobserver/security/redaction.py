@@ -1,10 +1,32 @@
+import functools
 import hashlib
-from typing import Any, Mapping
+from collections.abc import Mapping
+from typing import Any
 
 from .normalize import _normalize_key, _normalize_media_type
 from .policy import _DROP, SecurityPolicy
 
 MAX_SANITIZE_DEPTH = 32
+_SCALAR_TYPES = frozenset({str, int, float, bool})
+
+
+@functools.lru_cache(maxsize=64)
+def _policy_key_sets(
+    policy: SecurityPolicy,
+) -> tuple[frozenset[str], frozenset[str], frozenset[str] | None, frozenset[str] | None]:
+    # Policies are frozen, so the normalized lookup sets are built once per policy
+    # instead of once per log record.
+    def normalized(items: tuple[str, ...]) -> frozenset[str]:
+        return frozenset(_normalize_key(item) for item in items)
+
+    return (
+        normalized(policy.redacted_fields),
+        normalized(policy.redacted_headers),
+        normalized(policy.header_allowlist) if policy.header_allowlist is not None else None,
+        normalized(policy.event_key_allowlist)
+        if policy.event_key_allowlist is not None
+        else None,
+    )
 
 
 def _redact_value(value: Any, policy: SecurityPolicy) -> Any:
@@ -17,17 +39,8 @@ def _redact_value(value: Any, policy: SecurityPolicy) -> Any:
 
 
 def sanitize_event(data: dict[str, Any], policy: SecurityPolicy) -> dict[str, Any]:
-    sensitive_fields = {_normalize_key(item) for item in policy.redacted_fields}
-    sensitive_headers = {_normalize_key(item) for item in policy.redacted_headers}
-    header_allowlist = (
-        {_normalize_key(item) for item in policy.header_allowlist}
-        if policy.header_allowlist is not None
-        else None
-    )
-    event_key_allowlist = (
-        {_normalize_key(item) for item in policy.event_key_allowlist}
-        if policy.event_key_allowlist is not None
-        else None
+    sensitive_fields, sensitive_headers, header_allowlist, event_key_allowlist = (
+        _policy_key_sets(policy)
     )
     return _sanitize_mapping(
         data,
@@ -44,12 +57,12 @@ def sanitize_event(data: dict[str, Any], policy: SecurityPolicy) -> dict[str, An
 def _sanitize_mapping(
     data: Mapping[str, Any],
     policy: SecurityPolicy,
-    sensitive_fields: set[str],
-    sensitive_headers: set[str],
+    sensitive_fields: frozenset[str],
+    sensitive_headers: frozenset[str],
     parent_is_headers: bool,
     depth: int,
-    header_allowlist: set[str] | None,
-    event_key_allowlist: set[str] | None,
+    header_allowlist: frozenset[str] | None,
+    event_key_allowlist: frozenset[str] | None,
 ) -> dict[str, Any]:
     out: dict[str, Any] = {}
     for key, value in data.items():
@@ -72,6 +85,10 @@ def _sanitize_mapping(
                 out[str(key)] = redacted
             continue
 
+        if value is None or type(value) in _SCALAR_TYPES:
+            out[str(key)] = value
+            continue
+
         out[str(key)] = _sanitize_value(
             value,
             policy,
@@ -88,12 +105,12 @@ def _sanitize_mapping(
 def _sanitize_value(
     value: Any,
     policy: SecurityPolicy,
-    sensitive_fields: set[str],
-    sensitive_headers: set[str],
+    sensitive_fields: frozenset[str],
+    sensitive_headers: frozenset[str],
     parent_is_headers: bool,
     depth: int,
-    header_allowlist: set[str] | None,
-    event_key_allowlist: set[str] | None,
+    header_allowlist: frozenset[str] | None,
+    event_key_allowlist: frozenset[str] | None,
 ) -> Any:
     if depth > MAX_SANITIZE_DEPTH and isinstance(value, (Mapping, list, tuple)):
         # Too deep to inspect: mask rather than pass unchecked data through.
