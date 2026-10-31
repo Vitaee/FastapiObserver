@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [1.9.0] - 2026-10-31
+
 ### Added
 - Design decision records in the docs, each with its evidence and what it cost, and the two benchmark scripts behind them: `examples/benchmarks/middleware_overhead.py` and `slow_sink.py`.
 - A postmortem of the unredacted OTLP log export fixed in 1.5.0. Releases 0.2.1 to 1.4.1 were affected from 2026-03-04. The upstream change came in 0.61b0, not 0.66 as the 1.5.0 entry said; that entry is corrected.
