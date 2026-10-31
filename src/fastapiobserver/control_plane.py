@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, FastAPI, Header, HTTPException, Request,
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from .logging import get_log_level, set_log_level
 from .otel import get_trace_sampling_ratio, set_trace_sampling_ratio
 from .security import TrustedProxyPolicy, is_trusted_client_ip, resolve_client_ip
 from .utils import EnvLoadable, normalize_path
@@ -137,7 +138,7 @@ def _is_trusted_caller(request: Request, policy: TrustedProxyPolicy) -> bool:
 
 def _current_runtime_settings() -> dict[str, object]:
     return {
-        "log_level": logging.getLevelName(logging.getLogger().getEffectiveLevel()),
+        "log_level": get_log_level(),
         "trace_sampling_ratio": get_trace_sampling_ratio(),
     }
 
@@ -151,9 +152,7 @@ def _set_log_level(value: str) -> None:
             detail=f"Invalid log level: {value}",
         )
 
-    logging.getLogger().setLevel(level)
-    for logger_name in ("uvicorn", "uvicorn.error", "uvicorn.access"):
-        logging.getLogger(logger_name).setLevel(level)
+    set_log_level(level)
 
 
 class _RuntimeControlEnvSettings(BaseSettings):

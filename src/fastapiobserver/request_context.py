@@ -1,9 +1,19 @@
 from __future__ import annotations
 
+import logging
+import threading
+from collections import deque
+from collections.abc import Mapping
 from contextvars import ContextVar
+from dataclasses import dataclass, field
 from typing import Any
 
 __all__ = [
+    "UNMATCHED_ROUTE",
+    "RequestState",
+    "get_request_state",
+    "route_template",
+    "set_request_state",
     "set_request_id",
     "get_request_id",
     "clear_request_id",
@@ -24,6 +34,50 @@ _span_id_var: ContextVar[str | None] = ContextVar("span_id", default=None)
 _user_context_var: ContextVar[dict[str, Any] | None] = ContextVar(
     "user_context", default=None
 )
+_request_state_var: ContextVar[RequestState | None] = ContextVar(
+    "request_state", default=None
+)
+_CALLS_LOCK = threading.Lock()
+
+# Requests that matched no route share this label, so scanners can't add one per URL.
+UNMATCHED_ROUTE = "<unmatched>"
+
+
+@dataclass(eq=False, slots=True)
+class RequestState:
+    """What code running for a request adds to it, read when the request ends.
+
+    The middleware creates one per request. Sync endpoints and dependencies run
+    in the thread pool with a copy of the context, which still holds this object,
+    so what they add reaches the middleware.
+    """
+
+    scope: Mapping[str, Any]
+    held_logs: deque[logging.LogRecord] | None = None
+    calls: dict[str, list[float]] = field(default_factory=dict)  # kind -> [count, seconds]
+    statements: dict[str, int] = field(default_factory=dict)
+
+    def add_call(self, kind: str, seconds: float, statement: str | None = None) -> None:
+        with _CALLS_LOCK:
+            totals = self.calls.setdefault(kind, [0, 0.0])
+            totals[0] += 1
+            totals[1] += seconds
+            if statement:
+                self.statements[statement] = self.statements.get(statement, 0) + 1
+
+
+def route_template(scope: Mapping[str, Any]) -> str | None:
+    """The matched route's template, such as ``/users/{user_id}``, once routing has run."""
+    template = getattr(scope.get("route"), "path", None)
+    return template if isinstance(template, str) and template else None
+
+
+def set_request_state(value: RequestState | None) -> None:
+    _request_state_var.set(value)
+
+
+def get_request_state() -> RequestState | None:
+    return _request_state_var.get()
 
 
 def set_request_id(value: str | None) -> None:

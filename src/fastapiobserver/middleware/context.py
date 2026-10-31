@@ -3,13 +3,17 @@ from __future__ import annotations
 import re
 import uuid
 
+from starlette.types import Scope
+
 from ..config import ObservabilitySettings
 from ..request_context import (
+    RequestState,
     clear_request_id,
     clear_span_id,
     clear_trace_id,
     clear_user_context,
     set_request_id,
+    set_request_state,
     set_span_id,
     set_trace_id,
 )
@@ -40,7 +44,13 @@ class _RequestContextManager:
         self.settings = settings
         self._request_id_header_bytes = settings.request_id_header.lower().encode("latin1")
 
-    def initialize(self, headers: list[tuple[bytes, bytes]], trusted_source: bool) -> str:
+    def initialize(
+        self,
+        scope: Scope,
+        headers: list[tuple[bytes, bytes]],
+        trusted_source: bool,
+    ) -> str:
+        set_request_state(RequestState(scope))
         request_id_header = _get_header(headers, self._request_id_header_bytes)
         request_id = _resolve_request_id(request_id_header, trusted_source)
         set_request_id(request_id)
@@ -55,6 +65,7 @@ class _RequestContextManager:
         return request_id
 
     def cleanup(self) -> None:
+        set_request_state(None)
         clear_request_id()
         clear_trace_id()
         clear_span_id()

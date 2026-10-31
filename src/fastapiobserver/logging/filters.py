@@ -5,12 +5,13 @@ import sys
 
 from ..plugins import apply_log_filters
 from ..request_context import get_request_id, get_span_id, get_trace_id, get_user_context
+from . import volume
 
 _LOGGER = logging.getLogger("fastapiobserver.logging")
 
 
 class RequestIdFilter(logging.Filter):
-    """Attach request ID and user context from context vars to every log record.
+    """Attach request ID, user context and route from context vars to every log record.
 
     Records are formatted on the queue listener thread, where the request's
     context vars are not visible, so they are captured here.
@@ -21,6 +22,8 @@ class RequestIdFilter(logging.Filter):
             record.request_id = get_request_id()
         if not getattr(record, "user_context", None):
             record.user_context = get_user_context()
+        if volume.COUNTING:
+            record._obs_route = volume.current_route()
         return True
 
 

@@ -16,6 +16,7 @@ from fastapi import FastAPI
 from .config import ObservabilitySettings
 from .control_plane import RuntimeControlSettings, mount_control_plane
 from .logging import setup_logging, shutdown_logging
+from .loop_watchdog import EventLoopWatchdog
 from .profiles import apply_profile_context
 from .db_tracing import uninstrument_sqlalchemy
 from .metrics import (
@@ -148,6 +149,8 @@ def install_observability(
             "event": {
                 "profile": os.getenv("OBS_PROFILE", "").strip().lower() or None,
                 "log_level": settings.log_level,
+                "log_level_on_error": settings.log_level_on_error,
+                "loop_block_threshold_ms": settings.loop_block_threshold_ms,
                 "metrics_path": (
                     settings.metrics_path
                     if (settings.metrics_enabled if metrics_enabled is None else metrics_enabled)
@@ -389,12 +392,18 @@ async def observability_lifespan(app: FastAPI) -> typing.AsyncGenerator[typing.A
             yield
     """
     state = _get_runtime_state(app)
+    watchdog = None
     if state:
         _auto_discover_excluded_routes(app, state.settings)
+        if state.settings.loop_block_threshold_ms:
+            watchdog = EventLoopWatchdog(state.settings.loop_block_threshold_ms / 1000)
+            watchdog.start()
 
     try:
         yield {}
     finally:
+        if watchdog:
+            watchdog.stop()
         _teardown_observability(app)
 
 

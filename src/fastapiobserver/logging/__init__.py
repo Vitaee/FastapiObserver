@@ -14,7 +14,14 @@ from .queueing import (
     OverflowPolicyQueueHandler,
     get_log_queue_stats,
 )
-from .setup import get_managed_output_handlers, setup_logging, shutdown_logging
+from .setup import (
+    get_log_level,
+    get_managed_output_handlers,
+    set_log_level,
+    setup_logging,
+    shutdown_logging,
+)
+from .volume import get_log_bytes_by_route
 
 __all__ = [
     "LOG_SCHEMA_VERSION",
@@ -28,9 +35,12 @@ __all__ = [
     "SinkCircuitBreakerSnapshot",
     "StructuredJsonFormatter",
     "TraceContextFilter",
+    "get_log_bytes_by_route",
+    "get_log_level",
     "get_log_queue_stats",
     "get_managed_output_handlers",
     "get_sink_circuit_breaker_stats",
+    "set_log_level",
     "setup_logging",
     "shutdown_logging",
 ]

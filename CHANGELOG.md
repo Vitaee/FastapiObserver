@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- `OBS_LOOP_BLOCK_THRESHOLD_MS`: when the event loop doesn't run for this long, a background thread writes `event_loop.blocked` with the stack of the call that's blocking it, such as `requests.get` or `time.sleep` inside `async def`. One line per block. The thread runs during the app's lifespan.
+- `LOG_LEVEL_ON_ERROR`: a request's lines from this level up to `LOG_LEVEL` are held in memory, at most 200, and written before its `request.failed` or `request.server_error` line only if it ends in a 5xx or an unhandled exception. With it set, the root logger runs at the lower level, so those records are created.
+- With tracing on, request lines have `db` and `http` fields, `{"count", "ms"}`, for the request's database queries and outbound HTTP calls, taken from OpenTelemetry client spans. Sync endpoints included; unsampled requests have neither.
+- A `db.n_plus_one` warning when one statement runs 10 or more times in a request, once per method, route and statement in each process. Quoted strings and numbers in the statement are replaced with `?`.
+- `fastapiobserver_log_bytes_total{route}` on `/metrics`: bytes of JSON log lines written, by the route template of the request that wrote them. A line written to several sinks counts once.
+- Decision record 0008, on the per-request state object behind these, and `examples/benchmarks/request_cpu.py`, which measures CPU per request. These features add about 2 µs per request with all of them off.
+
 ## [1.9.0] - 2026-10-31
 
 ### Added

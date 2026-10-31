@@ -35,6 +35,43 @@ Standard request event fields include:
 - `client_ip`
 - `error_type`
 - OTel semantic aliases (`http.request.method`, `url.path`, `http.response.status_code`)
+- `db` and `http`: the count and total time of the request's database queries and outbound HTTP calls, with tracing on and the clients instrumented. See [database tracing](db-tracing.md#query-count-and-time-on-the-request-line)
+
+## Debug logs for failed requests
+
+Set `LOG_LEVEL_ON_ERROR` below `LOG_LEVEL` to keep a request's lower-level lines in memory while it runs:
+
+```bash
+LOG_LEVEL=INFO
+LOG_LEVEL_ON_ERROR=DEBUG
+```
+
+- If the request ends in a 5xx or an unhandled exception, its held lines are written just before its `request.failed` or `request.server_error` line, with the same `request_id` and `trace_id`.
+- Otherwise they're dropped, as `LOG_LEVEL` would have dropped them.
+- The last 200 lines of a request are kept.
+- Lines below `LOG_LEVEL` outside a request are dropped.
+- A level set through the [runtime control plane](runtime-control.md) replaces `LOG_LEVEL`, and holding stays on.
+
+What it costs: the root logger is set to the lower level, so every `DEBUG` call in the process creates a record, and other handlers on the root logger receive them. Loggers you set below `LOG_LEVEL` yourself are held too.
+
+## Calls that block the event loop
+
+A sync call inside `async def`, such as `requests.get`, `time.sleep` or a sync database driver, stops every request on the worker until it returns. Set a threshold to find them:
+
+```bash
+OBS_LOOP_BLOCK_THRESHOLD_MS=200
+```
+
+A background thread checks that the event loop keeps running. When it hasn't run for the threshold, the thread writes one warning per block, with the stack of the call that's blocking it:
+
+```json
+{"level": "WARNING", "logger": "fastapiobserver.event_loop", "message": "event_loop.blocked", "event": {"blocked_ms": 212, "stack": "...  File \"/app/orders.py\", line 41, in get_order\n    rates = requests.get(RATES_URL).json()\n"}}
+```
+
+- `blocked_ms` is how long the loop had been blocked when the stack was taken. The block can last longer.
+- To fix one, make the endpoint a plain `def`, which FastAPI runs in its thread pool, wrap the call in `await asyncio.to_thread(...)`, or use an async client.
+- The thread runs during the app's lifespan, so not with `uvicorn --lifespan off`.
+- Under heavy CPU load the loop can fall behind without one blocking call. The stack is then whatever was running at that moment.
 
 ## JSON Schema Contract
 

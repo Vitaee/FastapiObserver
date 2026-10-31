@@ -12,9 +12,11 @@ from ..sinks import build_sink_handlers
 from .circuit_breaker import SinkCircuitBreakerHandler
 from .filters import PluginLogFilter, RequestIdFilter, TraceContextFilter
 from .formatter import StructuredJsonFormatter
+from .held import HeldLogFilter
 from .queueing import OverflowPolicyQueueHandler, _LOG_QUEUE_TELEMETRY
 
 _LOGGER = logging.getLogger("fastapiobserver.logging")
+_UVICORN_LOGGERS = ("uvicorn", "uvicorn.error", "uvicorn.access")
 
 
 def get_managed_output_handlers() -> list[logging.Handler]:
@@ -94,6 +96,7 @@ def _teardown_handlers_locked(suppress_errors: bool = True) -> None:
             
     state._MANAGED_OUTPUT_HANDLERS = []
     state._SINK_CIRCUIT_BREAKERS = []
+    state._HELD_LOG_FILTER = None
     state._MANAGED_HANDLERS.clear()
 
     if errors and not suppress_errors:
@@ -150,8 +153,6 @@ def setup_logging(
                 delegate=formatter, key_provider=cast(AuditKeyProvider, provider),
             )
 
-        root_logger.setLevel(settings.log_level.upper())
-
         # Build output handlers based on logs_mode
         output_handlers: list[tuple[logging.Handler, str]] = []
         if logs_mode in ("local_json", "both"):
@@ -195,6 +196,14 @@ def setup_logging(
             telemetry=_LOG_QUEUE_TELEMETRY,
         )
         _configure_queue_handler(queue_handler)
+        level = logging.getLevelName(settings.log_level)
+        if settings.log_level_on_error is not None:
+            lowest_level = logging.getLevelName(settings.log_level_on_error)
+            if lowest_level < level:
+                held_filter = HeldLogFilter(queue_handler, level, lowest_level)
+                queue_handler.addFilter(held_filter)
+                state._HELD_LOG_FILTER = held_filter
+        set_log_level(level)
         root_logger.addHandler(queue_handler)
 
         listener = logging.handlers.QueueListener(
@@ -208,11 +217,42 @@ def setup_logging(
         _ensure_atexit_shutdown_hook_locked()
         _ensure_fork_reinitialization_locked()
 
-        for name in ("uvicorn", "uvicorn.error", "uvicorn.access"):
+        for name in _UVICORN_LOGGERS:
             uvicorn_logger = logging.getLogger(name)
             uvicorn_logger.handlers = []
             uvicorn_logger.propagate = True
-            uvicorn_logger.setLevel(settings.log_level.upper())
+
+
+def set_log_level(level: int) -> None:
+    """Set the log level, at startup and from the runtime control plane.
+
+    With ``LOG_LEVEL_ON_ERROR`` below *level*, the root logger stays at that
+    lower level so the records are created, and the held-log filter applies
+    *level* instead.
+    """
+    import fastapiobserver.logging.state as state
+
+    root_level = level
+    held_filter = state._HELD_LOG_FILTER
+    if held_filter is not None:
+        held_filter.level = level
+        root_level = min(level, held_filter.lowest_level)
+    logging.getLogger().setLevel(root_level)
+    for name in _UVICORN_LOGGERS:
+        logging.getLogger(name).setLevel(level)
+
+
+def get_log_level() -> str:
+    """The level records are written at, as set by :func:`set_log_level`."""
+    import fastapiobserver.logging.state as state
+
+    held_filter = state._HELD_LOG_FILTER
+    level = (
+        held_filter.level
+        if held_filter is not None
+        else logging.getLogger().getEffectiveLevel()
+    )
+    return logging.getLevelName(level)
 
 
 def _configure_queue_handler(handler: logging.Handler) -> None:

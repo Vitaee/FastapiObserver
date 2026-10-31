@@ -47,6 +47,26 @@ Example SQL comment shape:
 SELECT * FROM users /*db_driver='asyncpg',traceparent='00-<trace-id>-<span-id>-01'*/
 ```
 
+## Query count and time on the request line
+
+With tracing on, each request line counts the request's database queries and outbound HTTP calls, from the client spans OpenTelemetry records for them:
+
+```json
+{"message": "request.completed", "event": {"path": "/orders", "duration_ms": 182.4, "db": {"count": 12, "ms": 140.3}, "http": {"count": 1, "ms": 31.0}}}
+```
+
+`db` counts spans from instrumented database clients, such as the engines passed as `db_engine`. `http` counts spans from instrumented HTTP clients, such as `instrument_httpx_client()` and `instrument_requests_session()`. A request that wasn't sampled has neither field.
+
+### N+1 queries
+
+When one statement runs 10 or more times in a request, usually a query per item in a loop, a warning names it. It's written once per method, route and statement in each process:
+
+```json
+{"level": "WARNING", "message": "db.n_plus_one", "request_id": "...", "event": {"method": "GET", "route": "/orders", "statement": "SELECT * FROM items WHERE items.order_id = %(order_id_1)s", "count": 12}}
+```
+
+Quoted strings and numbers in the statement are replaced with `?` before it's written. The `request_id` leads to that request's trace.
+
 ## Recommended Setup (via `install_observability`)
 
 Use this path when you already initialize observability through the FastAPI facade.
@@ -174,6 +194,7 @@ Runnable demo:
 | `instrument_sqlalchemy_async` called with non-AsyncEngine | Raises `TypeError` (missing `sync_engine`) |
 | `db_engine` set but OTel disabled in `install_observability` | Instrumentation path is skipped |
 | `db_commenter_enabled=False` | DB spans still available; SQL comments disabled |
+| Request not sampled | No `db` or `http` field on its request line, and no N+1 check |
 
 ## Production Best Practices
 
@@ -190,6 +211,7 @@ Runnable demo:
 > `db.statement` span attributes from SQLAlchemy instrumentation are not scrubbed by
 > `fastapi-observer` security redaction. If queries contain inline sensitive values,
 > those values can be exported to tracing backends. Use parameterized statements and
-> enforce review of trace payloads in production.
+> enforce review of trace payloads in production. The `db.n_plus_one` log line
+> replaces quoted strings and numbers in the statement with `?`.
 
 ---

@@ -32,6 +32,9 @@ class ObservabilitySettings(InternalSettingsBase):
 
     # --- logging ---
     log_level: str = Field(default="INFO", validation_alias="LOG_LEVEL")
+    # Records from this level up to log_level are held per request and written
+    # only if the request fails.
+    log_level_on_error: str | None = Field(default=None, validation_alias="LOG_LEVEL_ON_ERROR")
     log_dir: str | None = Field(default=None, validation_alias="LOG_DIR")
     log_queue_max_size: int = Field(default=10_000, gt=0, validation_alias="LOG_QUEUE_MAX_SIZE")
     log_queue_overflow_policy: LogQueueOverflowPolicy = Field(
@@ -79,6 +82,12 @@ class ObservabilitySettings(InternalSettingsBase):
     )
     metrics_format: MetricsFormat = Field(
         default="negotiate", validation_alias="METRICS_FORMAT"
+    )
+
+    # --- event loop ---
+    # Log the blocking call's stack when the loop doesn't run for this long.
+    loop_block_threshold_ms: float | None = Field(
+        default=None, gt=0, validation_alias="OBS_LOOP_BLOCK_THRESHOLD_MS"
     )
 
     # --- otel trace noise control ---
@@ -135,9 +144,11 @@ class ObservabilitySettings(InternalSettingsBase):
 
     # ---------- validators ----------
 
-    @field_validator("log_level")
+    @field_validator("log_level", "log_level_on_error")
     @classmethod
-    def _validate_log_level(cls, value: str) -> str:
+    def _validate_log_level(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
         normalized_log_level = value.upper().strip()
         level = logging.getLevelName(normalized_log_level)
         if not isinstance(level, int):

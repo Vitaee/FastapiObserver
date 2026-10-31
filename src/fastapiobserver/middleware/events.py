@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 from typing import Any
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.types import Scope
 
+from ..request_context import UNMATCHED_ROUTE, route_template
 from ..security import SecurityPolicy, sanitize_event
 
 _CREDENTIAL_RE = re.compile(r"://[^:]+:[^@]+@")
@@ -30,6 +32,7 @@ class _RequestEventBuilder:
         response_body: str | None,
         error_type: str,
         exception: Exception | None,
+        calls: Mapping[str, list[float]] | None = None,
     ) -> dict[str, Any]:
         event: dict[str, Any] = {
             "method": method,
@@ -50,6 +53,8 @@ class _RequestEventBuilder:
         if exception is not None:
             event["exception_class"] = exception.__class__.__name__
             event["exception_message"] = _sanitize_exception_message(str(exception))
+        for kind, (count, seconds) in (calls or {}).items():
+            event[kind] = {"count": int(count), "ms": round(seconds * 1000, 3)}
         return sanitize_event(event, self.policy)
 
 
@@ -68,9 +73,6 @@ def _classify_error(status_code: int, error: Exception | None) -> str:
     return "ok"
 
 
-UNMATCHED_ROUTE = "<unmatched>"
-
-
 def _extract_route_template(scope: Scope, raw_path: str, status_code: int) -> str:
     """Return the metrics ``path`` label: the matched route template if known.
 
@@ -81,8 +83,8 @@ def _extract_route_template(scope: Scope, raw_path: str, status_code: int) -> st
     *raw_path*: FastAPI doesn't record plain Starlette routes, such as ones
     added with ``app.add_route()``, in the scope.
     """
-    template = getattr(scope.get("route"), "path", None)
-    if isinstance(template, str) and template:
+    template = route_template(scope)
+    if template:
         return template
     return UNMATCHED_ROUTE if status_code == 404 else raw_path
 
