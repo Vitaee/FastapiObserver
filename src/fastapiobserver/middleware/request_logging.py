@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import logging
+import re
 import time
 
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from ..config import ObservabilitySettings
+from ..logging.held import write_held_logs
 from ..metrics import MetricsBackend, NoopMetricsBackend
+from ..request_context import get_request_state
 from ..security import (
     SecurityPolicy,
     TrustedProxyPolicy,
@@ -18,6 +21,15 @@ from .events import _RequestEventBuilder, _classify_error, _extract_route_templa
 from .headers import _get_header, _upsert_header
 from .ip import _IpResolver
 from .metrics import _MetricsRecorder
+
+# The same statement this many times in one request is usually a query per item
+# in a loop (N+1), which one query with a join or IN would replace.
+# ponytail: fixed threshold; make it a setting if it's too noisy or quiet for someone.
+_N_PLUS_ONE_MIN_REPEATS = 10
+_MAX_STATEMENT_LENGTH = 1000
+# Quoted strings and numbers, so values written into SQL text never reach a log line.
+# ponytail: misses dollar-quoted and E'' strings; parse SQL if those ever show up.
+_SQL_LITERALS = re.compile(r"'(?:[^']|'')*'|\b\d+(?:\.\d+)?\b")
 
 
 class RequestLoggingMiddleware:
@@ -43,6 +55,7 @@ class RequestLoggingMiddleware:
             metrics_backend=self.metrics_backend,
             logger=self.logger,
         )
+        self._reported_statements: set[tuple[str, str, str]] = set()
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http":
@@ -52,7 +65,7 @@ class RequestLoggingMiddleware:
         start = time.perf_counter()
         raw_headers = scope.get("headers", [])
         client_ip, trusted_source = self.ip_resolver.resolve(scope, raw_headers)
-        request_id = self.context_manager.initialize(raw_headers, trusted_source)
+        request_id = self.context_manager.initialize(scope, raw_headers, trusted_source)
 
         path = scope.get("path", "")
         method = scope.get("method", "UNKNOWN")
@@ -146,9 +159,12 @@ class RequestLoggingMiddleware:
         else:
             level, message = logging.INFO, "request.completed"
 
+        request_state = get_request_state()
         # Building and redacting the event is the costliest step; skip it when
         # the record would be dropped by the log level anyway.
         if self.logger.isEnabledFor(level):
+            if level >= logging.ERROR:
+                write_held_logs()
             safe_event = self.event_builder.build(
                 method=method,
                 path=path,
@@ -159,6 +175,7 @@ class RequestLoggingMiddleware:
                 response_body=response_body_capture.value,
                 error_type=_classify_error(status_code, captured_error),
                 exception=captured_error,
+                calls=request_state.calls if request_state else None,
             )
             self.logger.log(
                 level,
@@ -169,6 +186,8 @@ class RequestLoggingMiddleware:
 
         # Prefer route template for bounded cardinality
         route_template = _extract_route_template(scope, path, status_code)
+        if request_state is not None and request_state.statements:
+            self._report_repeated_statement(method, route_template, request_state.statements)
 
         self.metrics_recorder.observe(
             method=method,
@@ -183,5 +202,26 @@ class RequestLoggingMiddleware:
             duration_seconds=duration_seconds,
         )
         self.context_manager.cleanup()
+
+    def _report_repeated_statement(
+        self, method: str, route: str, statements: dict[str, int]
+    ) -> None:
+        """Warn once per method, route and statement when a query runs once per item (N+1)."""
+        statement, count = max(statements.items(), key=lambda item: item[1])
+        key = (method, route, statement)
+        if count < _N_PLUS_ONE_MIN_REPEATS or key in self._reported_statements:
+            return
+        self._reported_statements.add(key)
+        self.logger.warning(
+            "db.n_plus_one",
+            extra={
+                "event": {
+                    "method": method,
+                    "route": route,
+                    "statement": _SQL_LITERALS.sub("?", statement)[:_MAX_STATEMENT_LENGTH],
+                    "count": count,
+                },
+            },
+        )
 
 __all__ = ["RequestLoggingMiddleware"]

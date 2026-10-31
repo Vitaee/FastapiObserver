@@ -13,6 +13,7 @@ from ..plugins import apply_log_enrichers
 from ..request_context import get_request_id, get_span_id, get_trace_id, get_user_context
 from ..security import SecurityPolicy, sanitize_event
 from ..utils import lazy_import
+from .volume import count_log_bytes
 
 orjson: Any
 try:
@@ -112,7 +113,9 @@ class StructuredJsonFormatter(logging.Formatter):
             sanitized_payload = _as_dict(sanitized_candidate)
         else:
             sanitized_payload = enriched_payload
-        return _json_dumps(sanitized_payload)
+        line = _json_dumps(sanitized_payload)
+        count_log_bytes(record, line)
+        return line
 
 
 def _as_dict(value: Mapping[str, Any]) -> dict[str, Any]:

@@ -9,6 +9,7 @@ from typing import Any
 from fastapi import FastAPI
 
 from ..config import ObservabilitySettings
+from ..request_context import get_request_state
 from .lifecycle import close_on_app_shutdown
 from .resource import (
     build_excluded_urls_csv,
@@ -21,6 +22,7 @@ from .settings import OTelSettings, get_trace_sampling_ratio, set_trace_sampling
 
 _LOGGER = logging.getLogger("fastapiobserver.otel")
 _OTEL_INSTALLED_APPS: weakref.WeakSet[FastAPI] = weakref.WeakSet()
+_CALL_TOTALS_PROVIDERS: weakref.WeakSet[Any] = weakref.WeakSet()
 
 
 def install_otel(
@@ -91,6 +93,13 @@ def install_otel(
             },
         )
 
+    if (
+        hasattr(tracer_provider, "add_span_processor")
+        and tracer_provider not in _CALL_TOTALS_PROVIDERS
+    ):
+        tracer_provider.add_span_processor(_request_call_totals(trace_api, trace_sdk))
+        _CALL_TOTALS_PROVIDERS.add(tracer_provider)
+
     # --- Wire excluded URLs for noise control ---
     excluded_urls_str = build_excluded_urls_csv(settings)
     instrument_kwargs: dict[str, Any] = {
@@ -107,3 +116,30 @@ def install_otel(
         close_on_app_shutdown(app, tracer_provider, shutdown=True)
 
     _OTEL_INSTALLED_APPS.add(app)
+
+
+def _request_call_totals(trace_api: Any, trace_sdk: Any) -> Any:
+    """A span processor that adds each finished client span, a database query or
+    an outbound HTTP call, to its request's ``db`` or ``http`` totals.
+
+    It sees only spans that are sampled, from clients that are instrumented.
+    """
+    client_kind = trace_api.SpanKind.CLIENT
+
+    class RequestCallTotals(trace_sdk.SpanProcessor):  # type: ignore
+        def on_end(self, span: Any) -> None:
+            request_state = get_request_state()
+            if request_state is None or span.kind != client_kind or span.end_time is None:
+                return
+            attributes = span.attributes or {}
+            seconds = (span.end_time - span.start_time) / 1e9
+            # Old and new semantic-convention names; instrumentations emit either.
+            if "db.system" in attributes or "db.system.name" in attributes:
+                statement = attributes.get("db.query.text") or attributes.get("db.statement")
+                request_state.add_call(
+                    "db", seconds, statement if isinstance(statement, str) else None
+                )
+            elif "http.request.method" in attributes or "http.method" in attributes:
+                request_state.add_call("http", seconds)
+
+    return RequestCallTotals()

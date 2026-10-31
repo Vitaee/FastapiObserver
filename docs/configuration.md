@@ -39,6 +39,8 @@ Notes:
 | `ENVIRONMENT` | `development` | Environment label |
 | `APP_VERSION` | `0.0.0` | Service version |
 | `LOG_LEVEL` | `INFO` | Root log level |
+| `LOG_LEVEL_ON_ERROR` | - | A lower level, such as `DEBUG`, for requests that fail: their lines at this level are held and written only if the request ends in a 5xx or an unhandled exception. See [debug logs for failed requests](logging.md#debug-logs-for-failed-requests) |
+| `OBS_LOOP_BLOCK_THRESHOLD_MS` | - | Write `event_loop.blocked`, with the stack of the blocking call, when the event loop doesn't run for this many milliseconds. See [calls that block the event loop](logging.md#calls-that-block-the-event-loop) |
 | `LOG_DIR` | - | Optional file log directory |
 | `OBS_LOG_SINKS` | - | Sinks from installed packages to send logs to, by entry-point name. Packages not listed are never loaded |
 | `LOG_QUEUE_MAX_SIZE` | `10000` | Max in-memory records in core log queue |

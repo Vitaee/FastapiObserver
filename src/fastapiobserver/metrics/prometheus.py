@@ -82,12 +82,17 @@ def _get_trace_exemplar() -> dict[str, str] | None:
 
 
 class _LogQueueMetricsCollector:
-    """Exposes log-queue, Logtail DLQ and sink circuit-breaker stats at scrape time."""
+    """Exposes log-queue, log volume, Logtail DLQ and sink circuit-breaker stats at
+    scrape time."""
 
     def collect(self) -> Iterator[Any]:
         from prometheus_client.core import CounterMetricFamily, GaugeMetricFamily
 
-        from ..logging import get_log_queue_stats, get_sink_circuit_breaker_stats
+        from ..logging import (
+            get_log_bytes_by_route,
+            get_log_queue_stats,
+            get_sink_circuit_breaker_stats,
+        )
         from ..sinks import get_logtail_dlq_stats
 
         queue = get_log_queue_stats()
@@ -131,6 +136,15 @@ class _LogQueueMetricsCollector:
             "Total blocking enqueue attempts that timed out and dropped the newest record.",
             value=float(queue["block_timeout_total"]),
         )
+
+        log_bytes = CounterMetricFamily(
+            "fastapiobserver_log_bytes_total",
+            "Bytes of JSON log lines written, by the route of the request that wrote them.",
+            labels=["route"],
+        )
+        for route, size in sorted(get_log_bytes_by_route().items()):
+            log_bytes.add_metric([route], float(size))
+        yield log_bytes
 
         dlq = get_logtail_dlq_stats()
         written = CounterMetricFamily(
@@ -176,6 +190,9 @@ def _register_log_queue_metrics_collector() -> None:
     # Per-worker queue stats would be meaningless once aggregated across processes.
     if _multiprocess_dir():
         return
+    from ..logging.volume import start_counting
+
+    start_counting()
     try:
         _import_prometheus_client().REGISTRY.register(_LogQueueMetricsCollector())
     except ValueError:
