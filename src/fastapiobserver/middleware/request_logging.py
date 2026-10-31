@@ -18,7 +18,6 @@ from .events import _RequestEventBuilder, _classify_error, _extract_route_templa
 from .headers import _get_header, _upsert_header
 from .ip import _IpResolver
 from .metrics import _MetricsRecorder
-from .span_errors import _SpanErrorRecorder
 
 
 class RequestLoggingMiddleware:
@@ -44,7 +43,6 @@ class RequestLoggingMiddleware:
             metrics_backend=self.metrics_backend,
             logger=self.logger,
         )
-        self.span_error_recorder = _SpanErrorRecorder(self.logger)
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http":
@@ -110,7 +108,6 @@ class RequestLoggingMiddleware:
             had_error = True
             captured_error = exc
             status_code = 500
-            self.span_error_recorder.record_exception(exc)
             raise
         finally:
             self._finalize_request(

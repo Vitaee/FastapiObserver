@@ -40,7 +40,7 @@ The project is now organized as focused subpackages instead of large monolithic 
 - `fastapiobserver/logging/`: formatter, queueing, filters, setup lifecycle, sink circuit-breakers.
 - `fastapiobserver/middleware/`: request logging orchestration, context, IP resolution, headers, body capture, metrics hooks.
 - `fastapiobserver/sinks/`: sink protocol, registry/discovery, built-ins, factory wiring, Logtail + DLQ implementation.
-- `fastapiobserver/metrics/`: backend contracts/registry/builder/endpoint, Prometheus integration subpackage.
+- `fastapiobserver/metrics/`: backend contract and registry; `prometheus.py` holds the Prometheus backend, the `/metrics` endpoint (rendered by `prometheus_client`) and multiprocess helpers.
 - `fastapiobserver/security/`: policy/settings models, normalization helpers, redaction engine, trusted-proxy utilities.
 - `fastapiobserver/otel/`: OTel settings/resource/tracing/logs/metrics/lifecycle helpers.
 

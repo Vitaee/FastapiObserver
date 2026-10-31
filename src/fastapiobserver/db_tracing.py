@@ -12,7 +12,7 @@ Usage::
 
     engine = create_engine("postgresql://...")
     instrument_sqlalchemy(engine)
-    # SELECT * FROM users /*traceparent='00-abc123...',route='/api/users'*/
+    # SELECT * FROM users /*db_driver='psycopg2',traceparent='00-abc123...'*/
 
 Or for async engines::
 
@@ -35,8 +35,11 @@ _DEFAULT_COMMENTER_OPTIONS: dict[str, bool] = {
     "opentelemetry_values": True,  # injects traceparent
     "db_driver": True,
     "db_framework": False,  # noisy — omit by default
-    "route": True,
 }
+
+# OpenTelemetry's instrumentor is a singleton that ignores a second
+# ``instrument()`` call, so every call re-instruments all engines seen so far.
+_ENGINES: list[Any] = []
 
 _PACKAGE_HINT = "fastapi-observer[otel-sqlalchemy]"
 
@@ -58,38 +61,46 @@ def instrument_sqlalchemy(
         context to every query.
     commenter_options:
         Key-value pairs controlling which fields appear in the SQL
-        comment.  Defaults to ``traceparent``, ``db_driver``, and
-        ``route``.
+        comment (``opentelemetry_values``, ``db_driver``, ``db_framework``).
+        Defaults to the trace context and ``db_driver``.
+
+    Call it once per engine. The commenter settings of the latest call apply
+    to every instrumented engine.
     """
     try:
         instrumentor_module = lazy_import(
             "opentelemetry.instrumentation.sqlalchemy",
             package_hint=_PACKAGE_HINT,
         )
-        instrumentor = instrumentor_module.SQLAlchemyInstrumentor()
-
-        options = commenter_options or _DEFAULT_COMMENTER_OPTIONS
-
-        instrumentor.instrument(
-            engine=engine,
-            enable_commenter=enable_commenter,
-            commenter_options=options,
-        )
-        _LOGGER.info(
-            "db_tracing.instrumented",
-            extra={
-                "event": {
-                    "engine_url": str(engine.url),
-                    "commenter_enabled": enable_commenter,
-                },
-                "_skip_enrichers": True,
-            },
-        )
     except RuntimeError as exc:
         raise RuntimeError(
             "SQLAlchemy instrumentation requires "
             f"`pip install {_PACKAGE_HINT}`"
         ) from exc
+    instrumentor = instrumentor_module.SQLAlchemyInstrumentor()
+
+    if not any(known is engine for known in _ENGINES):
+        _ENGINES.append(engine)
+    if instrumentor.is_instrumented_by_opentelemetry:
+        instrumentor.uninstrument()
+    instrumentor.instrument(
+        engines=list(_ENGINES),
+        enable_commenter=enable_commenter,
+        commenter_options=commenter_options or _DEFAULT_COMMENTER_OPTIONS,
+    )
+
+    event = {"engine_url": str(engine.url), "commenter_enabled": enable_commenter}
+    if not instrumentor.is_instrumented_by_opentelemetry:
+        # OpenTelemetry refuses unsupported SQLAlchemy versions and only logs it.
+        _LOGGER.warning(
+            "db_tracing.not_instrumented",
+            extra={"event": event, "_skip_enrichers": True},
+        )
+        return
+    _LOGGER.info(
+        "db_tracing.instrumented",
+        extra={"event": event, "_skip_enrichers": True},
+    )
 
 
 def instrument_sqlalchemy_async(
@@ -134,6 +145,7 @@ def uninstrument_sqlalchemy() -> None:
         instrumentor_module.SQLAlchemyInstrumentor().uninstrument()
     except (ModuleNotFoundError, RuntimeError):
         pass
+    _ENGINES.clear()
 
 
 __all__ = [

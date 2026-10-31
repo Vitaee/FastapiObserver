@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import io
 import logging
+
+import pytest
 
 from fastapiobserver.logging import SinkCircuitBreakerHandler
 
@@ -99,3 +102,28 @@ def test_get_sink_circuit_breaker_stats_contract() -> None:
 
     # cleanup
     state._SINK_CIRCUIT_BREAKERS = []
+
+
+def test_breaker_opens_when_stdlib_handler_reports_write_errors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # StreamHandler catches its own write errors and reports them through
+    # handleError() instead of raising; those must still trip the breaker.
+    monkeypatch.setattr(logging, "raiseExceptions", False)
+    stream = io.StringIO()
+    stream.close()
+    breaker = SinkCircuitBreakerHandler(
+        sink_name="stdout",
+        delegate=logging.StreamHandler(stream),
+        failure_threshold=3,
+        recovery_timeout_seconds=30,
+    )
+
+    for _ in range(5):
+        breaker.handle(_record())
+
+    snapshot = breaker.snapshot()
+    assert snapshot.state == "open"
+    assert snapshot.failures_total == 3
+    assert snapshot.handled_total == 0
+    assert snapshot.skipped_total == 2

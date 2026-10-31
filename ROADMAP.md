@@ -4,7 +4,6 @@ Planned work, roughly in priority order. Shipped changes are listed in [CHANGELO
 
 ## Leaner core
 
-- [ ] Hand work that OpenTelemetry, `prometheus_client` or the standard library already do to them, keeping the public API unchanged.
 - [ ] Opt-in sampling of successful request logs (errors and slow requests always logged).
 - [ ] Free-threaded Python (3.14t) in the CI matrix.
 

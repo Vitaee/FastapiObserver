@@ -1,16 +1,23 @@
 from __future__ import annotations
 
 import asyncio
-import uuid
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-from fastapiobserver.otel.lifecycle import (
-    build_provider_shutdown_callback,
-    register_shutdown_hook,
-)
+from fastapiobserver.otel.lifecycle import close_on_app_shutdown
+
+
+class _Provider:
+    def __init__(self, calls: list[str]) -> None:
+        self.calls = calls
+
+    def force_flush(self) -> None:
+        self.calls.append("flush")
+
+    def shutdown(self) -> None:
+        self.calls.append("shutdown")
 
 
 def _run_lifespan(app: FastAPI) -> None:
@@ -21,78 +28,40 @@ def _run_lifespan(app: FastAPI) -> None:
     asyncio.run(_cycle())
 
 
-def test_register_shutdown_hook_is_idempotent_per_app() -> None:
+def test_close_on_app_shutdown_runs_once_per_app_and_provider() -> None:
     app = FastAPI()
     calls: list[str] = []
-    key = f"otel.test.{uuid.uuid4()}"
+    provider = _Provider(calls)
 
-    register_shutdown_hook(key, lambda: calls.append("first"), app=app)
-    register_shutdown_hook(key, lambda: calls.append("second"), app=app)
+    close_on_app_shutdown(app, provider, shutdown=True)
+    close_on_app_shutdown(app, provider, shutdown=True)
 
     _run_lifespan(app)
     _run_lifespan(app)
-    assert calls == ["first"]
+    assert calls == ["shutdown"]
 
 
-def test_register_shutdown_hook_runs_with_custom_lifespan() -> None:
+def test_close_on_app_shutdown_only_flushes_providers_we_do_not_own() -> None:
+    app = FastAPI()
+    calls: list[str] = []
+
+    close_on_app_shutdown(app, _Provider(calls), shutdown=False)
+
+    _run_lifespan(app)
+    assert calls == ["flush"]
+
+
+def test_close_on_app_shutdown_runs_after_custom_lifespan() -> None:
     events: list[str] = []
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncGenerator[None, None]:
         events.append("startup")
         yield
-        events.append("shutdown")
+        events.append("app-shutdown")
 
     app = FastAPI(lifespan=lifespan)
-    register_shutdown_hook(f"otel.test.{uuid.uuid4()}", lambda: events.append("hook"), app=app)
+    close_on_app_shutdown(app, _Provider(events), shutdown=True)
 
     _run_lifespan(app)
-    assert events == ["startup", "shutdown", "hook"]
-
-
-def test_build_provider_shutdown_callback_flush_only() -> None:
-    class _Provider:
-        def __init__(self) -> None:
-            self.flush_calls = 0
-            self.shutdown_calls = 0
-
-        def force_flush(self) -> None:
-            self.flush_calls += 1
-
-        def shutdown(self) -> None:
-            self.shutdown_calls += 1
-
-    provider = _Provider()
-    callback = build_provider_shutdown_callback(
-        provider,
-        component="logger_provider",
-        shutdown=False,
-    )
-    callback()
-
-    assert provider.flush_calls == 1
-    assert provider.shutdown_calls == 0
-
-
-def test_build_provider_shutdown_callback_flush_and_shutdown() -> None:
-    class _Provider:
-        def __init__(self) -> None:
-            self.flush_calls = 0
-            self.shutdown_calls = 0
-
-        def force_flush(self) -> None:
-            self.flush_calls += 1
-
-        def shutdown(self) -> None:
-            self.shutdown_calls += 1
-
-    provider = _Provider()
-    callback = build_provider_shutdown_callback(
-        provider,
-        component="tracer_provider",
-        shutdown=True,
-    )
-    callback()
-
-    assert provider.flush_calls == 1
-    assert provider.shutdown_calls == 1
+    assert events == ["startup", "app-shutdown", "shutdown"]

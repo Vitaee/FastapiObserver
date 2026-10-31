@@ -9,11 +9,11 @@ from fastapi import FastAPI
 
 from ..config import ObservabilitySettings
 from ..security import SecurityPolicy, sanitize_event
-from .lifecycle import build_provider_shutdown_callback, register_shutdown_hook
+from .lifecycle import close_on_app_shutdown
 from .resource import (
-    build_log_exporter,
+    build_otlp_exporter,
     create_otel_resource,
-    has_configured_logger_provider,
+    has_configured_provider,
     import_otel_module,
 )
 from .settings import OTelLogsSettings, OTelSettings
@@ -90,12 +90,13 @@ def install_otel_logs(
         otel_logs_sdk = import_otel_module("opentelemetry.sdk._logs")
         otel_logs_export = import_otel_module("opentelemetry.sdk._logs.export")
         otel_log_api = import_otel_module("opentelemetry._logs")
+        otel_log_handler = import_otel_module("opentelemetry.instrumentation.logging.handler")
     except RuntimeError:
         _LOGGER.warning(
             "otel.logs.sdk_unavailable",
             extra={
                 "event": {
-                    "message": "OTLP log export requires opentelemetry-sdk.",
+                    "message": "OTLP log export requires fastapi-observer[otel].",
                 },
                 "_skip_enrichers": True,
             },
@@ -103,109 +104,61 @@ def install_otel_logs(
         return None
 
     policy = security_policy or SecurityPolicy()
-
-    # Re-use resource from trace settings when available.
-    trace_otel = otel_settings or OTelSettings(
-        service_name=settings.service,
-        service_version=settings.version,
-        environment=settings.environment,
-    )
-    resource = create_otel_resource(settings, trace_otel)
     processor_key = (
         otel_logs_settings.protocol,
         otel_logs_settings.otlp_endpoint or "__default__",
     )
 
-    logger_provider = otel_log_api.get_logger_provider()
-    has_external_provider = has_configured_logger_provider(
-        otel_log_api,
-        logger_provider,
-    )
-    provider_owned = False
-    if not has_external_provider:
-        candidate_provider = otel_logs_sdk.LoggerProvider(resource=resource)
-        attached = _attach_log_processor_once(
-            candidate_provider,
-            processor_key,
-            lambda: otel_logs_export.BatchLogRecordProcessor(
-                build_log_exporter(otel_logs_settings),
-            ),
+    def build_processor() -> Any:
+        return otel_logs_export.BatchLogRecordProcessor(
+            build_otlp_exporter("logs", otel_logs_settings)
         )
-        if not attached:
+
+    logger_provider = otel_log_api.get_logger_provider()
+    provider_owned = not has_configured_provider(logger_provider)
+    if provider_owned:
+        # Re-use resource from trace settings when available.
+        trace_otel = otel_settings or OTelSettings(
+            service_name=settings.service,
+            service_version=settings.version,
+            environment=settings.environment,
+        )
+        logger_provider = otel_logs_sdk.LoggerProvider(
+            resource=create_otel_resource(settings, trace_otel)
+        )
+        if not _attach_log_processor_once(logger_provider, processor_key, build_processor):
             _LOGGER.warning(
                 "otel.logs.processor_attach.failed",
                 extra={"_skip_enrichers": True},
             )
             return None
-        try:
-            otel_log_api.set_logger_provider(candidate_provider)
-            logger_provider = candidate_provider
-            provider_owned = True
-        except Exception:
-            logger_provider = otel_log_api.get_logger_provider()
-            attached = _attach_log_processor_once(
-                logger_provider,
-                processor_key,
-                lambda: otel_logs_export.BatchLogRecordProcessor(
-                    build_log_exporter(otel_logs_settings),
-                ),
-            )
-            if not attached:
-                _LOGGER.warning(
-                    "otel.logs.provider_already_configured",
-                    extra={"_skip_enrichers": True},
-                )
-                return None
-            provider_owned = False
-    elif otel_logs_settings.otlp_endpoint:
-        attached = _attach_log_processor_once(
-            logger_provider,
-            processor_key,
-            lambda: otel_logs_export.BatchLogRecordProcessor(
-                build_log_exporter(otel_logs_settings),
-            ),
-        )
-        if not attached:
-            _LOGGER.warning(
-                "otel.logs.external_provider_without_processor_hook",
-                extra={
-                    "event": {
-                        "provider_class": logger_provider.__class__.__name__,
-                    },
-                    "_skip_enrichers": True,
+        otel_log_api.set_logger_provider(logger_provider)
+    elif otel_logs_settings.otlp_endpoint and not _attach_log_processor_once(
+        logger_provider, processor_key, build_processor
+    ):
+        _LOGGER.warning(
+            "otel.logs.external_provider_without_processor_hook",
+            extra={
+                "event": {
+                    "provider_class": logger_provider.__class__.__name__,
                 },
-            )
-
-    # Return handler for routing through QueueListener instead of attaching
-    # directly to root. This keeps a single logging pipeline.
-    try:
-        raw_handler = otel_logs_sdk.LoggingHandler(
-            level=logging.NOTSET,
-            logger_provider=logger_provider,
+                "_skip_enrichers": True,
+            },
         )
-    except Exception:
-        _LOGGER.debug(
-            "otel.logs.handler_create.failed",
-            exc_info=True,
-            extra={"_skip_enrichers": True},
-        )
-        return None
 
+    # Build the handler directly: LoggingInstrumentor().instrument() would also
+    # attach it to the root logger, bypassing the queue and redaction. The
+    # caller routes this one through the QueueListener pipeline instead.
+    raw_handler = otel_log_handler.LoggingHandler(
+        level=logging.NOTSET,
+        logger_provider=logger_provider,
+        log_code_attributes=True,  # the SDK handler always added code.* attributes
+    )
     otel_handler = _SanitizingOTLPLogHandler(
         raw_handler,
         security_policy=policy,
     )
-    register_shutdown_hook(
-        key=f"otel.logger_provider.{id(logger_provider)}",
-        callback=build_provider_shutdown_callback(
-            logger_provider,
-            logger=_LOGGER,
-            component="logger_provider",
-            shutdown=provider_owned,
-        ),
-        app=app,
-        logger=_LOGGER,
-    )
+    close_on_app_shutdown(app, logger_provider, shutdown=provider_owned)
     _LOGGER.info(
         "otel.logs.installed",
         extra={
@@ -230,30 +183,15 @@ def _attach_log_processor_once(
     key: tuple[str, str],
     build_processor: Callable[[], Any],
 ) -> bool:
-    if not hasattr(logger_provider, "add_log_record_processor"):
-        return False
-
-    existing_keys: set[tuple[str, str]]
-    existing_keys = getattr(logger_provider, _OTLP_LOG_PROCESSOR_KEYS_ATTR, set())
-    if not isinstance(existing_keys, set):
-        try:
-            existing_keys = set(existing_keys)
-        except TypeError:
-            existing_keys = set()
-    if key in existing_keys:
+    """Add an OTLP processor unless one for ``key`` is already attached."""
+    keys: set[tuple[str, str]] = getattr(logger_provider, _OTLP_LOG_PROCESSOR_KEYS_ATTR, set())
+    if key in keys:
         return True
-
     try:
         logger_provider.add_log_record_processor(build_processor())
+        setattr(logger_provider, _OTLP_LOG_PROCESSOR_KEYS_ATTR, keys | {key})
     except Exception:
         return False
-
-    existing_keys.add(key)
-    try:
-        setattr(logger_provider, _OTLP_LOG_PROCESSOR_KEYS_ATTR, existing_keys)
-    except Exception:
-        # Some provider implementations may not allow custom attributes.
-        pass
     return True
 
 

@@ -12,10 +12,10 @@ What happens under the hood:
     1. The SQLAlchemy `create_async_engine` is dynamically instrumented by OpenTelemetry.
     2. Every database query generates an OTel span linked to the current HTTP Request.
     3. The executing query automatically receives a SQL comment containing the `traceparent` and
-       `route` info.
+       the database driver.
 
     Example executed query:
-    SELECT * FROM users /*traceparent='00-d8...,route='/users',db_driver='sqlite'*/
+    SELECT * FROM users /*db_driver='aiosqlite',traceparent='00-d8...'*/
 """
 
 import logging
@@ -80,7 +80,6 @@ install_observability(
     db_engine=engine,
     db_commenter_options={
         "opentelemetry_values": True,
-        "route": True,
         "db_driver": True,
     }
 )

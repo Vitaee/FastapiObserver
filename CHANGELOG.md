@@ -4,6 +4,28 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+- Database tracing now covers every engine. OpenTelemetry's SQLAlchemy instrumentor is a singleton that ignores a second `instrument()` call, so `install_observability(db_engine=[a, b])` or repeated `instrument_sqlalchemy()` calls traced only the first engine. All engines are now instrumented together.
+- When OpenTelemetry's SQLAlchemy instrumentation refuses the installed SQLAlchemy version (it currently supports versions below 2.1), fastapi-observer logs a `db_tracing.not_instrumented` warning instead of reporting `db_tracing.instrumented`.
+- The sink circuit breaker now opens when a sink fails to write. Standard library handlers catch their own write errors and only report them through `handleError()`, so the breaker counted every failed write as a success and never opened.
+- OTLP metrics are exported. `install_otel_metrics()` looked for a provider class named `ProxyMeterProvider`, but OpenTelemetry's is `_ProxyMeterProvider`, so the SDK `MeterProvider` was never installed and nothing was exported.
+- Logs written while the app shuts down reach the OTLP exporter. The log provider was shut down before the log queue had drained.
+- With `http/protobuf`, `OTEL_LOGS_ENDPOINT` gets `/v1/logs` appended to a bare host, as trace and metric endpoints already did. Logs were posted to `/`.
+- Failed requests record one exception event on the server span instead of two; OpenTelemetry's FastAPI instrumentation already records it.
+- `METRICS_FORMAT=prometheus` always serves the classic text format; it used to negotiate OpenMetrics. In `prometheus` and multiprocess modes, `/metrics` no longer redirects to `/metrics/`, and the redirect target is no longer counted in the request metrics. Multiprocess mode now honours `METRICS_FORMAT`.
+
+### Changed
+- `/metrics` uses `prometheus_client`'s own format negotiation, gzip compression and `name[]` filtering instead of a hand-written copy. Rendering still runs in the thread pool, so large metric sets don't block the event loop. Differences from the old negotiation: `q=0` in `Accept` is no longer honoured, OpenMetrics responses carry `prometheus_client`'s `escaping` parameter, and media types are matched case-sensitively.
+- OTLP log export uses the `LoggingHandler` from `opentelemetry-instrumentation-logging` instead of the SDK's deprecated one. Records are still redacted before export, and no handler is attached to the root logger.
+- With gRPC, an `OTEL_LOGS_ENDPOINT` ending in `/v1/logs` is rejected, as trace and metric endpoints already were.
+- Providers fastapi-observer creates are flushed when the app's lifespan ends; at process exit the OpenTelemetry SDK's own hook takes over. Providers configured by the application are no longer force-flushed by fastapi-observer at exit.
+- An existing tracer provider that is not an SDK provider is reused instead of replaced.
+- If you wrap the app in OpenTelemetry's raw ASGI middleware instead of `FastAPIInstrumentor`, failed requests no longer get an exception event from fastapi-observer; the span status is still `ERROR`.
+- Internals of `otel/` and `metrics/` now lean on the OpenTelemetry SDK and `prometheus_client`; the public API is unchanged.
+
+### Removed
+- The `route` SQLCommenter option. OpenTelemetry's SQLCommenter never supported it, so it had no effect; the docs no longer show it.
+
 ## [1.6.0] - 2026-10-31
 
 ### Added

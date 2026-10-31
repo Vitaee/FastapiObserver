@@ -1,11 +1,11 @@
-"""Tests for the 3-tier excluded URL precedence in _build_excluded_urls_csv."""
+"""Tests for the 3-tier excluded URL precedence in build_excluded_urls_csv."""
 
 from __future__ import annotations
 
 import pytest
 
 from fastapiobserver.config import ObservabilitySettings
-from fastapiobserver.otel import _build_excluded_urls_csv  # type: ignore[attr-defined]
+from fastapiobserver.otel import build_excluded_urls_csv
 
 
 def test_tier1_explicit_config_takes_priority(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -14,7 +14,7 @@ def test_tier1_explicit_config_takes_priority(monkeypatch: pytest.MonkeyPatch) -
     settings = ObservabilitySettings(
         otel_excluded_urls=("/custom/path", "/another"),
     )
-    result = _build_excluded_urls_csv(settings)
+    result = build_excluded_urls_csv(settings)
     assert result is not None
     assert "/custom/path" in result
     assert "/another" in result
@@ -26,7 +26,7 @@ def test_tier2_otel_env_vars_return_none(monkeypatch: pytest.MonkeyPatch) -> Non
     monkeypatch.setenv("OTEL_PYTHON_FASTAPI_EXCLUDED_URLS", "/health,/ready")
     settings = ObservabilitySettings()
     assert settings.otel_excluded_urls is None  # not explicitly set
-    result = _build_excluded_urls_csv(settings)
+    result = build_excluded_urls_csv(settings)
     assert result is None
 
 
@@ -35,7 +35,7 @@ def test_tier2_generic_otel_env_var(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("OTEL_PYTHON_EXCLUDED_URLS", "/ping")
     monkeypatch.delenv("OTEL_PYTHON_FASTAPI_EXCLUDED_URLS", raising=False)
     settings = ObservabilitySettings()
-    result = _build_excluded_urls_csv(settings)
+    result = build_excluded_urls_csv(settings)
     assert result is None
 
 
@@ -44,7 +44,7 @@ def test_tier2_empty_string_env_var_still_defers(monkeypatch: pytest.MonkeyPatch
     and defers to SDK rather than falling to package defaults."""
     monkeypatch.setenv("OTEL_PYTHON_FASTAPI_EXCLUDED_URLS", "")
     settings = ObservabilitySettings()
-    result = _build_excluded_urls_csv(settings)
+    result = build_excluded_urls_csv(settings)
     assert result is None
 
 
@@ -53,7 +53,7 @@ def test_tier3_package_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("OTEL_PYTHON_FASTAPI_EXCLUDED_URLS", raising=False)
     monkeypatch.delenv("OTEL_PYTHON_EXCLUDED_URLS", raising=False)
     settings = ObservabilitySettings()
-    result = _build_excluded_urls_csv(settings)
+    result = build_excluded_urls_csv(settings)
     assert result is not None
     urls = result.split(",")
     assert "/metrics" in urls
@@ -64,7 +64,7 @@ def test_explicit_empty_exclusion_returns_empty_string() -> None:
     """Operators can set OTEL_EXCLUDED_URLS='' to mean 'no exclusions at all'."""
     settings = ObservabilitySettings(otel_excluded_urls="")  # type: ignore[arg-type]
     assert settings.otel_excluded_urls == ()  # validator converts "" → empty tuple
-    result = _build_excluded_urls_csv(settings)
+    result = build_excluded_urls_csv(settings)
     assert result == ""  # empty string = trace everything, no exclusions
 
 

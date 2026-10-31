@@ -7,7 +7,6 @@ from .headers import _get_header, _upsert_header
 from .ip import _IpResolver, _extract_scope_client_ip
 from .metrics import _MetricsRecorder
 from .request_logging import RequestLoggingMiddleware
-from .span_errors import _SpanErrorRecorder
 
 __all__ = [
     "RequestLoggingMiddleware",
@@ -16,7 +15,6 @@ __all__ = [
     "_MetricsRecorder",
     "_RequestContextManager",
     "_RequestEventBuilder",
-    "_SpanErrorRecorder",
     "_classify_error",
     "_extract_route_template",
     "_extract_scope_client_ip",

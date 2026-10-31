@@ -122,30 +122,15 @@ def test_middleware_classifies_unhandled_exception(caplog) -> None:
     assert request_logs[-1].event["http.response.status_code"] == 500
 
 
-def test_middleware_records_exception_on_active_span(
+def test_unhandled_exception_recorded_once_on_server_span(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    otel_trace = pytest.importorskip("opentelemetry.trace")
+    in_memory = pytest.importorskip("opentelemetry.sdk.trace.export.in_memory_span_exporter")
+    import fastapiobserver.otel.tracing as otel_tracing_module
+    from fastapiobserver import OTelSettings
 
-    class _SpanContext:
-        is_valid = True
-
-    class _Span:
-        def __init__(self) -> None:
-            self.exceptions: list[Exception] = []
-            self.status: object | None = None
-
-        def get_span_context(self) -> _SpanContext:
-            return _SpanContext()
-
-        def record_exception(self, error: Exception) -> None:
-            self.exceptions.append(error)
-
-        def set_status(self, status: object) -> None:
-            self.status = status
-
-    span = _Span()
-    monkeypatch.setattr(otel_trace, "get_current_span", lambda: span)
+    exporter = in_memory.InMemorySpanExporter()
+    monkeypatch.setattr(otel_tracing_module, "build_otlp_exporter", lambda *_: exporter)
 
     app = FastAPI()
 
@@ -157,13 +142,20 @@ def test_middleware_records_exception_on_active_span(
         app,
         ObservabilitySettings(app_name="test", service="svc", environment="test"),
         metrics_enabled=False,
+        otel_settings=OTelSettings(enabled=True),
     )
 
     response = TestClient(app, raise_server_exceptions=False).get("/boom-span")
     assert response.status_code == 500
-    assert span.exceptions
-    assert isinstance(span.exceptions[0], RuntimeError)
-    assert span.status is not None
+
+    otel_trace = pytest.importorskip("opentelemetry.trace")
+    otel_trace.get_tracer_provider().force_flush()
+    [server_span] = [
+        span for span in exporter.get_finished_spans() if span.kind.name == "SERVER"
+    ]
+    assert [event.name for event in server_span.events] == ["exception"]
+    assert server_span.status.status_code.name == "ERROR"
+
 
 def test_extract_scope_client_ip_contract() -> None:
     from fastapiobserver.middleware import _extract_scope_client_ip
