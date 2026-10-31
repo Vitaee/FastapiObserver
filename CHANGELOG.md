@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [1.14.0] - 2026-11-01
+
 ### Security
 - `hash` redaction, used by the `gdpr` preset, hashed values with plain SHA-256. Emails, phone numbers and IP addresses hashed that way can be recovered by hashing candidates until one matches. Values are now HMAC-SHA256 with the key in `OBS_REDACTION_HASH_KEY` or `SecurityPolicy(hash_key=...)`, written as `hmac-sha256:<hex>` instead of `sha256:<hex>`. Without a key, a random one is picked at startup and `observability.redaction.hash_key_missing` is logged. **Hashes change once on upgrade; queries that match `sha256:` need updating.** Affected: every earlier release that used the `gdpr` preset or `OBS_REDACTION_MODE=hash`.
 
