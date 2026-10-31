@@ -69,8 +69,17 @@ class RequestState:
 
 
 def route_template(scope: Mapping[str, Any]) -> str | None:
-    """The matched route's template, such as ``/users/{user_id}``, once routing has run."""
-    template = getattr(scope.get("route"), "path", None)
+    """The matched route's template, such as ``/users/{user_id}``, once routing has run.
+
+    Since FastAPI 0.137, ``scope["route"].path`` leaves out prefixes given to
+    ``include_router()`` and those of outer routers. FastAPI keeps the full
+    template in its effective route context, set for routes in included routers.
+    """
+    fastapi_scope = scope.get("fastapi")
+    context = (
+        fastapi_scope.get("effective_route_context") if isinstance(fastapi_scope, dict) else None
+    )
+    template = getattr(context, "path", None) or getattr(scope.get("route"), "path", None)
     return template if isinstance(template, str) and template else None
 
 

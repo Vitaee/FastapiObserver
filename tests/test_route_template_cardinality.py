@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import FastAPI
+from fastapi import APIRouter, FastAPI
 from fastapi.testclient import TestClient
 
 from fastapiobserver import ObservabilitySettings, install_observability
@@ -88,3 +88,38 @@ def test_scanner_404s_share_one_metrics_label() -> None:
     assert after_probes - before == 20
     assert unmatched_requests() == after_probes
     assert not any(path in client.get("/metrics").text for path in probes)
+
+
+def test_routers_included_with_a_prefix_keep_it_in_the_label() -> None:
+    # Since FastAPI 0.137, scope["route"].path leaves out prefixes given to
+    # include_router() and those of outer routers (fastapi/fastapi#16051).
+    app = FastAPI()
+    v1, v2, inner = APIRouter(), APIRouter(), APIRouter()
+
+    @v1.get("/items/{item_id}")
+    def v1_item(item_id: str) -> dict[str, str]:
+        return {}
+
+    @v2.get("/items/{item_id}")
+    def v2_item(item_id: str) -> dict[str, str]:
+        return {}
+
+    @inner.get("/ping")
+    def ping() -> dict[str, str]:
+        return {}
+
+    v2.include_router(inner, prefix="/admin")
+    app.include_router(v1, prefix="/v1")
+    app.include_router(v2, prefix="/v2")
+    install_observability(app, ObservabilitySettings(metrics_enabled=True))
+    client = TestClient(app)
+    for path in ("/v1/items/1", "/v2/items/1", "/v2/admin/ping"):
+        assert client.get(path).status_code == 200
+
+    labels = {
+        line.split('path="', 1)[1].split('"', 1)[0]
+        for line in client.get("/metrics").text.splitlines()
+        if line.startswith("http_requests_total{")
+    }
+    assert {"/v1/items/{item_id}", "/v2/items/{item_id}", "/v2/admin/ping"} <= labels
+    assert "/items/{item_id}" not in labels
