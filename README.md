@@ -74,7 +74,7 @@ Explicit variables and Python arguments always win over profile defaults. Every 
 - **Request IDs** taken from `X-Request-ID` when the caller is a trusted proxy, generated otherwise, returned in the response and passed on to the services you call, so one ID finds a request's logs in every service.
 - **Redaction on by default.** Passwords, tokens, API keys, `Authorization` and cookies are masked before anything is written. Presets cover stricter needs (`strict`, `pci`, `gdpr`).
 - **Prometheus metrics** labelled by route template (`/orders/{order_id}`), and 404s for paths no route matches share one `<unmatched>` label, so neither IDs nor scanners explode cardinality.
-- **OpenTelemetry traces** with `trace_id` and `span_id` in every log line, and optional log export over OTLP.
+- **OpenTelemetry traces**, from FastAPI's own support on 0.142 and later, with `trace_id` and `span_id` in every log line, and optional log export over OTLP, redacted like everything else.
 - **Non-blocking log writes.** Lines are written from a background thread, so a slow stdout never stalls the event loop.
 - **Help finding what slows a request down.** Opt-in: a warning with the stack of any sync call that blocks the event loop, and `DEBUG` lines written only for requests that fail. With tracing on, each request line counts its queries and outbound HTTP calls, and a query run once per item (N+1) gets a warning. With metrics on, `/metrics` shows how many bytes of logs each route writes, and `LOG_SAMPLE_RATE` keeps a share of successful requests, chosen by trace ID, while failed and slow requests are always written in full.
 
@@ -86,14 +86,16 @@ Optional extras: runtime log-level control, a tamper-evident audit log, SQLAlche
 
 ## How it compares
 
-| | fastapi-observer | structlog or loguru | OpenTelemetry auto-instrumentation | Logfire |
-|---|---|---|---|---|
-| JSON log line per request | Built in | You write the middleware | No | A span per request |
-| Request ID on every log line | Built in | You wire it up | No | Trace IDs |
-| Redaction by default | Yes, with presets | You write a processor | No | Yes |
-| Prometheus `/metrics` | Built in | No | Through an exporter | No |
-| Traces | OpenTelemetry | No | Yes | Yes |
-| Where data goes | stdout, Prometheus and any OTLP backend | stdout or files | Any OTLP backend | Logfire's platform |
+| | fastapi-observer | FastAPI 0.142+ built in | structlog or loguru | OpenTelemetry auto-instrumentation | Logfire |
+|---|---|---|---|---|---|
+| JSON log line per request | Built in | No, only errors as OTLP log records | You write the middleware | No | A span per request |
+| Request ID on every log line | Built in | No | You wire it up | No | Trace IDs |
+| Redaction by default | Yes, with presets | Signed-URL query parameters only | You write a processor | No | Yes |
+| Prometheus `/metrics` | Built in | Through an exporter | No | Through an exporter | No |
+| Traces | FastAPI's own on 0.142+, OpenTelemetry's instrumentation before | Yes, with spans for dependencies, the endpoint and serialization | No | Yes | Yes |
+| Where data goes | stdout, Prometheus and any OTLP backend | Any OTLP backend | stdout or files | Any OTLP backend | Logfire's platform |
+
+Since 0.142, FastAPI traces requests on its own once an OpenTelemetry provider is set up. fastapi-observer uses that for traces and adds the rest of the first column.
 
 **When not to use it:**
 
