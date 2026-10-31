@@ -351,3 +351,23 @@ def test_auto_discover_catches_and_logs_otel_exclusion_errors(
         fastapi_module._auto_discover_excluded_routes(app, settings)
         
     assert "observability.fastapi.otel_exclusion_update_failed" in caplog.text
+
+
+def test_install_logs_the_settings_that_took_effect(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    monkeypatch.setenv("OBS_PROFILE", "production")
+    monkeypatch.setenv(
+        "OTEL_EXPORTER_OTLP_ENDPOINT",
+        "https://user:s3cret@collector.internal:4318/v1/traces?api_key=abc",
+    )
+
+    with caplog.at_level(logging.INFO, logger="fastapiobserver.fastapi"):
+        install_observability(FastAPI(), metrics_enabled=False)
+
+    [record] = [r for r in caplog.records if r.getMessage() == "observability.configured"]
+    event = record.event  # type: ignore[attr-defined]
+    assert event["profile"] == "production"
+    assert event["redaction_mode"] == "drop"  # from the production profile's strict preset
+    assert event["metrics_path"] is None
+    assert event["otlp_endpoint"] == "https://collector.internal:4318/v1/traces"

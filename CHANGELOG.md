@@ -4,6 +4,9 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- `install_observability()` writes one `observability.configured` line at startup with the settings that took effect: profile, log level, metrics path, OpenTelemetry endpoint, protocol and sampling, OTLP logs and metrics, redaction mode, body capture, trusted networks, request ID header, control plane path and enabled sinks. Endpoint credentials, query strings and tokens are left out.
+
 ### Security
 - Log sinks from installed packages load only when named in the new `OBS_LOG_SINKS` setting. Before, any installed package that declared a `fastapiobserver.log_sinks` entry point was imported at startup and received every log line. Entry points that aren't listed are never imported, and a `sinks.entry_point.not_enabled` warning names them. **If you use such a sink, add its entry-point name to `OBS_LOG_SINKS`.**
 - The runtime control plane only accepts callers whose address is in `OBS_TRUSTED_CIDRS`, checked before the token. A request that arrives through a proxy (it has `X-Forwarded-For`) is refused unless `OBS_HONOR_FORWARDED_HEADERS=true` resolves it to a trusted address, so the endpoint can't be reached, or its token guessed, through a public ingress. `mount_control_plane()` takes an optional `trusted_proxy_policy`. Tests that call the endpoint through Starlette's `TestClient` need `TestClient(app, client=("127.0.0.1", 50000))`, since its default caller, `testclient`, isn't an address.
