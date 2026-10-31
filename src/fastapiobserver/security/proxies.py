@@ -35,15 +35,20 @@ def resolve_client_ip(
     if not is_trusted_client_ip(client_ip, policy):
         return client_ip
 
-    forwarded_for = None
-    for k, v in headers:
-        if k.lower() == b"x-forwarded-for":
-            forwarded_for = v.decode("latin1")
-            break
-
-    if not forwarded_for:
-        return client_ip
-    first_hop = forwarded_for.split(",")[0].strip()
-    return first_hop or client_ip
+    # Each proxy appends the address it received the request from, so only the
+    # right-hand entries can be trusted; the left ones are whatever the client sent.
+    # Walk right to left and return the first hop that is not a trusted proxy.
+    # Repeated header lines form one list.
+    hops = [
+        hop.strip()
+        for k, v in headers
+        if k.lower() == b"x-forwarded-for"
+        for hop in v.decode("latin1").split(",")
+        if hop.strip()
+    ]
+    for hop in reversed(hops):
+        if not is_trusted_client_ip(hop, policy):
+            return hop
+    return hops[0] if hops else client_ip
 
 __all__ = ["is_trusted_client_ip", "resolve_client_ip"]

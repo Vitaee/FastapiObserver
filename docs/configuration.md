@@ -72,7 +72,7 @@ Notes:
 | `OBS_BODY_CAPTURE_MEDIA_TYPES` | - | CSV allowed media types for body capture |
 | `OBS_TRUSTED_PROXY_ENABLED` | `true` | Enable trusted-proxy policy |
 | `OBS_TRUSTED_CIDRS` | RFC1918 + loopback | CSV trusted CIDRs |
-| `OBS_HONOR_FORWARDED_HEADERS` | `false` | Trust forwarded headers |
+| `OBS_HONOR_FORWARDED_HEADERS` | `false` | Take the client IP from `X-Forwarded-For` when the direct peer is in `OBS_TRUSTED_CIDRS`: the rightmost address that is not a trusted proxy |
 
 Notes:
 - `OBS_HEADER_ALLOWLIST`, `OBS_EVENT_KEY_ALLOWLIST`, and `OBS_BODY_CAPTURE_MEDIA_TYPES` accept `none`, `null`, or `unset` to clear values.
