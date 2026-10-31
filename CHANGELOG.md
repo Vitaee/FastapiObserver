@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [1.7.0] - 2026-10-31
+
 ### Fixed
 - Database tracing now covers every engine. OpenTelemetry's SQLAlchemy instrumentor is a singleton that ignores a second `instrument()` call, so `install_observability(db_engine=[a, b])` or repeated `instrument_sqlalchemy()` calls traced only the first engine. All engines are now instrumented together.
 - When OpenTelemetry's SQLAlchemy instrumentation refuses the installed SQLAlchemy version (it currently supports versions below 2.1), fastapi-observer logs a `db_tracing.not_instrumented` warning instead of reporting `db_tracing.instrumented`.
