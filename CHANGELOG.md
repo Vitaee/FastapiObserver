@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [1.12.0] - 2026-10-31
+
 ### Security
 - With FastAPI 0.142 or later, OTLP log export on and tracing off, FastAPI's own OpenTelemetry support exported validation failures and unhandled exceptions, with exception messages and stack traces, through the logger provider fastapi-observer set up. Those records skipped fastapi-observer's redaction and duplicated its `request.failed` lines. FastAPI's own log export is now turned off whenever fastapi-observer exports OTLP logs. Affected: every earlier release used with FastAPI 0.142.0 (2026-09-29) or later, `OTEL_LOGS_ENABLED=true` and `OTEL_ENABLED=false`.
 
