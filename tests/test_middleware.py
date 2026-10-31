@@ -122,8 +122,18 @@ def test_middleware_classifies_unhandled_exception(caplog) -> None:
     assert request_logs[-1].event["http.response.status_code"] == 500
 
 
-def test_unhandled_exception_recorded_once_on_server_span(
+@pytest.mark.parametrize(
+    ("telemetry", "events", "error_type"),
+    [
+        ({}, [], "RuntimeError"),  # FastAPI's own tracing: no exception text in the trace
+        ({"tracing": False}, ["exception"], None),  # the instrumentation records it once
+    ],
+)
+def test_unhandled_exception_marks_the_server_span_once(
     monkeypatch: pytest.MonkeyPatch,
+    telemetry: dict[str, bool],
+    events: list[str],
+    error_type: str | None,
 ) -> None:
     in_memory = pytest.importorskip("opentelemetry.sdk.trace.export.in_memory_span_exporter")
     import fastapiobserver.otel.tracing as otel_tracing_module
@@ -132,7 +142,7 @@ def test_unhandled_exception_recorded_once_on_server_span(
     exporter = in_memory.InMemorySpanExporter()
     monkeypatch.setattr(otel_tracing_module, "build_otlp_exporter", lambda *_: exporter)
 
-    app = FastAPI()
+    app = FastAPI(telemetry=telemetry)  # type: ignore[arg-type]
 
     @app.get("/boom-span")
     def boom() -> None:
@@ -153,8 +163,9 @@ def test_unhandled_exception_recorded_once_on_server_span(
     [server_span] = [
         span for span in exporter.get_finished_spans() if span.kind.name == "SERVER"
     ]
-    assert [event.name for event in server_span.events] == ["exception"]
+    assert [event.name for event in server_span.events] == events
     assert server_span.status.status_code.name == "ERROR"
+    assert server_span.attributes.get("error.type") == error_type
 
 
 def test_extract_scope_client_ip_contract() -> None:

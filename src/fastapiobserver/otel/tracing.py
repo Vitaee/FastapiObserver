@@ -11,6 +11,7 @@ from fastapi import FastAPI
 from ..config import ObservabilitySettings
 from ..request_context import get_request_state
 from .lifecycle import close_on_app_shutdown
+from .native import trace_natively
 from .resource import (
     build_excluded_urls_csv,
     build_otlp_exporter,
@@ -39,9 +40,6 @@ def install_otel(
     trace_sdk = import_otel_module("opentelemetry.sdk.trace")
     trace_export = import_otel_module("opentelemetry.sdk.trace.export")
     sampling = import_otel_module("opentelemetry.sdk.trace.sampling")
-    fastapi_instrumentor_module = import_otel_module(
-        "opentelemetry.instrumentation.fastapi"
-    )
 
     set_trace_sampling_ratio(otel_settings.trace_sampling_ratio)
     tracer_provider = trace_api.get_tracer_provider()
@@ -100,17 +98,16 @@ def install_otel(
         tracer_provider.add_span_processor(_request_call_totals(trace_api, trace_sdk))
         _CALL_TOTALS_PROVIDERS.add(tracer_provider)
 
-    # --- Wire excluded URLs for noise control ---
+    # FastAPI 0.142+ traces requests itself, with spans for dependencies, the
+    # endpoint and serialization; older versions need OpenTelemetry's instrumentation.
     excluded_urls_str = build_excluded_urls_csv(settings)
-    instrument_kwargs: dict[str, Any] = {
-        "tracer_provider": tracer_provider,
-    }
-    if excluded_urls_str is not None:
-        instrument_kwargs["excluded_urls"] = excluded_urls_str
-
-    fastapi_instrumentor_module.FastAPIInstrumentor.instrument_app(
-        app, **instrument_kwargs
-    )
+    if not trace_natively(app, excluded_urls_str):
+        instrument_kwargs: dict[str, Any] = {"tracer_provider": tracer_provider}
+        if excluded_urls_str is not None:
+            instrument_kwargs["excluded_urls"] = excluded_urls_str
+        import_otel_module(
+            "opentelemetry.instrumentation.fastapi"
+        ).FastAPIInstrumentor.instrument_app(app, **instrument_kwargs)
 
     if provider_owned:
         close_on_app_shutdown(app, tracer_provider, shutdown=True)
