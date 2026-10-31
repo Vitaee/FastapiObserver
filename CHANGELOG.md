@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [1.5.0] - 2026-10-31
+
 ### Security
 - With `honor_forwarded_headers` on (`OBS_HONOR_FORWARDED_HEADERS=true`, off by default), the logged `client_ip` was the leftmost `X-Forwarded-For` entry, which the client controls: proxies such as nginx (`$proxy_add_x_forwarded_for`), AWS ALB and Traefik append to the header the client sent. Clients could log any IP they chose. The client IP is now the rightmost address that is not in `trusted_cidrs`, and repeated `X-Forwarded-For` lines are read as one list. Request ID and `traceparent` trust were not affected; they check the direct peer.
 
