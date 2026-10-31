@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- `LOG_SAMPLE_RATE`: the `INFO` and lower lines of only this share of requests are written, `request.completed` included. Requests are chosen by trace ID with the rule OpenTelemetry's `TraceIdRatioBased` sampler uses, so at the same ratio a request's lines are kept exactly when its trace is, in every service. Without a trace ID, the request ID is hashed. Failed requests, requests that take `LOG_SLOW_REQUEST_MS` (default 1000) or longer, `WARNING` and higher lines, and lines outside a request are always written. Metrics still count every request. At 0.1, CPU per request in `examples/benchmarks/request_cpu.py` went from 51 to 38 µs.
+- Decision record 0009, on sampling per request by trace ID.
+
 ## [1.10.0] - 2026-10-31
 
 ### Added

@@ -54,6 +54,7 @@ class RequestState:
 
     scope: Mapping[str, Any]
     user_context: dict[str, Any] | None = None
+    sampled: bool | None = None  # decided at its first record that needs it
     held_logs: deque[logging.LogRecord] | None = None
     calls: dict[str, list[float]] = field(default_factory=dict)  # kind -> [count, seconds]
     statements: dict[str, int] = field(default_factory=dict)

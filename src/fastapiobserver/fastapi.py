@@ -150,6 +150,8 @@ def install_observability(
                 "profile": os.getenv("OBS_PROFILE", "").strip().lower() or None,
                 "log_level": settings.log_level,
                 "log_level_on_error": settings.log_level_on_error,
+                "log_sample_rate": settings.log_sample_rate,
+                "log_slow_request_ms": settings.log_slow_request_ms,
                 "loop_block_threshold_ms": settings.loop_block_threshold_ms,
                 "metrics_path": (
                     settings.metrics_path

@@ -6,7 +6,7 @@ counts too. Prints the median overhead against the same app without
 fastapi-observer. Backs decision record 0008
 (docs/decisions/0008-one-state-object-per-request.md).
 
-    python examples/benchmarks/request_cpu.py [default|metrics|held] > /dev/null
+    python examples/benchmarks/request_cpu.py [default|metrics|held|sampled] > /dev/null
 
 To compare two versions, run it with ``PYTHONPATH`` set to each one's ``src``.
 """
@@ -38,6 +38,13 @@ SCOPE = {
     "http_version": "1.1",
     "root_path": "",
 }
+# Settings per mode; "metrics" also turns Prometheus on.
+MODES: dict[str, dict[str, Any]] = {
+    "default": {},
+    "metrics": {},
+    "held": {"log_level_on_error": "DEBUG"},
+    "sampled": {"log_sample_rate": 0.1},
+}
 
 
 def build(mode: str | None) -> FastAPI:
@@ -49,8 +56,9 @@ def build(mode: str | None) -> FastAPI:
         return {}
 
     if mode is not None:
-        settings = ObservabilitySettings(log_level_on_error="DEBUG" if mode == "held" else None)
-        install_observability(app, settings, metrics_enabled=mode == "metrics")
+        install_observability(
+            app, ObservabilitySettings(**MODES[mode]), metrics_enabled=mode == "metrics"
+        )
     return app
 
 

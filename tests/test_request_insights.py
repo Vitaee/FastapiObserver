@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from typing import Any
@@ -115,6 +116,71 @@ def test_user_context_set_in_a_sync_endpoint_reaches_the_request_line() -> None:
     assert me_line["user_context"] == {"user_id": "42"}
     assert "user_context" not in anonymous_line
     assert tenant_line["user_context"] == {"tenant": "acme"}
+
+
+def test_unsampled_requests_write_only_warnings_unless_they_fail_or_are_slow() -> None:
+    settings = ObservabilitySettings(log_sample_rate=0.0, log_slow_request_ms=50)
+    app = FastAPI()
+    log = logging.getLogger("tests.sampling")
+
+    @app.get("/fast")
+    async def fast() -> dict[str, str]:
+        log.info("fast detail")
+        log.warning("fast warning")
+        return {}
+
+    @app.get("/slow")
+    async def slow() -> dict[str, str]:
+        log.info("slow detail")
+        await asyncio.sleep(0.06)
+        return {}
+
+    @app.get("/fail")
+    def fail() -> dict[str, str]:
+        log.info("fail detail")
+        raise RuntimeError("boom")
+
+    install_observability(app, settings, metrics_enabled=False)
+    collector = _capture_logs(settings)
+    client = TestClient(app, raise_server_exceptions=False)
+    for path in ("/fast", "/slow", "/fail"):
+        client.get(path)
+    log.info("outside a request")
+    shutdown_logging()
+
+    messages = [payload["message"] for payload in collector.payloads]
+    assert "fast detail" not in messages
+    assert "fast warning" in messages
+    assert {"slow detail", "fail detail", "request.failed", "outside a request"} <= set(messages)
+    [completed] = [p for p in collector.payloads if p["message"] == "request.completed"]
+    assert completed["event"]["path"] == "/slow"
+
+
+def test_sampling_follows_the_trace_id_as_opentelemetry_does() -> None:
+    settings = ObservabilitySettings(log_sample_rate=0.5)
+    app = FastAPI()
+
+    @app.get("/")
+    async def root() -> dict[str, str]:
+        return {}
+
+    install_observability(app, settings, metrics_enabled=False)
+    collector = _capture_logs(settings)
+    client = TestClient(app, client=("127.0.0.1", 50000))  # trusted, so traceparent is read
+    kept, dropped = "0af7651916cd43dd" + "0" * 16, "0af7651916cd43dd" + "f" * 16
+    for trace_id in (kept, dropped):
+        client.get("/", headers={"traceparent": f"00-{trace_id}-b7ad6b7169203331-01"})
+    shutdown_logging()
+
+    completed = [p for p in collector.payloads if p["message"] == "request.completed"]
+    assert [payload["trace_id"] for payload in completed] == [kept]
+    sampling = pytest.importorskip("opentelemetry.sdk.trace.sampling")
+    sampler = sampling.TraceIdRatioBased(0.5)
+    decisions = [
+        sampler.should_sample(None, int(trace_id, 16), "GET /").decision.is_sampled()
+        for trace_id in (kept, dropped)
+    ]
+    assert decisions == [True, False]
 
 
 def test_runtime_log_level_keeps_holding_lower_records() -> None:

@@ -7,7 +7,7 @@ import time
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from ..config import ObservabilitySettings
-from ..logging.held import write_held_logs
+from ..logging.held import keep_request_logs
 from ..metrics import MetricsBackend, NoopMetricsBackend
 from ..request_context import get_request_state
 from ..security import (
@@ -160,11 +160,12 @@ class RequestLoggingMiddleware:
             level, message = logging.INFO, "request.completed"
 
         request_state = get_request_state()
+        failed = level >= logging.ERROR
+        if failed or duration_seconds * 1000 >= self.settings.log_slow_request_ms:
+            keep_request_logs(failed=failed)
         # Building and redacting the event is the costliest step; skip it when
         # the record would be dropped by the log level anyway.
         if self.logger.isEnabledFor(level):
-            if level >= logging.ERROR:
-                write_held_logs()
             safe_event = self.event_builder.build(
                 method=method,
                 path=path,
