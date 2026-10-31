@@ -1,5 +1,7 @@
 # Maintenance & Contributing
 
+Before changing the middleware, the log queue, redaction, the trust checks or the OpenTelemetry wiring, read the matching [design decision](decisions/index.md). Each one lists the tests that guard it.
+
 
 ## OTel Test Coverage
 
