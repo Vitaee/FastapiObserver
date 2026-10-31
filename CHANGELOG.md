@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- Design decision records in the docs: what was decided about the middleware, the log queue, the trust checks, redaction, metric labels, delegating to OpenTelemetry, and opt-in destinations, with the evidence for each and what it cost. Two measurement scripts back them: `examples/benchmarks/middleware_overhead.py` and `examples/benchmarks/slow_sink.py`.
+- A postmortem of the unredacted OTLP log export fixed in 1.5.0. It affected releases 0.2.1 to 1.4.1 with tracing and OTLP logs on, from 2026-03-04, when `opentelemetry-instrumentation-logging` 0.61b0 started adding a root handler. The 1.5.0 entry below said 0.66 and has been corrected.
+
 ## [1.8.0] - 2026-10-31
 
 ### Security
@@ -62,7 +66,7 @@ All notable changes to this project will be documented in this file.
 - With `honor_forwarded_headers` on (`OBS_HONOR_FORWARDED_HEADERS=true`, off by default), the logged `client_ip` was the leftmost `X-Forwarded-For` entry, which the client controls: proxies such as nginx (`$proxy_add_x_forwarded_for`), AWS ALB and Traefik append to the header the client sent. Clients could log any IP they chose. The client IP is now the rightmost address that is not in `trusted_cidrs`, and repeated `X-Forwarded-For` lines are read as one list. Request ID and `traceparent` trust were not affected; they check the direct peer.
 
 ### Fixed
-- With tracing enabled, the library no longer calls OpenTelemetry's `LoggingInstrumentor`. Since `opentelemetry-instrumentation-logging` 0.66 it attaches its own handler to the root logger, which bypassed the queue and redaction: with OTLP logs enabled, every record was exported a second time without redaction.
+- With tracing enabled, the library no longer calls OpenTelemetry's `LoggingInstrumentor`. Since `opentelemetry-instrumentation-logging` 0.61 it attaches its own handler to the root logger, which bypassed the queue and redaction: with OTLP logs enabled, every record was exported a second time without redaction.
 - Exceptions logged through the queue keep the structured `error` field (type, message, stack trace, fingerprint). The stdlib `QueueHandler.prepare()` dropped `exc_info` and appended the traceback to `message`.
 - `user_context` set with `set_user_context()` now appears in JSON logs. It was read on the queue listener thread, where the request's context variables are not visible.
 - The log `timestamp` is the time the record was created, not the time the background thread formatted it.

@@ -61,4 +61,14 @@ nav:
       - Performance Tuning: tuning.md
       - Advanced Operations: advanced.md
       - Benchmarks: benchmarks.md
+  - Design decisions:
+      - Overview: decisions/index.md
+      - 0001 Pure ASGI middleware: decisions/0001-pure-asgi-middleware.md
+      - 0002 Logs leave through a queue: decisions/0002-logs-leave-through-a-queue.md
+      - 0003 Trust only known peers: decisions/0003-trust-only-known-peers.md
+      - 0004 Redact before anything leaves: decisions/0004-redact-before-anything-leaves.md
+      - 0005 Route templates as labels: decisions/0005-route-templates-as-metric-labels.md
+      - 0006 Delegate to OpenTelemetry: decisions/0006-delegate-to-opentelemetry.md
+      - 0007 New destinations are opt-in: decisions/0007-new-destinations-are-opt-in.md
+      - "Postmortem: unredacted OTLP logs": postmortems/2026-10-otlp-logs-exported-unredacted.md
   - Contributing: contributing.md

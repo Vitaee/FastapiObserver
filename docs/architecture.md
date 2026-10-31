@@ -1,5 +1,7 @@
 # Architecture
 
+Why it's built this way, with the evidence and what each choice cost, is in the [design decisions](decisions/index.md).
+
 
 ## What `install_observability()` Wires Up
 
