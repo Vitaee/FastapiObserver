@@ -124,3 +124,13 @@ def test_runtime_control_settings_from_env(monkeypatch: pytest.MonkeyPatch) -> N
     assert settings.enabled is True
     assert settings.path == "/control"
     assert settings.token_env_var == "CONTROL_TOKEN"
+
+
+def test_list_settings_read_csv_or_json_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("METRICS_EXCLUDE_PATHS", "/health,/ready")
+    monkeypatch.setenv("OBS_LOG_SINKS", '["acme"]')
+
+    settings = ObservabilitySettings()
+
+    assert settings.metrics_exclude_paths == ("/health", "/ready")
+    assert settings.log_sinks == ("acme",)

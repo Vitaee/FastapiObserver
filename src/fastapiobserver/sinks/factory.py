@@ -53,8 +53,8 @@ def build_sink_handlers(
             )
         )
 
-    # Add entry-point discovered sinks
-    discover_entry_point_sinks()
+    # Add entry-point sinks named in OBS_LOG_SINKS
+    discover_entry_point_sinks(settings.log_sinks)
     for sink in get_registered_sinks().values():
         try:
             handlers.append((sink.create_handler(formatter), sink.name))

@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import Field, field_validator
+from pydantic_settings import NoDecode
 
-from .utils import InternalSettingsBase, normalize_path, parse_csv
+from .utils import InternalSettingsBase, normalize_path, parse_csv, parse_csv_tuple
 
 _HEADER_NAME_RE = re.compile(r"^[A-Za-z0-9-]+$")
 DEFAULT_METRICS_EXCLUDE_PATHS = (
@@ -69,7 +70,7 @@ class ObservabilitySettings(InternalSettingsBase):
     metrics_enabled: bool = Field(default=False, validation_alias="METRICS_ENABLED")
     metrics_backend: str = Field(default="prometheus", validation_alias="METRICS_BACKEND")
     metrics_path: str = Field(default="/metrics", validation_alias="METRICS_PATH")
-    metrics_exclude_paths: tuple[str, ...] = Field(
+    metrics_exclude_paths: Annotated[tuple[str, ...], NoDecode] = Field(
         default=DEFAULT_METRICS_EXCLUDE_PATHS,
         validation_alias="METRICS_EXCLUDE_PATHS",
     )
@@ -83,6 +84,11 @@ class ObservabilitySettings(InternalSettingsBase):
     # --- otel trace noise control ---
     otel_excluded_urls: tuple[str, ...] | None = Field(
         default=None, validation_alias="OTEL_EXCLUDED_URLS"
+    )
+
+    # --- extra sinks from installed packages ---
+    log_sinks: Annotated[tuple[str, ...], NoDecode] = Field(
+        default=(), validation_alias="OBS_LOG_SINKS"
     )
 
     # --- logtail (Better Stack) ---
@@ -177,6 +183,11 @@ class ObservabilitySettings(InternalSettingsBase):
         if isinstance(parsed, tuple):
             return parsed
         return DEFAULT_METRICS_EXCLUDE_PATHS
+
+    @field_validator("log_sinks", mode="before")
+    @classmethod
+    def _parse_log_sinks(cls, value: object) -> tuple[str, ...]:
+        return parse_csv_tuple(value, ())
 
     @field_validator("metrics_exclude_paths")
     @classmethod

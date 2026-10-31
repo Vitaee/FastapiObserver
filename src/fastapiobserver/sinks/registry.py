@@ -25,8 +25,8 @@ def get_registered_sinks() -> dict[str, LogSink]:
 
 def clear_sinks() -> None:
     """Remove all registered sinks (useful for testing)."""
-    from .discovery import _set_discovered
-    _set_discovered(False)
+    from .discovery import _forget_loaded
+    _forget_loaded()
     with _SINK_REGISTRY_LOCK:
         _SINK_REGISTRY.clear()
 

@@ -209,3 +209,23 @@ def test_logtail_handler_emits_to_dlq_on_network_failure(
     assert dlq_stats["written_overflow"] == 0
     
     handler.close()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX file permissions")
+def test_logtail_dlq_files_are_owner_only(tmp_path) -> None:
+    dlq_dir = tmp_path / "dlq"
+    dlq = LogtailDLQ(
+        directory=str(dlq_dir),
+        filename="dlq.ndjson",
+        max_bytes=300,
+        backup_count=3,
+        compress=True,
+    )
+    for index in range(5):
+        dlq.submit(json.dumps({"msg": "x" * 100, "index": index}), reason="send_failed")
+    dlq.close()
+
+    files = sorted(dlq_dir.iterdir())
+    assert any(path.suffix == ".gz" for path in files)  # rotation happened
+    assert dlq_dir.stat().st_mode & 0o777 == 0o700
+    assert {path.stat().st_mode & 0o777 for path in files} == {0o600}

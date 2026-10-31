@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Security
+- Log sinks from installed packages load only when named in the new `OBS_LOG_SINKS` setting. Before, any installed package that declared a `fastapiobserver.log_sinks` entry point was imported at startup and received every log line. Entry points that aren't listed are never imported, and a `sinks.entry_point.not_enabled` warning names them. **If you use such a sink, add its entry-point name to `OBS_LOG_SINKS`.**
+- The runtime control plane only accepts callers whose address is in `OBS_TRUSTED_CIDRS`, checked before the token. A request that arrives through a proxy (it has `X-Forwarded-For`) is refused unless `OBS_HONOR_FORWARDED_HEADERS=true` resolves it to a trusted address, so the endpoint can't be reached, or its token guessed, through a public ingress. `mount_control_plane()` takes an optional `trusted_proxy_policy`. Tests that call the endpoint through Starlette's `TestClient` need `TestClient(app, client=("127.0.0.1", 50000))`, since its default caller, `testclient`, isn't an address.
+- The Logtail dead-letter directory is created with mode `0700` and its files, including compressed rotations, with `0600`. They used to follow the process umask, usually world-readable. Existing files and directories keep their permissions.
+
+### Fixed
+- `METRICS_EXCLUDE_PATHS` set as a comma-separated list, as the configuration guide shows, no longer stops the app from starting with a `SettingsError`. A JSON array still works.
+
 ## [1.7.0] - 2026-10-31
 
 ### Fixed

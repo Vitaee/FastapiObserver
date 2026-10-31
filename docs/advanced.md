@@ -130,6 +130,13 @@ degrade request-path logging. This includes custom sinks registered via the
 The core package stays intentionally lean; provider-specific sinks can be added
 as optional packages without changing `install_observability()`.
 
+A package provides a sink through the `fastapiobserver.log_sinks` entry-point
+group. Installing it isn't enough: list its entry-point name in `OBS_LOG_SINKS`
+(for example `OBS_LOG_SINKS=acme`), so a dependency can't start receiving your
+logs on its own. Entry points that are installed but not listed are never
+imported; a `sinks.entry_point.not_enabled` warning names them, and
+`sinks.entry_point.missing` names listed sinks that aren't installed.
+
 ```python
 settings = ObservabilitySettings(
     app_name="orders-api",
