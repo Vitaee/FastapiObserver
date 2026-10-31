@@ -186,17 +186,65 @@ class _LogQueueMetricsCollector:
             yield counter
 
 
-def _register_log_queue_metrics_collector() -> None:
-    # Per-worker queue stats would be meaningless once aggregated across processes.
+class _PoolMetricsCollector:
+    """Exposes thread pool and SQLAlchemy connection pool usage at scrape time."""
+
+    def collect(self) -> Iterator[Any]:
+        from prometheus_client.core import GaugeMetricFamily
+
+        from ..pools import db_pool_usage, thread_pool_usage
+
+        threads = thread_pool_usage()
+        if threads is not None:
+            busy, limit, waiting = threads
+            yield GaugeMetricFamily(
+                "fastapiobserver_threadpool_busy",
+                "Threads running sync endpoints and dependencies.",
+                value=busy,
+            )
+            yield GaugeMetricFamily(
+                "fastapiobserver_threadpool_limit",
+                "Threads AnyIO's default pool may run at once.",
+                value=limit,
+            )
+            yield GaugeMetricFamily(
+                "fastapiobserver_threadpool_waiting",
+                "Calls waiting for a thread.",
+                value=waiting,
+            )
+
+        db_pools = db_pool_usage()
+        if not db_pools:
+            return
+        checked_out = GaugeMetricFamily(
+            "fastapiobserver_db_pool_checked_out",
+            "Connections checked out of each SQLAlchemy pool.",
+            labels=["engine"],
+        )
+        limits = GaugeMetricFamily(
+            "fastapiobserver_db_pool_limit",
+            "Connections each SQLAlchemy pool may hand out: pool_size plus max_overflow.",
+            labels=["engine"],
+        )
+        for label, out, limit in db_pools:
+            checked_out.add_metric([label], out)
+            limits.add_metric([label], limit)
+        yield checked_out
+        yield limits
+
+
+def _register_collectors() -> None:
+    # Per-worker stats would be meaningless once aggregated across processes.
     if _multiprocess_dir():
         return
     from ..logging.volume import start_counting
 
     start_counting()
-    try:
-        _import_prometheus_client().REGISTRY.register(_LogQueueMetricsCollector())
-    except ValueError:
-        pass  # Already registered by an earlier backend build in this process.
+    for collector in (_LogQueueMetricsCollector(), _PoolMetricsCollector()):
+        try:
+            _import_prometheus_client().REGISTRY.register(collector)
+        except ValueError:
+            pass  # Already registered by an earlier backend build in this process.
 
 
 class PrometheusMetricsBackend:
@@ -288,7 +336,7 @@ def _build_prometheus_metrics_backend(
         environment=environment,
         exemplars_enabled=exemplars_enabled,
     )
-    _register_log_queue_metrics_collector()
+    _register_collectors()
     return backend
 
 

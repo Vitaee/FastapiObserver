@@ -91,6 +91,27 @@ A background thread checks that the event loop keeps running. When it hasn't run
 - The thread runs during the app's lifespan, so not with `uvicorn --lifespan off`.
 - Under heavy CPU load the loop can fall behind without one blocking call. The stack is then whatever was running at that moment.
 
+## Full thread and database pools
+
+Two pools make requests wait without using CPU, so latency climbs while CPU stays low:
+
+- AnyIO's thread pool runs sync (`def`) endpoints and dependencies, 40 threads at a time by default. When all are busy, the next sync call waits.
+- A SQLAlchemy `QueuePool` hands out at most `pool_size + max_overflow` connections. When all are checked out, the next session waits up to `pool_timeout` (30 s by default), then fails with `QueuePool limit ... reached`.
+
+fastapi-observer checks both as each request starts. While a pool is full, it writes a warning at most once a minute for that pool. For example:
+
+```json
+{"level": "WARNING", "logger": "fastapiobserver.pools", "message": "threadpool.saturated", "event": {"busy": 40, "limit": 40, "waiting": 12}}
+{"level": "WARNING", "logger": "fastapiobserver.pools", "message": "db.pool_exhausted", "event": {"engine": "postgresql://app@db/orders", "checked_out": 15, "limit": 15}}
+```
+
+New requests keep starting while every thread and connection is stuck, so a deadlock is reported too. Both warnings together match the deadlock in [fastapi/fastapi#6628](https://github.com/fastapi/fastapi/discussions/6628). Sync endpoints take every thread while they wait for a connection, and the sync dependencies that would close the open sessions need a thread to run.
+
+- The thread pool is watched once the app's lifespan starts.
+- Database pools are watched for the engines passed as `install_observability(app, db_engine=engine)`, with or without tracing. Pools without a limit, such as `NullPool`, are skipped.
+- With metrics on, `/metrics` shows the same numbers as gauges: `fastapiobserver_threadpool_busy`, `fastapiobserver_threadpool_limit`, `fastapiobserver_threadpool_waiting`, `fastapiobserver_db_pool_checked_out{engine}` and `fastapiobserver_db_pool_limit{engine}`.
+- Neither AnyIO nor SQLAlchemy reports how long one call waited, so there's no wait time per request.
+
 ## JSON Schema Contract
 
 Top-level fields:

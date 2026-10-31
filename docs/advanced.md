@@ -122,6 +122,8 @@ Queue pressure metrics exposed on `/metrics` (Prometheus mode):
 - `fastapiobserver_log_queue_dropped_total{reason="drop_oldest|drop_newest"}`
 - `fastapiobserver_log_queue_blocked_total`
 - `fastapiobserver_log_queue_block_timeouts_total`
+- `fastapiobserver_threadpool_busy`, `fastapiobserver_threadpool_limit` and `fastapiobserver_threadpool_waiting`: AnyIO's thread pool, which runs sync endpoints and dependencies. See [full thread and database pools](logging.md#full-thread-and-database-pools).
+- `fastapiobserver_db_pool_checked_out{engine}` and `fastapiobserver_db_pool_limit{engine}`: each SQLAlchemy `QueuePool` passed as `db_engine`.
 - `fastapiobserver_log_bytes_total{route}`: bytes of JSON log lines written, by the route template of the request that wrote them. Lines written outside a request are counted as `<none>`, and requests that matched no route as `<unmatched>`. A line written to several sinks counts once. Use it to see which routes drive your log bill.
 
 ### Sink circuit breaker
