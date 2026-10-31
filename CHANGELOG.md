@@ -12,6 +12,9 @@ All notable changes to this project will be documented in this file.
 - `fastapiobserver_log_bytes_total{route}` on `/metrics`: bytes of JSON log lines written, by the route template of the request that wrote them. A line written to several sinks counts once.
 - Decision record 0008, on the per-request state object behind these, and `examples/benchmarks/request_cpu.py`, which measures CPU per request. These features add about 2 µs per request with all of them off.
 
+### Fixed
+- `set_user_context()` called in a sync (`def`) endpoint or dependency now appears on the request's `request.completed` line. It used to be set only in the thread pool's copy of the context, which the middleware never sees.
+
 ## [1.9.0] - 2026-10-31
 
 ### Added

@@ -8,7 +8,12 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 import pytest
 
-from fastapiobserver import ObservabilitySettings, OTelSettings, install_observability
+from fastapiobserver import (
+    ObservabilitySettings,
+    OTelSettings,
+    install_observability,
+    set_user_context,
+)
 from fastapiobserver.logging import (
     get_log_bytes_by_route,
     get_log_level,
@@ -70,6 +75,46 @@ def test_failed_request_writes_its_held_debug_logs() -> None:
     failed = collector.payloads[messages.index("request.failed")]
     assert held["level"] == "DEBUG"
     assert held["request_id"] == failed["request_id"]
+
+
+def test_user_context_set_in_a_sync_endpoint_reaches_the_request_line() -> None:
+    settings = ObservabilitySettings()
+    app = FastAPI()
+
+    @app.get("/me")
+    def me() -> dict[str, str]:  # sync: runs in the thread pool with a copy of the context
+        set_user_context({"user_id": "42"})
+        return {}
+
+    @app.get("/anonymous")
+    def anonymous() -> dict[str, str]:
+        return {}
+
+    install_observability(app, settings, metrics_enabled=False)
+
+    @app.middleware("http")  # added after install_observability, so it runs outside it
+    async def set_tenant(request: Any, call_next: Any) -> Any:
+        if request.url.path == "/tenant":
+            set_user_context({"tenant": "acme"})
+        return await call_next(request)
+
+    @app.get("/tenant")
+    def tenant() -> dict[str, str]:
+        return {}
+
+    collector = _capture_logs(settings)
+    client = TestClient(app)
+    client.get("/me")
+    client.get("/anonymous")
+    client.get("/tenant")
+    shutdown_logging()
+
+    me_line, anonymous_line, tenant_line = [
+        p for p in collector.payloads if p["message"] == "request.completed"
+    ]
+    assert me_line["user_context"] == {"user_id": "42"}
+    assert "user_context" not in anonymous_line
+    assert tenant_line["user_context"] == {"tenant": "acme"}
 
 
 def test_runtime_log_level_keeps_holding_lower_records() -> None:

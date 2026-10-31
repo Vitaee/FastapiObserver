@@ -10,7 +10,7 @@ Three features add to a request while it runs, and the middleware reads the resu
 - counting its database queries and outbound HTTP calls, and spotting one query repeated per item (N+1);
 - labelling each log line with its route for `fastapiobserver_log_bytes_total`.
 
-The code that adds runs elsewhere: a sync endpoint in the thread pool, an OpenTelemetry span processor, a log filter. A context variable *set* there doesn't reach the middleware, because a sync endpoint runs in a copy of the context. That's why `set_user_context()` in a sync endpoint is lost ([0001](0001-pure-asgi-middleware.md)).
+The code that adds runs elsewhere: a sync endpoint in the thread pool, an OpenTelemetry span processor, a log filter. A context variable *set* there doesn't reach the middleware, because a sync endpoint runs in a copy of the context. That's also why `set_user_context()` in a sync endpoint used to be lost ([0001](0001-pure-asgi-middleware.md)). It now stores its value on the same object.
 
 ## Decision
 
@@ -33,7 +33,7 @@ CPU per request, log line included, from [`examples/benchmarks/request_cpu.py`](
 
 Turning off any single step saved at most 0.4 µs; the cost is spread over creating, reading and clearing the object.
 
-Tests in [`test_request_insights.py`](https://github.com/Vitaee/FastapiObserver/blob/main/tests/test_request_insights.py) cover lines held in a sync endpoint, totals from client spans, and bytes counted once across two sinks. [`test_loop_watchdog.py`](https://github.com/Vitaee/FastapiObserver/blob/main/tests/test_loop_watchdog.py) blocks a real endpoint.
+Tests in [`test_request_insights.py`](https://github.com/Vitaee/FastapiObserver/blob/main/tests/test_request_insights.py) cover lines held in a sync endpoint, user context set in a sync endpoint, totals from client spans, and bytes counted once across two sinks. [`test_loop_watchdog.py`](https://github.com/Vitaee/FastapiObserver/blob/main/tests/test_loop_watchdog.py) blocks a real endpoint.
 
 ## What it cost
 
