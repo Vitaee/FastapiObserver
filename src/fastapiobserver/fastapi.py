@@ -34,6 +34,7 @@ from .otel import (
     install_otel_logs,
     install_otel_metrics,
 )
+from .otel.native import keep_native_logs_out
 from .propagation import install_request_id_propagation
 from .security import SecurityPolicy, TrustedProxyPolicy
 
@@ -217,6 +218,8 @@ def _setup_structured_logging(
             otel_settings=otel_settings,
             security_policy=security_policy,
         )
+        if otel_log_handler is not None:
+            keep_native_logs_out(app)
         if logs_mode == "otlp" and otel_log_handler is None:
             raise RuntimeError(
                 "OTLP log mode requires a configured OTLP log handler. "

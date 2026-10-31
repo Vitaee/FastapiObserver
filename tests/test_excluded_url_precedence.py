@@ -72,7 +72,8 @@ def test_install_otel_passes_empty_excluded_urls(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Integration: install_otel actually passes excluded_urls='' to instrument_app
-    when otel_excluded_urls is explicitly set to empty."""
+    when otel_excluded_urls is explicitly set to empty. FastAPI's own tracing is
+    off, so the instrumentation is used, as on FastAPI before 0.142."""
     pytest.importorskip("opentelemetry.instrumentation.fastapi")
 
     from fastapi import FastAPI
@@ -87,7 +88,7 @@ def test_install_otel_passes_empty_excluded_urls(
 
     monkeypatch.setattr(FastAPIInstrumentor, "instrument_app", spy_instrument_app)
 
-    app = FastAPI()
+    app = FastAPI(telemetry={"tracing": False})
     settings = ObservabilitySettings(otel_excluded_urls="")  # type: ignore[arg-type]
     otel_settings = OTelSettings(enabled=True, service_name="test-svc")
 

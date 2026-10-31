@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Security
+- With FastAPI 0.142 or later, OTLP log export on and tracing off, FastAPI's own OpenTelemetry support exported validation failures and unhandled exceptions, with exception messages and stack traces, through the logger provider fastapi-observer set up. Those records skipped fastapi-observer's redaction and duplicated its `request.failed` lines. FastAPI's own log export is now turned off whenever fastapi-observer exports OTLP logs. Affected: every earlier release used with FastAPI 0.142.0 (2026-09-29) or later, `OTEL_LOGS_ENABLED=true` and `OTEL_ENABLED=false`.
+
+### Changed
+- On FastAPI 0.142 and later, request tracing uses FastAPI's own OpenTelemetry support instead of OpenTelemetry's FastAPI instrumentation. Traces gain spans for dependency resolution, the endpoint and serialization. Excluded URLs still apply. CPU added per traced request went from 187 to 175 µs in `examples/benchmarks/request_cpu.py`. Older FastAPI versions are unchanged, and `FastAPI(telemetry={"tracing": False})` keeps the instrumentation.
+- A failed request's server span has `error.type` and an `ERROR` status instead of an exception event. The exception message and stack trace are in the redacted `request.failed` log line, which carries the same `trace_id`.
+- With OTLP metrics on, HTTP server metrics come from FastAPI: `http.server.request.duration` (seconds) and `http.server.active_requests`. The instrumentation's `http.server.duration` (milliseconds) and `http.server.response.size` are gone. **Dashboards and alerts on those names need updating.**
+
+### Added
+- Decision record 0010, on tracing with FastAPI's own OpenTelemetry.
+
 ## [1.11.1] - 2026-10-31
 
 ### Fixed

@@ -13,6 +13,7 @@ Each record says what was decided, the evidence for it and what it cost. Read th
 | [0007](0007-new-destinations-are-opt-in.md) | New destinations and controls are opt-in | Sinks from other packages, the control plane, metrics and OTLP export stay off until configured. |
 | [0008](0008-one-state-object-per-request.md) | One state object per request | Held log lines, user context, query totals and log bytes reach the middleware from sync endpoints and span processors. Costs about 2 µs per request. |
 | [0009](0009-sample-logs-per-request-by-trace-id.md) | Sample logs per request, by trace ID | A request's `INFO` lines are kept or dropped together, the same way as its trace in every service. Failed and slow requests are always kept. |
+| [0010](0010-trace-with-fastapis-own-opentelemetry.md) | Trace with FastAPI's own OpenTelemetry | On FastAPI 0.142+, FastAPI traces requests itself, and its own log export stays off so error logs go through redaction. |
 
 ## Postmortems
 

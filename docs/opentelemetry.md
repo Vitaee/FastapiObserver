@@ -46,6 +46,9 @@ install_observability(
 ```
 
 Design details:
+- On FastAPI 0.142 and later, requests are traced by FastAPI's own OpenTelemetry support, with spans for dependency resolution, the endpoint and serialization. Older versions, or `FastAPI(telemetry={"tracing": False})`, use OpenTelemetry's FastAPI instrumentation. See [decision 0010](decisions/0010-trace-with-fastapis-own-opentelemetry.md).
+- A failed request's server span has `error.type` and an `ERROR` status. The exception message and stack trace stay in the redacted `request.failed` log line, which carries the same `trace_id`.
+- When OTLP log export is on, FastAPI's own error log export is turned off, so error logs reach the backend once, redacted.
 - Reuses an externally configured tracer provider if one already exists.
 - Injects trace IDs into application logs for log-trace correlation.
 - Supports runtime sampling updates through the control plane.
