@@ -36,7 +36,7 @@ Standard request event fields include:
 - `client_ip`
 - `error_type`
 - OTel semantic aliases (`http.request.method`, `url.path`, `http.response.status_code`)
-- `db` and `http`: the count and total time of the request's database queries and outbound HTTP calls, with tracing on and the clients instrumented. See [database tracing](db-tracing.md#query-count-and-time-on-the-request-line)
+- `db` and `http`: the count and total time of the request's database queries and outbound HTTP calls. Queries on the SQLAlchemy engines passed as `db_engine` are always counted; other database and HTTP clients are counted from their spans, with tracing on and the clients instrumented. See [database tracing](db-tracing.md#query-count-and-time-on-the-request-line)
 
 ## Debug logs for failed requests
 
@@ -75,7 +75,7 @@ The lines of a request that isn't sampled are held until it ends, at most the la
 
 ## Calls that block the event loop
 
-A sync call inside `async def`, such as `requests.get`, `time.sleep` or a sync database driver, stops every request on the worker until it returns. Set a threshold to find them:
+A sync call inside `async def`, such as `requests.get`, `time.sleep` or a sync database driver, stops every request on the worker until it returns. The `production` profile watches for them at 250 ms. Without it, set a threshold:
 
 ```bash
 OBS_LOOP_BLOCK_THRESHOLD_MS=200
@@ -91,6 +91,7 @@ A background thread checks that the event loop keeps running. When it hasn't run
 - To fix one, make the endpoint a plain `def`, which FastAPI runs in its thread pool, wrap the call in `await asyncio.to_thread(...)`, or use an async client.
 - The thread runs during the app's lifespan, so not with `uvicorn --lifespan off`.
 - Under heavy CPU load the loop can fall behind without one blocking call. The stack is then whatever was running at that moment.
+- It costs nothing measurable per request, and about 0.25% of one core per worker while idle. See [decision record 0014](decisions/0014-diagnosis-without-tracing.md).
 
 ## Full thread and database pools
 

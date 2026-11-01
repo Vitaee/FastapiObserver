@@ -53,13 +53,13 @@ Engines passed as `db_engine` are also watched for a full connection pool, with 
 
 ## Query count and time on the request line
 
-With tracing on, each request line counts the request's database queries and outbound HTTP calls, from the client spans OpenTelemetry records for them:
+Each request line counts the request's database queries and, with tracing on, its outbound HTTP calls:
 
 ```json
 {"message": "request.completed", "event": {"path": "/orders", "duration_ms": 182.4, "db": {"count": 12, "ms": 140.3}, "http": {"count": 1, "ms": 31.0}}}
 ```
 
-`db` counts spans from instrumented database clients, such as the engines passed as `db_engine`. `http` counts spans from instrumented HTTP clients, such as `instrument_httpx_client()` and `instrument_requests_session()`. A request that wasn't sampled has neither field.
+`db` counts every query on the engines passed as `db_engine`, from SQLAlchemy's own events, so it works without tracing and on every request. Other database clients, such as Redis or a driver used directly, are counted from their OpenTelemetry spans, so only with tracing on and for sampled requests. `http` counts spans from instrumented HTTP clients, such as `instrument_httpx_client()` and `instrument_requests_session()`.
 
 ### N+1 queries
 
@@ -198,7 +198,8 @@ Runnable demo:
 | `instrument_sqlalchemy_async` called with non-AsyncEngine | Raises `TypeError` (missing `sync_engine`) |
 | `db_engine` set but OTel disabled in `install_observability` | Instrumentation path is skipped |
 | `db_commenter_enabled=False` | DB spans still available; SQL comments disabled |
-| Request not sampled | No `db` or `http` field on its request line, and no N+1 check |
+| Request not sampled | SQLAlchemy queries on `db_engine` engines are still counted and checked for N+1; spans from other clients aren't |
+| SQLAlchemy 2.1 | OpenTelemetry's instrumentation supports SQLAlchemy before 2.1, so there are no query spans or SQL comments (`db_tracing.not_instrumented` is logged); query counts and N+1 still work |
 
 ## Production Best Practices
 

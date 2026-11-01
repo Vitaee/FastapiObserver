@@ -23,7 +23,7 @@ The line is written at `INFO`, so it's hidden when `OBS_LOG_LEVEL` is `WARNING` 
 Current profile defaults:
 
 - `development`: sets `OBS_LOG_LEVEL=DEBUG`.
-- `production`: sets `OBS_LOG_LEVEL=INFO`, `OBS_LOG_QUEUE_MAX_SIZE=20000`, `OBS_REDACTION_PRESET=strict`.
+- `production`: sets `OBS_LOG_LEVEL=INFO`, `OBS_LOG_QUEUE_MAX_SIZE=20000`, `OBS_REDACTION_PRESET=strict` and `OBS_LOOP_BLOCK_THRESHOLD_MS=250`. `OBS_LOG_LEVEL_ON_ERROR` stays off, since each held `DEBUG` record costs CPU; see [decision record 0014](decisions/0014-diagnosis-without-tracing.md).
 
 Notes:
 - Variables you set yourself win over the profile's.
@@ -42,7 +42,7 @@ Notes:
 | `OBS_LOG_LEVEL_ON_ERROR` | - | A lower level, such as `DEBUG`, for requests that fail: their lines at this level are held and written only if the request ends in a 5xx or an unhandled exception. See [debug logs for failed requests](logging.md#debug-logs-for-failed-requests) |
 | `OBS_LOG_SAMPLE_RATE` | `1.0` | Share of requests whose `INFO` and lower lines are written, chosen by trace ID. Failed and slow requests, and `WARNING` and higher lines, are always written. See [sampling request logs](logging.md#sampling-request-logs) |
 | `OBS_LOG_SLOW_REQUEST_MS` | `1000` | With sampling, requests that take at least this long are written in full |
-| `OBS_LOOP_BLOCK_THRESHOLD_MS` | - | Write `event_loop.blocked`, with the stack of the blocking call, when the event loop doesn't run for this many milliseconds. See [calls that block the event loop](logging.md#calls-that-block-the-event-loop) |
+| `OBS_LOOP_BLOCK_THRESHOLD_MS` | `250` with the `production` profile, off otherwise | Write `event_loop.blocked`, with the stack of the blocking call, when the event loop doesn't run for this many milliseconds. See [calls that block the event loop](logging.md#calls-that-block-the-event-loop) |
 | `OBS_LOG_DIR` | - | Optional file log directory |
 | `OBS_LOG_QUEUE_MAX_SIZE` | `10000` | Max in-memory records in core log queue |
 | `OBS_LOG_QUEUE_OVERFLOW_POLICY` | `drop_oldest` | Queue overflow behavior: `drop_oldest`, `drop_newest`, `block` |
