@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [1.16.0] - 2026-11-01
+
 ### Fixed
 - The Strawberry extension made every GraphQL request fail with a 500 on current Strawberry (0.339.1). It didn't subclass Strawberry's `SchemaExtension`, and Strawberry calls methods it lacked. It now subclasses it, works with both sync and async execution, and reads the operation name after the query is parsed, so an operation named only in the query text is found. Its tests now run against real Strawberry instead of mocks.
 - The runtime control plane answered an `Authorization` header with non-ASCII characters with a 500 instead of a 401.
