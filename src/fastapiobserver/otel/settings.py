@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import threading
-from typing import Literal, Mapping
+from typing import Any, Literal, Mapping, Self
+from urllib.parse import unquote
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings
 
-from ..config import ObservabilitySettings
 from ..utils import EnvLoadable, InternalSettingsBase, normalize_protocol
 
 OTEL_PROTOCOLS = {"grpc", "http/protobuf"}
@@ -61,29 +61,6 @@ class OTelSettings(_BaseOTelSettings):
     @classmethod
     def _parse_resource_attributes(cls, value: object) -> dict[str, str]:
         return parse_resource_attributes(value)
-
-    @classmethod
-    def from_env(
-        cls,
-        settings: ObservabilitySettings | None = None,
-    ) -> "OTelSettings":
-        default_service_name = settings.service if settings else "api"
-        default_service_version = settings.version if settings else "0.0.0"
-        default_environment = settings.environment if settings else "development"
-        env_settings = cls._env_values()
-
-        return cls(
-            enabled=bool(env_settings["enabled"]),
-            service_name=env_settings["service_name"] or default_service_name,
-            service_version=env_settings["service_version"] or default_service_version,
-            environment=env_settings["environment"] or default_environment,
-            otlp_endpoint=env_settings["otlp_endpoint"],
-            protocol=env_settings["protocol"],
-            trace_sampling_ratio=float(env_settings["trace_sampling_ratio"]),
-            extra_resource_attributes=parse_resource_attributes(
-                env_settings["extra_resource_attributes"]
-            ),
-        )
 
     @classmethod
     def _env_settings_class(cls) -> type[BaseSettings]:
@@ -155,6 +132,13 @@ def runtime_sampler_installed() -> bool:
 
 
 class _BaseOTelEnvSettings(InternalSettingsBase):
+    """Endpoints aren't read here: the OTLP exporters read the specification's
+    ``OTEL_EXPORTER_OTLP_*ENDPOINT`` variables themselves."""
+
+    enabled: bool = False
+    # The specification's switch for the whole SDK: it overrides every enable flag.
+    sdk_disabled: bool = Field(default=False, validation_alias="OTEL_SDK_DISABLED", exclude=True)
+
     @field_validator("protocol", mode="before", check_fields=False)
     @classmethod
     def _normalize_protocol_env_base(cls, value: object) -> str:
@@ -166,49 +150,46 @@ class _BaseOTelEnvSettings(InternalSettingsBase):
             label="OTel protocol",
         )
 
+    @model_validator(mode="after")
+    def _apply_sdk_disabled(self) -> Self:
+        if self.sdk_disabled:
+            self.enabled = False
+        return self
+
+
+def _protocol_field(signal: str) -> Any:
+    """The signal's OTLP protocol: its own variable, then the shared one."""
+    return Field(
+        default="grpc",
+        validation_alias=AliasChoices(
+            f"OTEL_EXPORTER_OTLP_{signal}_PROTOCOL", "OTEL_EXPORTER_OTLP_PROTOCOL"
+        ),
+    )
+
 
 class _OTelEnvSettings(_BaseOTelEnvSettings):
 
-    enabled: bool = Field(default=False, validation_alias="OTEL_ENABLED")
-    service_name: str | None = Field(default=None, validation_alias="OTEL_SERVICE_NAME")
-    service_version: str | None = Field(
-        default=None,
-        validation_alias="OTEL_SERVICE_VERSION",
-    )
-    environment: str | None = Field(default=None, validation_alias="OTEL_ENVIRONMENT")
-    otlp_endpoint: str | None = Field(
-        default=None,
-        validation_alias="OTEL_EXPORTER_OTLP_ENDPOINT",
-    )
-    protocol: Literal["grpc", "http/protobuf"] = Field(
-        default="grpc",
-        validation_alias="OTEL_EXPORTER_OTLP_PROTOCOL",
-    )
+    enabled: bool = Field(default=False, validation_alias="OBS_OTEL_ENABLED")
+    protocol: Literal["grpc", "http/protobuf"] = _protocol_field("TRACES")
     trace_sampling_ratio: float = Field(
         default=1.0,
         ge=0.0,
         le=1.0,
-        validation_alias="OTEL_TRACE_SAMPLING_RATIO",
+        validation_alias="OTEL_TRACES_SAMPLER_ARG",
     )
     extra_resource_attributes: str | None = Field(
         default=None,
-        validation_alias="OTEL_EXTRA_RESOURCE_ATTRIBUTES",
+        validation_alias="OTEL_RESOURCE_ATTRIBUTES",
     )
 
 
 class _OTelLogsEnvSettings(_BaseOTelEnvSettings):
-    """Env-based settings for OTLP log export (12-factor parity)."""
 
-    enabled: bool = Field(default=False, validation_alias="OTEL_LOGS_ENABLED")
+    enabled: bool = Field(default=False, validation_alias="OBS_OTEL_LOGS_ENABLED")
     logs_mode: Literal["local_json", "otlp", "both"] = Field(
-        default="local_json", validation_alias="OTEL_LOGS_MODE"
+        default="local_json", validation_alias="OBS_OTEL_LOGS_MODE"
     )
-    otlp_endpoint: str | None = Field(
-        default=None, validation_alias="OTEL_LOGS_ENDPOINT"
-    )
-    protocol: Literal["grpc", "http/protobuf"] = Field(
-        default="grpc", validation_alias="OTEL_LOGS_PROTOCOL"
-    )
+    protocol: Literal["grpc", "http/protobuf"] = _protocol_field("LOGS")
 
     @field_validator("logs_mode", mode="before")
     @classmethod
@@ -221,17 +202,12 @@ class _OTelLogsEnvSettings(_BaseOTelEnvSettings):
 
 class _OTelMetricsEnvSettings(_BaseOTelEnvSettings):
 
-    enabled: bool = Field(default=False, validation_alias="OTEL_METRICS_ENABLED")
-    otlp_endpoint: str | None = Field(
-        default=None, validation_alias="OTEL_METRICS_ENDPOINT"
-    )
-    protocol: Literal["grpc", "http/protobuf"] = Field(
-        default="grpc", validation_alias="OTEL_METRICS_PROTOCOL"
-    )
+    enabled: bool = Field(default=False, validation_alias="OBS_OTEL_METRICS_ENABLED")
+    protocol: Literal["grpc", "http/protobuf"] = _protocol_field("METRICS")
     export_interval_millis: int = Field(
         default=60_000,
         ge=1_000,
-        validation_alias="OTEL_METRICS_EXPORT_INTERVAL_MILLIS",
+        validation_alias="OTEL_METRIC_EXPORT_INTERVAL",
     )
 
 
@@ -265,6 +241,6 @@ def parse_resource_attributes(value: object) -> dict[str, str]:
                 raise ValueError(
                     "Invalid OTEL extra resource attribute format; key cannot be empty"
                 )
-            attributes[normalized_key] = raw_value.strip()
+            attributes[normalized_key] = unquote(raw_value.strip())  # percent-encoded per spec
         return attributes
     raise ValueError("extra_resource_attributes must be a mapping or key=value CSV string")

@@ -34,10 +34,10 @@ from fastapiobserver.otel import OTelLogsSettings, OTelSettings
 # ---------------------------------------------------------------------------
 # App identity from environment (each container gets different values)
 # ---------------------------------------------------------------------------
-SERVICE_NAME = os.getenv("SERVICE_NAME", "demo-api")
-APP_NAME = os.getenv("APP_NAME", "demo")
-ENVIRONMENT = os.getenv("ENVIRONMENT", "local")
-APP_VERSION = os.getenv("APP_VERSION", "1.0.0")
+SERVICE_NAME = os.getenv("OBS_SERVICE_NAME", "demo-api")
+APP_NAME = os.getenv("OBS_APP_NAME", "demo")
+ENVIRONMENT = os.getenv("OBS_ENVIRONMENT", "local")
+APP_VERSION = os.getenv("OBS_APP_VERSION", "1.0.0")
 
 # Cross-service targets for the /chain endpoint
 TARGET_B = os.getenv("TARGET_B", "http://app-b:8000")
@@ -57,7 +57,7 @@ settings = ObservabilitySettings(
     metrics_enabled=True,
 )
 
-otel_settings = OTelSettings.from_env(settings)
+otel_settings = OTelSettings.from_env()
 otel_logs_settings = OTelLogsSettings.from_env()
 
 install_observability(

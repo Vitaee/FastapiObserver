@@ -17,9 +17,8 @@ from fastapiobserver import (
     ObservabilitySettings,
     install_observability,
     observability_lifespan,
-    register_metrics_backend,
-    unregister_metrics_backend,
 )
+from fastapiobserver.metrics import register_metrics_backend, unregister_metrics_backend
 from fastapiobserver.middleware import RequestLoggingMiddleware
 
 
@@ -410,3 +409,19 @@ def test_one_apps_shutdown_leaves_logging_running_for_others_and_restarts(
         if line["message"] == "request.completed" and line["event"]["path"] == "/ping"
     }
     assert len(request_ids) == 2
+
+
+def test_second_install_changes_nothing(caplog: pytest.LogCaptureFixture) -> None:
+    app = FastAPI()
+    first = ObservabilitySettings(app_name="first", service="svc")
+    install_observability(app, first, metrics_enabled=False)
+    routes = list(app.routes)
+
+    with caplog.at_level(logging.WARNING, logger="fastapiobserver.fastapi"):
+        install_observability(
+            app, ObservabilitySettings(app_name="second", service="svc"), metrics_enabled=True
+        )
+
+    assert "observability.already_installed" in caplog.messages
+    assert app.state._observability_state.settings is first
+    assert app.routes == routes  # no second /metrics

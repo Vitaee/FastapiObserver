@@ -13,7 +13,7 @@ from typing import Any, Literal, cast
 
 from fastapi import FastAPI
 
-from .config import ObservabilitySettings
+from .config import ObservabilitySettings, retired_env_vars
 from .control_plane import RuntimeControlSettings, mount_control_plane
 from .logging import flush_logging, setup_logging
 from .loop_watchdog import EventLoopWatchdog
@@ -60,7 +60,6 @@ def install_observability(
     otel_logs_settings: OTelLogsSettings | None = None,
     otel_metrics_settings: OTelMetricsSettings | None = None,
     runtime_control_settings: RuntimeControlSettings | None = None,
-    audit_key_provider: object | None = None,
     db_engine: Any | Sequence[Any] | None = None,
     db_commenter_enabled: bool = True,
     db_commenter_options: dict[str, bool] | None = None,
@@ -71,6 +70,23 @@ def install_observability(
     metrics backend selection, OTel installation, and middleware ordering
     behind a single function.
     """
+    if _get_runtime_state(app) is not None:
+        # A second run would replace logging and metrics but keep the first
+        # middleware, leaving the app half on each call's settings.
+        _LOGGER.warning(
+            "observability.already_installed",
+            extra={
+                "event": {
+                    "message": (
+                        "install_observability() already ran for this app, so this "
+                        "call changes nothing."
+                    ),
+                },
+                "_skip_enrichers": True,
+            },
+        )
+        return
+
     # --- 0. Zero-Glue Profile Application ---
     # Apply profile defaults via context manager so configure objects
     # pick them up, but environment reverts instantly after.
@@ -79,7 +95,7 @@ def install_observability(
         settings = settings or ObservabilitySettings.from_env()
         security_policy = security_policy or SecurityPolicy.from_env()
         trusted_proxy_policy = trusted_proxy_policy or TrustedProxyPolicy.from_env()
-        otel_settings = otel_settings or OTelSettings.from_env(settings)
+        otel_settings = otel_settings or OTelSettings.from_env()
         otel_logs_settings = otel_logs_settings or OTelLogsSettings.from_env()
         otel_metrics_settings = otel_metrics_settings or OTelMetricsSettings.from_env()
         runtime_control_settings = runtime_control_settings or RuntimeControlSettings.from_env()
@@ -94,7 +110,6 @@ def install_observability(
         otel_settings=otel_settings,
         otel_logs_settings=otel_logs_settings,
         security_policy=security_policy,
-        audit_key_provider=audit_key_provider,
     )
 
     # --- 3. Metrics backend ---
@@ -142,16 +157,15 @@ def install_observability(
     if runtime_control_settings and runtime_control_settings.enabled:
         mount_control_plane(app, runtime_control_settings, trusted_proxy_policy)
 
-    if os.getenv("OBS_LOG_SINKS"):
-        # No longer read. Without this, a package's sink would stop getting logs silently.
+    retired = retired_env_vars()
+    if retired:
+        # Without this, a setting from 1.x would stop working silently.
         _LOGGER.warning(
-            "observability.log_sinks_removed",
+            "observability.settings_retired",
             extra={
                 "event": {
-                    "message": (
-                        "OBS_LOG_SINKS is no longer read: sinks aren't loaded from installed "
-                        "packages any more. Register the sink in code with register_sink()."
-                    ),
+                    "message": "These variables are no longer read; use the replacements.",
+                    "replacements": retired,
                 },
                 "_skip_enrichers": True,
             },
@@ -189,7 +203,12 @@ def install_observability(
                     else None
                 ),
                 "tracing": otel_settings.enabled,
-                "otlp_endpoint": _endpoint_for_log(otel_settings.otlp_endpoint),
+                "otlp_endpoint": _endpoint_for_log(
+                    # The exporter reads the variables itself; these are what it uses.
+                    otel_settings.otlp_endpoint
+                    or os.getenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT")
+                    or os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
+                ),
                 "otlp_protocol": otel_settings.protocol,
                 "trace_sampling_ratio": otel_settings.trace_sampling_ratio,
                 "otel_logs_mode": (
@@ -230,7 +249,6 @@ def _setup_structured_logging(
     otel_settings: OTelSettings | None,
     otel_logs_settings: OTelLogsSettings | None,
     security_policy: SecurityPolicy,
-    audit_key_provider: object | None,
 ) -> None:
     # Hook the lifespan before install_otel_logs does, so on shutdown the log
     # queue drains into the OTLP handler before its provider is shut down.
@@ -261,7 +279,6 @@ def _setup_structured_logging(
         security_policy=security_policy,
         logs_mode=logs_mode,
         extra_handlers=extra_handlers,
-        audit_key_provider=audit_key_provider,
     )
 
 
@@ -390,11 +407,15 @@ def _auto_discover_excluded_routes(app: FastAPI, settings: ObservabilitySettings
     if state:
         state.excluded_urls = frozenset(excluded)
 
-    # If OTel middleware is present, dynamically update its excluded URLs
+    # Extend the trace exclusions too, unless they were set explicitly.
     try:
-        from .otel.exclusions import update_otel_middleware_exclusions
+        from .otel.exclusions import (
+            update_otel_middleware_exclusions,
+            uses_default_trace_exclusions,
+        )
 
-        update_otel_middleware_exclusions(app, excluded)
+        if uses_default_trace_exclusions(settings):
+            update_otel_middleware_exclusions(app, excluded)
     except ImportError:
         pass
     except Exception:

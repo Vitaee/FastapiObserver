@@ -7,7 +7,6 @@ if TYPE_CHECKING:
     from ..config import ObservabilitySettings
 
 from .builtin import RotatingFileSink, StdoutSink
-from .logtail.sink import LogtailSink
 from .registry import get_registered_sinks
 
 _LOGGER = logging.getLogger("fastapiobserver.sinks")
@@ -31,25 +30,6 @@ def build_sink_handlers(
     if settings.log_dir:
         handlers.append(
             (RotatingFileSink(log_dir=settings.log_dir).create_handler(formatter), "rotating_file")
-        )
-
-    # Add Logtail if configured
-    if settings.logtail_enabled and settings.logtail_source_token:
-        handlers.append(
-            (
-                LogtailSink(
-                    source_token=settings.logtail_source_token,
-                    batch_size=settings.logtail_batch_size,
-                    flush_interval=settings.logtail_flush_interval,
-                    dlq_enabled=settings.logtail_dlq_enabled,
-                    dlq_dir=settings.logtail_dlq_dir,
-                    dlq_filename=settings.logtail_dlq_filename,
-                    dlq_max_bytes=settings.logtail_dlq_max_bytes,
-                    dlq_backup_count=settings.logtail_dlq_backup_count,
-                    dlq_compress=settings.logtail_dlq_compress,
-                ).create_handler(formatter),
-                "logtail",
-            )
         )
 
     # Add sinks registered with register_sink()

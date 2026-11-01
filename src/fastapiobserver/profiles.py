@@ -3,55 +3,39 @@
 from __future__ import annotations
 
 import os
-
+from collections.abc import Generator
 from contextlib import contextmanager
-from typing import Generator
+
+_PROFILE_DEFAULTS: dict[str, dict[str, str]] = {
+    "development": {"OBS_LOG_LEVEL": "DEBUG"},
+    "production": {
+        "OBS_LOG_LEVEL": "INFO",
+        "OBS_LOG_QUEUE_MAX_SIZE": "20000",
+        "OBS_REDACTION_PRESET": "strict",
+    },
+}
+
 
 @contextmanager
 def apply_profile_context() -> Generator[None, None, None]:
-    """Read OBS_PROFILE and dynamically inject profile defaults.
-    
-    Restores the os.environ dictionary after yielding.
+    """Add the defaults of the ``OBS_PROFILE`` profile to the environment while
+    settings are read. Variables already set win.
+
+    Only the variables added here are removed afterwards, so changes other
+    threads make to the environment meanwhile are kept.
     """
-    profile = str(os.getenv("OBS_PROFILE", "")).strip().lower()
-    
-    original_env = dict(os.environ)
-
+    profile = os.getenv("OBS_PROFILE", "").strip().lower()
+    added = {
+        name: value
+        for name, value in _PROFILE_DEFAULTS.get(profile, {}).items()
+        if name not in os.environ
+    }
+    os.environ.update(added)
     try:
-        if profile == "development":
-            _apply_development_profile()
-        elif profile == "production":
-            _apply_production_profile()
-            
         yield
-        
     finally:
-        os.environ.clear()
-        os.environ.update(original_env)
+        for name in added:
+            os.environ.pop(name, None)
 
-def _apply_development_profile() -> None:
-    """Injects development environment defaults."""
-    # Verbose logging by default
-    os.environ.setdefault("LOG_LEVEL", "DEBUG")
-    
-    # Disable OTel components by default to save resources localy
-    os.environ.setdefault("OTEL_ENABLED", "false")
-    os.environ.setdefault("OTEL_LOGS_ENABLED", "false")
-    os.environ.setdefault("OTEL_METRICS_ENABLED", "false")
-    
-    # Optional: we don't enforce security redaction changes since default is mask,
-    # which is already relatively loose compared to strict/hash.
-
-def _apply_production_profile() -> None:
-    """Injects production environment defaults."""
-    # Standard log level
-    os.environ.setdefault("LOG_LEVEL", "INFO")
-    
-    # Optimize log queue for high throughput
-    os.environ.setdefault("LOG_QUEUE_MAX_SIZE", "20000")
-    os.environ.setdefault("LOG_QUEUE_OVERFLOW_POLICY", "drop_oldest")
-    
-    # Automatically enforce strict redaction preset
-    os.environ.setdefault("OBS_REDACTION_PRESET", "strict")
 
 __all__ = ["apply_profile_context"]

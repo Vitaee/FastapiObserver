@@ -6,6 +6,9 @@ import pytest
 
 from fastapiobserver.config import ObservabilitySettings
 from fastapiobserver.otel import build_excluded_urls_csv
+from fastapiobserver.otel.exclusions import path_pattern
+
+parse_excluded_urls = pytest.importorskip("opentelemetry.util.http").parse_excluded_urls
 
 
 def test_tier1_explicit_config_takes_priority(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -55,9 +58,41 @@ def test_tier3_package_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
     settings = ObservabilitySettings()
     result = build_excluded_urls_csv(settings)
     assert result is not None
-    urls = result.split(",")
-    assert "/metrics" in urls
-    assert "/_observability/control" in urls
+    excluded = parse_excluded_urls(result)
+    assert excluded.url_disabled("/metrics")
+    assert excluded.url_disabled("/_observability/control")
+
+
+@pytest.mark.parametrize(
+    ("url", "disabled"),
+    [
+        ("/health", True),
+        ("http://testserver/health", True),  # the instrumentation checks the full URL
+        ("/healthcare", False),
+        ("/api/health", False),
+        ("http://testserver/api/metrics/x", False),
+    ],
+)
+def test_default_exclusions_match_whole_paths_only(
+    monkeypatch: pytest.MonkeyPatch, url: str, disabled: bool
+) -> None:
+    monkeypatch.delenv("OTEL_PYTHON_FASTAPI_EXCLUDED_URLS", raising=False)
+    monkeypatch.delenv("OTEL_PYTHON_EXCLUDED_URLS", raising=False)
+    csv = build_excluded_urls_csv(ObservabilitySettings())
+    assert csv is not None
+    assert parse_excluded_urls(csv).url_disabled(url) is disabled
+
+
+@pytest.mark.parametrize(
+    ("template", "url", "disabled"),
+    [
+        ("/hidden/{item_id}", "/hidden/42", True),
+        ("/hidden/{item_id}", "/hidden/42/more", False),
+        ("/files/{file_path:path}", "/files/a/b.txt", True),
+    ],
+)
+def test_path_pattern_matches_route_templates(template: str, url: str, disabled: bool) -> None:
+    assert parse_excluded_urls(path_pattern(template)).url_disabled(url) is disabled
 
 
 def test_explicit_empty_exclusion_returns_empty_string() -> None:
@@ -101,3 +136,24 @@ def test_install_otel_passes_empty_excluded_urls(
         "install_otel must pass excluded_urls to instrument_app"
     )
     assert captured_kwargs["excluded_urls"] == ""
+
+
+def test_explicit_trace_exclusions_are_not_extended_with_discovered_routes() -> None:
+    from fastapi import FastAPI
+
+    from fastapiobserver import fastapi as fastapi_module
+    from fastapiobserver.otel.exclusions import NativeExclusions
+
+    app = FastAPI()
+
+    @app.get("/hidden", include_in_schema=False)
+    def hidden() -> None:
+        return None
+
+    settings = ObservabilitySettings(otel_excluded_urls="")  # type: ignore[arg-type]
+    app._telemetry = {"exclude": NativeExclusions(build_excluded_urls_csv(settings))}
+    app.state._observability_state = fastapi_module.ObservabilityRuntimeState(settings=settings)
+
+    fastapi_module._auto_discover_excluded_routes(app, settings)
+
+    assert not app._telemetry["exclude"]({"path": "/hidden"})

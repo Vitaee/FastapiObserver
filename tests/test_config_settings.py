@@ -96,17 +96,30 @@ def test_trusted_proxy_policy_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_otel_settings_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("OTEL_ENABLED", "true")
-    monkeypatch.setenv("OTEL_SERVICE_NAME", "payments-api")
+    monkeypatch.setenv("OBS_OTEL_ENABLED", "true")
     monkeypatch.setenv("OTEL_EXPORTER_OTLP_PROTOCOL", "http/protobuf")
-    monkeypatch.setenv("OTEL_TRACE_SAMPLING_RATIO", "0.25")
+    monkeypatch.setenv("OTEL_TRACES_SAMPLER_ARG", "0.25")
 
     settings = OTelSettings.from_env()
 
     assert settings.enabled is True
-    assert settings.service_name == "payments-api"
     assert settings.protocol == "http/protobuf"
     assert settings.trace_sampling_ratio == 0.25
+
+
+def test_otel_service_name_names_the_service_everywhere(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("OBS_SERVICE_NAME", raising=False)
+    monkeypatch.setenv("OTEL_SERVICE_NAME", "payments-api")
+    assert ObservabilitySettings().service == "payments-api"
+
+    monkeypatch.setenv("OBS_SERVICE_NAME", "orders-api")
+    assert ObservabilitySettings().service == "orders-api"
+
+
+def test_sdk_disabled_turns_tracing_off(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("OBS_OTEL_ENABLED", "true")
+    monkeypatch.setenv("OTEL_SDK_DISABLED", "true")
+    assert OTelSettings.from_env().enabled is False
 
 
 def test_otel_settings_reject_invalid_protocol() -> None:
@@ -130,6 +143,39 @@ def test_runtime_control_settings_from_env(monkeypatch: pytest.MonkeyPatch) -> N
 def test_list_settings_read_csv_or_json_from_env(
     monkeypatch: pytest.MonkeyPatch, value: str
 ) -> None:
-    monkeypatch.setenv("METRICS_EXCLUDE_PATHS", value)
+    monkeypatch.setenv("OBS_METRICS_EXCLUDE_PATHS", value)
 
     assert ObservabilitySettings().metrics_exclude_paths == ("/health", "/ready")
+
+
+@pytest.mark.parametrize("value", ["", "[]"])
+def test_empty_metrics_exclude_paths_excludes_nothing(
+    monkeypatch: pytest.MonkeyPatch, value: str
+) -> None:
+    monkeypatch.setenv("OBS_METRICS_EXCLUDE_PATHS", value)
+    assert ObservabilitySettings().metrics_exclude_paths == ()
+    assert ObservabilitySettings(metrics_exclude_paths=()).metrics_exclude_paths == ()
+
+
+def test_settings_ignore_variables_named_like_their_fields(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    for name, value in {
+        "ENABLED": "true",
+        "PATH": "/usr/bin",
+        "PROTOCOL": "http/protobuf",
+        "LOG_LEVEL": "DEBUG",
+        "METRICS_ENABLED": "true",
+    }.items():
+        monkeypatch.setenv(name, value)
+
+    control = RuntimeControlSettings.from_env()
+    assert control.enabled is False
+    assert control.path == "/_observability/control"
+    assert OTelSettings.from_env().enabled is False
+    assert OTelSettings.from_env().protocol == "grpc"
+    settings = ObservabilitySettings()
+    assert settings.log_level == "INFO"
+    assert settings.metrics_enabled is False
+    # Field names still work in code.
+    assert ObservabilitySettings(log_level="DEBUG").log_level == "DEBUG"

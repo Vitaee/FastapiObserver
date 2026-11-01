@@ -56,13 +56,13 @@ Requires Python 3.11 or newer.
 
 ## Configure with environment variables
 
-`install_observability(app)` reads its settings from the environment. These are the ones most apps set:
+`install_observability(app)` reads its settings from the environment: its own start with `OBS_`, and OpenTelemetry's standard `OTEL_*` variables work as usual. These are the ones most apps set:
 
 | Variable | Example | What it does |
 |---|---|---|
-| `APP_NAME`, `SERVICE_NAME`, `ENVIRONMENT`, `APP_VERSION` | `orders-api`, `orders`, `production`, `2.3.1` | Added to every log line |
-| `METRICS_ENABLED` | `true` | Serves Prometheus metrics at `/metrics` (needs `[prometheus]`) |
-| `OTEL_ENABLED`, `OTEL_EXPORTER_OTLP_ENDPOINT` | `true`, `http://collector:4317` | Sends traces over OTLP and adds `trace_id` to logs (needs `[otel]`) |
+| `OBS_APP_NAME`, `OBS_SERVICE_NAME`, `OBS_ENVIRONMENT`, `OBS_APP_VERSION` | `orders-api`, `orders`, `production`, `2.3.1` | Added to every log line |
+| `OBS_METRICS_ENABLED` | `true` | Serves Prometheus metrics at `/metrics` (needs `[prometheus]`) |
+| `OBS_OTEL_ENABLED`, `OTEL_EXPORTER_OTLP_ENDPOINT` | `true`, `http://collector:4317` | Sends traces over OTLP and adds `trace_id` to logs (needs `[otel]`) |
 | `OBS_REDACTION_PRESET` | `strict`, `pci`, `gdpr` | Chooses which fields and headers are masked |
 | `OBS_PROFILE` | `development`, `production` | Sensible defaults: `production` sets `INFO` logs, a larger log queue and the `strict` preset |
 
@@ -76,9 +76,9 @@ Explicit variables and Python arguments always win over profile defaults. Every 
 - **Prometheus metrics** labelled by route template (`/orders/{order_id}`). Requests no route matches, such as scanners, CORS preflights and requests an auth middleware rejects, share one `<unmatched>` label, and made-up methods share `_OTHER`, so neither IDs nor anonymous clients explode cardinality.
 - **OpenTelemetry traces**, from FastAPI's own support on 0.142 and later, with `trace_id` and `span_id` in every log line, and optional log export over OTLP, redacted like everything else.
 - **Non-blocking log writes.** Lines are written from a background thread, so a slow stdout never stalls the event loop.
-- **Help finding what slows a request down.** Opt-in: a warning with the stack of any sync call that blocks the event loop, and `DEBUG` lines written only for requests that fail. Always on: a warning when the thread pool or a database connection pool is full, the usual cause when latency climbs while CPU stays low. With tracing on, each request line counts its queries and outbound HTTP calls, and a query run once per item (N+1) gets a warning. With metrics on, `/metrics` shows how many bytes of logs each route writes, and `LOG_SAMPLE_RATE` keeps a share of successful requests, chosen by trace ID, while failed and slow requests are always written in full.
+- **Help finding what slows a request down.** Opt-in: a warning with the stack of any sync call that blocks the event loop, and `DEBUG` lines written only for requests that fail. Always on: a warning when the thread pool or a database connection pool is full, the usual cause when latency climbs while CPU stays low. With tracing on, each request line counts its queries and outbound HTTP calls, and a query run once per item (N+1) gets a warning. With metrics on, `/metrics` shows how many bytes of logs each route writes, and `OBS_LOG_SAMPLE_RATE` keeps a share of successful requests, chosen by trace ID, while failed and slow requests are always written in full.
 
-Optional extras: runtime log-level control, a tamper-evident audit log, SQLAlchemy, `httpx` and `requests` tracing, Strawberry GraphQL and a Loguru bridge. See the [documentation](https://vitaee.github.io/FastapiObserver/).
+Optional extras: runtime log-level control, SQLAlchemy, `httpx` and `requests` tracing, Strawberry GraphQL and a Loguru bridge. See the [documentation](https://vitaee.github.io/FastapiObserver/).
 
 ![Grafana dashboard built from fastapi-observer metrics, traces and logs](https://raw.githubusercontent.com/Vitaee/FastapiObserver/main/examples/full_stack/screenshot/dashboard_top.png)
 
@@ -113,8 +113,8 @@ What it costs: with default settings, about 43 µs of CPU per request on an Appl
 
 ## Why you can trust it
 
-- Tested in CI on Python 3.11 to 3.15, type-checked with `mypy --strict`, tested nightly against the newest OpenTelemetry releases, and used in production by its maintainer.
-- Releases are published with PyPI Trusted Publishing and signed attestations. CI runs `pip-audit` and generates an SBOM.
+- Tested in CI on Python 3.11 to 3.15, against both the newest and the oldest dependency versions it supports, type-checked with `mypy --strict`, and used in production by its maintainer.
+- Releases are published with PyPI Trusted Publishing and signed attestations, and only after their tests pass. CI runs `pip-audit` and builds the package on every pull request.
 - Security fixes are called out in the [changelog](https://github.com/Vitaee/FastapiObserver/blob/main/CHANGELOG.md). To report a vulnerability, see [SECURITY.md](https://github.com/Vitaee/FastapiObserver/blob/main/SECURITY.md).
 - Benchmarks are reproducible from [`examples/benchmarks`](https://github.com/Vitaee/FastapiObserver/tree/main/examples/benchmarks).
 

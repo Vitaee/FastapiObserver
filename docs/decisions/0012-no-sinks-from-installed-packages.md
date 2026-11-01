@@ -1,6 +1,6 @@
 # 0012: No sinks from installed packages
 
-**Status:** accepted · **Reviewed:** 2026-11-01 · Supersedes the row of [0007](0007-new-destinations-are-opt-in.md) on sinks from installed packages
+**Status:** accepted · **Reviewed:** 2026-11-01 · Supersedes the row of [0007](0007-new-destinations-are-opt-in.md) on sinks from installed packages. Its startup warning is now `observability.settings_retired` ([0013](0013-every-setting-has-one-name.md))
 
 ## Context
 

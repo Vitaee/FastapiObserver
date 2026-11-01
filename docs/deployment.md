@@ -67,7 +67,7 @@ service:
 
 | Failure mode | Expected behavior | Immediate action |
 |---|---|---|
-| OTel Collector down | App still serves traffic; local logs still available if `OTEL_LOGS_MODE=both` | Fail over Collector or temporarily switch to local-json mode |
+| OTel Collector down | App still serves traffic; local logs still available if `OBS_OTEL_LOGS_MODE=both` | Fail over Collector or temporarily switch to local-json mode |
 | Tempo down | Traces unavailable; logs/metrics continue | Restore Tempo, keep incident correlation via logs |
 | Loki down | Logs unavailable in Grafana; metrics/traces continue | Restore Loki, use app stdout logs temporarily |
 | Prometheus down | No metrics/alerts; app traffic unaffected | Restore Prometheus and alertmanager path |

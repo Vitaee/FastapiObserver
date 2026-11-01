@@ -2,10 +2,10 @@
 
 Two settings hold records:
 
-- ``LOG_LEVEL_ON_ERROR``: a request's records below ``LOG_LEVEL`` are written
+- ``OBS_LOG_LEVEL_ON_ERROR``: a request's records below ``OBS_LOG_LEVEL`` are written
   only if it ends in a 5xx or an unhandled exception.
-- ``LOG_SAMPLE_RATE``: a request that isn't sampled has its ``INFO`` and lower
-  records written only if it fails or takes ``LOG_SLOW_REQUEST_MS`` or longer.
+- ``OBS_LOG_SAMPLE_RATE``: a request that isn't sampled has its ``INFO`` and lower
+  records written only if it fails or takes ``OBS_LOG_SLOW_REQUEST_MS`` or longer.
   ``WARNING`` and higher are always written.
 """
 
@@ -29,7 +29,7 @@ class HeldLogFilter(logging.Filter):
     It is the queue handler's last filter, so held records already carry their
     request ID and trace context. Outside a request, records below *level* are
     dropped, as the log level would have dropped them. *lowest_level* is
-    ``LOG_LEVEL_ON_ERROR``, or *level* without it.
+    ``OBS_LOG_LEVEL_ON_ERROR``, or *level* without it.
     """
 
     def __init__(

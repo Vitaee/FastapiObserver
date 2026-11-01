@@ -1,8 +1,7 @@
-"""OTel resource creation, URL exclusion, and endpoint normalization helpers."""
+"""OTel resource creation and endpoint normalization helpers."""
 
 from __future__ import annotations
 
-import os
 from types import ModuleType
 from typing import Any, Literal
 from urllib.parse import urlparse, urlunparse
@@ -25,41 +24,6 @@ def create_otel_resource(
     }
     resource_attrs.update(otel_settings.extra_resource_attributes)
     return resources_module.Resource.create(resource_attrs)
-
-
-# ---------------------------------------------------------------------------
-# Excluded URLs — auto-derived from settings (WS4)
-# ---------------------------------------------------------------------------
-
-
-def build_excluded_urls_csv(settings: ObservabilitySettings) -> str | None:
-    """Build a comma-separated string of excluded URLs for OTel tracing.
-
-    Precedence (highest to lowest):
-
-    1. **Explicit config** — ``otel_excluded_urls`` set in
-       ``ObservabilitySettings``.
-    2. **OTel env vars** — ``OTEL_PYTHON_FASTAPI_EXCLUDED_URLS`` or
-       ``OTEL_PYTHON_EXCLUDED_URLS`` set in the environment.  We return
-       ``None`` so the OTel SDK handles them natively.
-    3. **Package defaults** — auto-derived from ``metrics_path``,
-       ``metrics_exclude_paths``, and the control-plane default path.
-    """
-    # --- Tier 1: explicit config (includes explicit empty = 'trace everything') ---
-    if settings.otel_excluded_urls is not None:
-        return ",".join(settings.otel_excluded_urls)  # "" means no exclusions
-
-    # --- Tier 2: OTel env vars — let SDK handle natively ---
-    if os.environ.get("OTEL_PYTHON_FASTAPI_EXCLUDED_URLS") is not None or os.environ.get(
-        "OTEL_PYTHON_EXCLUDED_URLS"
-    ) is not None:
-        return None
-
-    # --- Tier 3: safe package defaults ---
-    urls: set[str] = set(settings.metrics_exclude_paths)
-    urls.add(settings.metrics_path)
-    urls.add("/_observability/control")  # RuntimeControlSettings.path default
-    return ",".join(sorted(urls)) or None
 
 
 _OTLP_EXPORTERS = {

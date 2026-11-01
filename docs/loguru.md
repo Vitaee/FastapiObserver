@@ -62,7 +62,7 @@ loguru_logger.bind(
 ## Removing the Bridge
 
 ```python
-from fastapiobserver import remove_loguru_bridge
+from fastapiobserver.loguru import remove_loguru_bridge
 
 remove_loguru_bridge(bridge_id)
 ```

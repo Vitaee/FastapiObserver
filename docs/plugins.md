@@ -37,7 +37,7 @@ Use `register_metrics_backend()` to plug in non-Prometheus backends without
 modifying core code:
 
 ```python
-from fastapiobserver import register_metrics_backend
+from fastapiobserver.metrics import register_metrics_backend
 
 
 class MyBackend:

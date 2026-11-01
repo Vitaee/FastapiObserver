@@ -124,7 +124,7 @@ Important behavior:
 Use manual instrumentation if you do not want to pass engines through `install_observability`.
 
 ```python
-from fastapiobserver import instrument_sqlalchemy, instrument_sqlalchemy_async
+from fastapiobserver.db_tracing import instrument_sqlalchemy, instrument_sqlalchemy_async
 
 # Sync SQLAlchemy Engine
 instrument_sqlalchemy(engine)
@@ -136,7 +136,7 @@ instrument_sqlalchemy_async(async_engine)
 Teardown helper:
 
 ```python
-from fastapiobserver import uninstrument_sqlalchemy
+from fastapiobserver.db_tracing import uninstrument_sqlalchemy
 
 uninstrument_sqlalchemy()
 ```

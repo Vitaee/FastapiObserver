@@ -144,7 +144,6 @@ def setup_logging(
     security_policy: SecurityPolicy | None = None,
     logs_mode: Literal["local_json", "otlp", "both"] = "local_json",
     extra_handlers: list[logging.Handler] | None = None,
-    audit_key_provider: object | None = None,
 ) -> None:
     """Configure the root logger with structured JSON output."""
     import fastapiobserver.logging.state as state
@@ -167,20 +166,7 @@ def setup_logging(
             overflow_policy=settings.log_queue_overflow_policy,
         )
 
-        formatter: logging.Formatter = StructuredJsonFormatter(
-            settings=settings, security_policy=security_policy
-        )
-
-        # Wrap with tamper-evident audit chain if enabled.
-        if settings.audit_logging_enabled:
-            from ..audit import AuditChainFormatter, AuditKeyProvider, LocalHMACProvider
-
-            provider = audit_key_provider or LocalHMACProvider(
-                env_var=settings.audit_key_env_var,
-            )
-            formatter = AuditChainFormatter(
-                delegate=formatter, key_provider=cast(AuditKeyProvider, provider),
-            )
+        formatter = StructuredJsonFormatter(settings=settings, security_policy=security_policy)
 
         # Build output handlers based on logs_mode
         output_handlers: list[tuple[logging.Handler, str]] = []
@@ -258,7 +244,7 @@ def setup_logging(
 def set_log_level(level: int) -> None:
     """Set the log level, at startup and from the runtime control plane.
 
-    With ``LOG_LEVEL_ON_ERROR`` below *level*, the root logger stays at that
+    With ``OBS_LOG_LEVEL_ON_ERROR`` below *level*, the root logger stays at that
     lower level so the records are created, and the held-log filter applies
     *level* instead.
     """

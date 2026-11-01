@@ -11,9 +11,9 @@ from fastapi import FastAPI
 from ..config import ObservabilitySettings
 from ..request_context import get_request_state
 from .lifecycle import flush_on_app_shutdown
+from .exclusions import build_excluded_urls_csv
 from .native import trace_natively
 from .resource import (
-    build_excluded_urls_csv,
     build_otlp_exporter,
     create_otel_resource,
     has_configured_provider,

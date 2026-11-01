@@ -46,78 +46,36 @@ CI automation:
 
 ---
 
-## Release Tracks
-
-- `0.1.x`: secure-by-default core
-- `0.2.x`: OTel interoperability, security presets, allowlists
-- `0.3.x`: GraphQL observability, error fingerprinting, and Logtail DLQ durability
-- `0.4.x`: package modularization, sink/registry hardening, and runtime control token rotation
-- `1.0.x`: first stable release contract for production deployments
-- `1.2.0`: tamper-evident audit logging and SQLAlchemy trace/commenter integration
-- `1.3.0`: zero-glue install defaults, profile-aware configuration, lifespan teardown hardening, and route exclusion auto-discovery
-- `1.3.1`: prometheus-client multiprocess compatibility fix for delayed submodule attachment
-
-Current release version: `1.3.1`
-
 ## Changelog Policy
 
 Breaking changes must be listed under a `Breaking Changes` section in `CHANGELOG.md`.
 
 ---
 
-## Packaging and Publishing (Maintainers)
+## Releasing (Maintainers)
 
-Recommended release flow (Trusted Publishing + auto GitHub release notes):
+Releases are published from CI with PyPI Trusted Publishing; no token is stored anywhere.
+
+1. Open a `release/vX.Y.Z` pull request that sets the version in `src/fastapiobserver/_version.py` and dates its `CHANGELOG.md` section.
+2. After it merges, tag the merge commit and push the tag:
+
+    ```bash
+    git tag vX.Y.Z
+    git push origin vX.Y.Z
+    ```
+
+On a tag push, `.github/workflows/release.yml` runs the tests, rejects a tag that doesn't match `_version.py`, builds and checks the distributions, publishes them to PyPI with attestations, and creates the GitHub Release from the matching `CHANGELOG.md` section.
+
+If publishing fails partway, don't re-run the tag's run: it rebuilds files that differ from the ones PyPI already has. Run the workflow by hand instead, which skips files PyPI has:
 
 ```bash
-git tag v1.3.1
-git push origin v1.3.1
+gh workflow run release.yml --ref main -f tag=vX.Y.Z
 ```
 
-On tag push, `.github/workflows/release.yml` will:
-
-1. Build and validate package artifacts.
-2. Publish to PyPI via Trusted Publishing.
-3. Create/update the GitHub Release body from the matching section in `CHANGELOG.md`.
-
-Manual fallback command (uses `.env` with `PYPI_TOKEN`):
-
-```bash
-scripts/deploy_pypi.sh --tag v1.3.1 --push-tag
-```
-
-Before tagging, maintainers should run:
+For high-risk changes, run the stress harness before tagging:
 
 ```bash
 uv run python scripts/runtime_stress.py --profile standard
-```
-
-### 1) Build distributions
-
-```bash
-python -m pip install --upgrade pip build
-python -m build
-```
-
-### 2) Upload to TestPyPI
-
-```bash
-python -m pip install --upgrade twine
-python -m twine upload --repository testpypi dist/*
-```
-
-### 3) Validate install from TestPyPI
-
-```bash
-python -m pip install \
-  --extra-index-url https://test.pypi.org/simple/ \
-  fastapi-observer
-```
-
-### 4) Upload to production PyPI
-
-```bash
-python -m twine upload dist/*
 ```
 
 ---

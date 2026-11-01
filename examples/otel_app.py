@@ -8,9 +8,9 @@ Run this:
     uvicorn examples.otel_app:app --reload
 
 Or with environment variables:
-    OTEL_ENABLED=true \
+    OBS_OTEL_ENABLED=true \
     OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317 \
-    OTEL_EXTRA_RESOURCE_ATTRIBUTES="k8s.namespace=prod,team=platform" \
+    OTEL_RESOURCE_ATTRIBUTES="k8s.namespace=prod,team=platform" \
     uvicorn examples.otel_app:app --reload
 
 What happens under the hood when OTel is enabled:

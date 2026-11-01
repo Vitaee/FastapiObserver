@@ -16,6 +16,7 @@ Each record says what was decided, the evidence for it and what it cost. Read th
 | [0010](0010-trace-with-fastapis-own-opentelemetry.md) | Trace with FastAPI's own OpenTelemetry | On FastAPI 0.142+, FastAPI traces requests itself, and its own log export stays off so error logs go through redaction. |
 | [0011](0011-every-unmatched-request-shares-one-label.md) | Every unmatched request shares one label | Preflights, rejected requests and scanners share `<unmatched>`, and made-up methods share `_OTHER`. |
 | [0012](0012-no-sinks-from-installed-packages.md) | No sinks from installed packages | Custom sinks are registered in code with `register_sink()`. The entry-point loader and `OBS_LOG_SINKS` are gone. |
+| [0013](0013-every-setting-has-one-name.md) | Every setting has one name | The library's own variables start with `OBS_`, OpenTelemetry's are the specification's, and nothing is read from a field's bare name. |
 
 ## Writing a new record
 

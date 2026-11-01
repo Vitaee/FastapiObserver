@@ -198,13 +198,13 @@ from fastapiobserver import ObservabilitySettings, install_observability
 from fastapiobserver.otel import OTelSettings, OTelLogsSettings
 
 settings = ObservabilitySettings.from_env()
-otel_settings = OTelSettings.from_env(settings)
+otel_settings = OTelSettings.from_env()
 otel_logs_settings = OTelLogsSettings.from_env()
 
 install_observability(app, settings, otel_settings=otel_settings, otel_logs_settings=otel_logs_settings)
 ```
 
-All configuration flows through environment variables defined in `docker-compose.yml`. Each service gets its own `SERVICE_NAME` and `OTEL_SERVICE_NAME`, making it trivially easy to scale to N instances.
+All configuration flows through environment variables defined in `docker-compose.yml`. Each service gets its own `OBS_SERVICE_NAME` and `OTEL_SERVICE_NAME`, making it trivially easy to scale to N instances.
 
 ---
 
@@ -222,7 +222,7 @@ To add a 4th service to the stack:
       - "8003:8000"
     environment:
       <<: *app-env
-      SERVICE_NAME: "app-d"
+      OBS_SERVICE_NAME: "app-d"
       OTEL_SERVICE_NAME: "app-d"
 ```
 

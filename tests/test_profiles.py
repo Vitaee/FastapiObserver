@@ -22,8 +22,6 @@ def clean_env() -> typing.Generator[None, None, None]:
         if (
             key.startswith("OBS_")
             or key.startswith("OTEL_")
-            or key.startswith("LOG_")
-            or key in {"APP_NAME", "SERVICE_NAME", "ENVIRONMENT"}
         ):
             del os.environ[key]
             
@@ -47,8 +45,8 @@ def test_zero_glue_install_works_with_no_args() -> None:
 
 def test_observability_settings_read_from_env_automatically() -> None:
     """Test zero-glue picks up standard env vars."""
-    os.environ["APP_NAME"] = "zero-glue-test"
-    os.environ["SERVICE_NAME"] = "magic-service"
+    os.environ["OBS_APP_NAME"] = "zero-glue-test"
+    os.environ["OBS_SERVICE_NAME"] = "magic-service"
     
     app = FastAPI()
     install_observability(app)
@@ -67,8 +65,8 @@ def test_observability_settings_read_from_env_automatically() -> None:
 def test_development_profile_overrides() -> None:
     """Test OBS_PROFILE=development behavior."""
     os.environ["OBS_PROFILE"] = "development"
-    os.environ["APP_NAME"] = "dev-api"
-    os.environ["OTEL_ENABLED"] = "true" 
+    os.environ["OBS_APP_NAME"] = "dev-api"
+    os.environ["OBS_OTEL_ENABLED"] = "true"
     
     app = FastAPI()
     install_observability(app)
@@ -78,13 +76,13 @@ def test_development_profile_overrides() -> None:
     settings = typing.cast(ObservabilitySettings, middleware.kwargs["settings"])
     
     from fastapiobserver.otel.settings import OTelSettings
-    otel_settings = OTelSettings.from_env(settings)
+    otel_settings = OTelSettings.from_env()
 
     assert settings.log_level == "DEBUG"
     # os.environ modification during profile context allows user envs to override securely
     assert otel_settings.enabled is True
     # The environment shouldn't bleed out.
-    assert "LOG_LEVEL" not in os.environ
+    assert "OBS_LOG_LEVEL" not in os.environ
 
 
 def test_development_profile_pure_defaults() -> None:
@@ -119,6 +117,6 @@ def test_production_profile_enforces_strict() -> None:
     assert security_policy.log_request_body is False
 
     # Asserts that local os environ variables do not bleed out after the end
-    assert "LOG_LEVEL" not in os.environ
-    assert "LOG_QUEUE_MAX_SIZE" not in os.environ
+    assert "OBS_LOG_LEVEL" not in os.environ
+    assert "OBS_LOG_QUEUE_MAX_SIZE" not in os.environ
     assert "OBS_REDACTION_PRESET" not in os.environ

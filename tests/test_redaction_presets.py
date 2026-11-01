@@ -5,7 +5,7 @@ import hmac
 
 import pytest
 
-import fastapiobserver
+from fastapiobserver import security
 from fastapiobserver.security import SecurityPolicy, sanitize_event
 
 
@@ -68,10 +68,10 @@ def test_preset_can_be_overridden_by_env(monkeypatch: pytest.MonkeyPatch) -> Non
     assert policy.redacted_fields == ("password",)
 
 
-def test_preset_constants_are_available_in_public_api() -> None:
-    assert "strict" in fastapiobserver.SECURITY_POLICY_PRESETS
-    assert fastapiobserver.PCI_REDACTED_FIELDS
-    assert fastapiobserver.GDPR_REDACTED_FIELDS
+def test_preset_constants_are_available_from_the_security_module() -> None:
+    assert "strict" in security.SECURITY_POLICY_PRESETS
+    assert security.PCI_REDACTED_FIELDS
+    assert security.GDPR_REDACTED_FIELDS
 
 
 def test_hash_mode_is_keyed_so_values_cannot_be_recovered_by_guessing(

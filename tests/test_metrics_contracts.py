@@ -44,6 +44,41 @@ def test_metrics_collapse_dynamic_segments_contract() -> None:
     assert collapse_dynamic_segments("/objects/0123456789abcdef012345/meta") == "/objects/:id/meta"
 
 
+@pytest.mark.parametrize("path", ["/auth/2fa", "/v2beta/users", "/files/1password"])
+def test_collapse_keeps_segments_that_only_start_with_digits(path: str) -> None:
+    from fastapiobserver.metrics import collapse_dynamic_segments
+
+    assert collapse_dynamic_segments(path) == path
+
+
+@pytest.mark.parametrize(("sampled", "has_exemplar"), [(True, True), (False, False)])
+def test_exemplar_only_for_sampled_traces(sampled: bool, has_exemplar: bool) -> None:
+    trace_api = pytest.importorskip("opentelemetry.trace")
+    from fastapiobserver.metrics.prometheus import _get_trace_exemplar
+
+    context = trace_api.SpanContext(
+        trace_id=0x1234,
+        span_id=0x5678,
+        is_remote=False,
+        trace_flags=trace_api.TraceFlags(trace_api.TraceFlags.SAMPLED if sampled else 0),
+    )
+    with trace_api.use_span(trace_api.NonRecordingSpan(context)):
+        assert (_get_trace_exemplar() is not None) is has_exemplar
+
+
+def test_multiprocess_mode_warns_that_process_stats_are_not_exported(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    pytest.importorskip("prometheus_client")
+    from fastapiobserver.metrics.prometheus import _register_collectors
+
+    monkeypatch.setenv("PROMETHEUS_MULTIPROC_DIR", str(tmp_path))
+    with caplog.at_level("WARNING", logger="fastapiobserver.metrics"):
+        _register_collectors()
+
+    assert "metrics.multiprocess.process_stats_unavailable" in caplog.messages
+
+
 def test_metrics_build_backend_contract() -> None:
     from fastapiobserver.metrics import (
         NoopMetricsBackend,

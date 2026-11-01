@@ -8,7 +8,7 @@ Then try:
     curl http://localhost:8000/health
     curl http://localhost:8000/items/42
     # Metrics are disabled by default in zero-glue mode.
-    # Enable them with METRICS_ENABLED=true, then:
+    # Enable them with OBS_METRICS_ENABLED=true, then:
     # curl http://localhost:8000/metrics
 
 Watch your terminal — every request produces a structured JSON log line with:
@@ -56,7 +56,7 @@ app = FastAPI(title="Basic Observability Example", lifespan=lifespan)
 # Try running this app with different profiles:
 #   OBS_PROFILE=development uvicorn examples.basic_app:app --reload
 #   OBS_PROFILE=production uvicorn examples.basic_app:app --reload
-#   METRICS_ENABLED=true uvicorn examples.basic_app:app --reload
+#   OBS_METRICS_ENABLED=true uvicorn examples.basic_app:app --reload
 install_observability(app)
 
 

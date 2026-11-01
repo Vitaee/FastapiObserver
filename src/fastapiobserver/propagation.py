@@ -19,7 +19,7 @@ Or for automatic instrumentation::
     instrument_httpx_client()  # all httpx calls get traceparent and the request ID
 
 ``install_observability()`` sets the request ID header to forward from
-``REQUEST_ID_HEADER``.
+``OBS_REQUEST_ID_HEADER``.
 """
 
 from __future__ import annotations
@@ -34,7 +34,7 @@ from .utils import lazy_import
 
 _LOGGER = logging.getLogger("fastapiobserver.propagation")
 # ponytail: one header per process, the last install_observability() wins; key it
-# per app if one process ever runs apps with different REQUEST_ID_HEADER values.
+# per app if one process ever runs apps with different OBS_REQUEST_ID_HEADER values.
 _request_id_header = "x-request-id"
 
 

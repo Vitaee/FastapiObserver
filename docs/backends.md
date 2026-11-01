@@ -4,9 +4,9 @@
 
 | Data | Format | How it leaves the app |
 |---|---|---|
-| Logs | JSON lines on stdout, and optionally OTLP | A log collector reads stdout, or set `OTEL_LOGS_ENABLED=true` |
-| Metrics | Prometheus text at `/metrics`, and optionally OTLP | Prometheus scrapes it, or set `OTEL_METRICS_ENABLED=true` |
-| Traces | OTLP | `OTEL_ENABLED=true` and `OTEL_EXPORTER_OTLP_ENDPOINT` |
+| Logs | JSON lines on stdout, and optionally OTLP | A log collector reads stdout, or set `OBS_OTEL_LOGS_ENABLED=true` |
+| Metrics | Prometheus text at `/metrics`, and optionally OTLP | Prometheus scrapes it, or set `OBS_OTEL_METRICS_ENABLED=true` |
+| Traces | OTLP | `OBS_OTEL_ENABLED=true` and `OTEL_EXPORTER_OTLP_ENDPOINT` |
 
 ## Logs from stdout
 
@@ -17,13 +17,13 @@ Any collector that reads container output and parses JSON works: Grafana Alloy o
 Point the OTLP endpoint at an [OpenTelemetry Collector](https://opentelemetry.io/docs/collector/) (recommended) or directly at a backend that accepts OTLP:
 
 ```bash
-export OTEL_ENABLED=true
+export OBS_OTEL_ENABLED=true
 export OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
 
 # Optional: also export logs over OTLP, keeping JSON on stdout
-export OTEL_LOGS_ENABLED=true
-export OTEL_LOGS_MODE=both          # local_json (default), otlp or both
-export OTEL_LOGS_ENDPOINT=http://otel-collector:4317
+export OBS_OTEL_LOGS_ENABLED=true
+export OBS_OTEL_LOGS_MODE=both          # local_json (default), otlp or both
+export OTEL_EXPORTER_OTLP_LOGS_ENDPOINT=http://otel-collector:4317
 ```
 
 All OpenTelemetry settings are listed in the [configuration guide](configuration.md) and the [OpenTelemetry guide](opentelemetry.md).

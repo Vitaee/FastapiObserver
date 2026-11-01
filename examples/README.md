@@ -31,7 +31,6 @@ uvicorn examples.basic_app:app --reload
 ### Security & Compliance
 | File | Description |
 |---|---|
-| [`audit_app.py`](audit_app.py) | **(Requires `[audit]`)** Simulates a banking API. It demonstrates Tamper-Evident HMAC-SHA256 signature chains, mathematically proving that your JSON log stream hasn't been reordered, tampered with, or deleted. |
 
 ## Full-Stack Deployments
 

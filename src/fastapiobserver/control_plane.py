@@ -8,13 +8,13 @@ from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, FastAPI, Header, HTTPException, Request, status
 from pydantic import BaseModel, ConfigDict, Field, field_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings
 
 from .logging import get_log_level, set_log_level
 from .otel import get_trace_sampling_ratio, set_trace_sampling_ratio
 from .otel.settings import runtime_sampler_installed
 from .security import TrustedProxyPolicy, is_trusted_client_ip, resolve_client_ip
-from .utils import EnvLoadable, normalize_path
+from .utils import EnvLoadable, InternalSettingsBase, normalize_path
 
 __all__ = [
     "RuntimeControlSettings",
@@ -184,12 +184,7 @@ def _parse_log_level(value: str) -> int:
     return level
 
 
-class _RuntimeControlEnvSettings(BaseSettings):
-    model_config = SettingsConfigDict(
-        extra="ignore",
-        case_sensitive=False,
-        populate_by_name=True,
-    )
+class _RuntimeControlEnvSettings(InternalSettingsBase):
 
     enabled: bool = Field(
         default=False,
