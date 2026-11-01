@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [2.0.1] - 2026-11-01
+
 ### Fixed
 - On FastAPI 0.142+, the Strawberry extension named FastAPI's endpoint span after the GraphQL operation instead of the request's server span, so trace lists still showed `POST /graphql`. It now names and tags the server span, with FastAPI's own tracing and with OpenTelemetry's instrumentation. Affected: 1.12.0 to 2.0.0.
 - `.env.example` still used the 1.x variable names and listed the removed Logtail sink. It now uses the 2.0 names and shows the settings for finding slow and failing requests.
