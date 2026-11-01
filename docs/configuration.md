@@ -7,7 +7,7 @@ The library supports configuration from code and env vars. Below are the most re
 To see what took effect, look for the `observability.configured` line that `install_observability()` writes at startup. It lists the active profile, log level, metrics path, OpenTelemetry endpoint and sampling, redaction mode, trusted networks, control plane path and enabled sinks. Endpoint credentials, query strings and tokens are left out.
 
 ```json
-{"message": "observability.configured", "event": {"profile": "production", "log_level": "INFO", "metrics_path": null, "tracing": true, "otlp_endpoint": "http://collector:4317", "trace_sampling_ratio": 0.1, "redaction_mode": "drop", "trusted_cidrs": ["10.0.0.0/8", "..."], "control_plane": null, "log_sinks": []}}
+{"message": "observability.configured", "event": {"profile": "production", "log_level": "INFO", "metrics_path": null, "tracing": true, "otlp_endpoint": "http://collector:4317", "trace_sampling_ratio": 0.1, "redaction_mode": "drop", "trusted_cidrs": ["10.0.0.0/8", "..."], "control_plane": null}}
 ```
 
 The line is written at `INFO`, so it's hidden when `LOG_LEVEL` is `WARNING` or higher.
@@ -44,7 +44,6 @@ Notes:
 | `LOG_SLOW_REQUEST_MS` | `1000` | With sampling, requests that take at least this long are written in full |
 | `OBS_LOOP_BLOCK_THRESHOLD_MS` | - | Write `event_loop.blocked`, with the stack of the blocking call, when the event loop doesn't run for this many milliseconds. See [calls that block the event loop](logging.md#calls-that-block-the-event-loop) |
 | `LOG_DIR` | - | Optional file log directory |
-| `OBS_LOG_SINKS` | - | Sinks from installed packages to send logs to, by entry-point name. Packages not listed are never loaded |
 | `LOG_QUEUE_MAX_SIZE` | `10000` | Max in-memory records in core log queue |
 | `LOG_QUEUE_OVERFLOW_POLICY` | `drop_oldest` | Queue overflow behavior: `drop_oldest`, `drop_newest`, `block` |
 | `LOG_QUEUE_BLOCK_TIMEOUT_SECONDS` | `1.0` | Timeout used by `block` policy before dropping newest |

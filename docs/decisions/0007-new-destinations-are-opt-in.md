@@ -1,6 +1,6 @@
 # 0007: New destinations and controls are opt-in
 
-**Status:** accepted · **Reviewed:** 2026-10-31
+**Status:** accepted · **Reviewed:** 2026-10-31 · Its row on sinks from installed packages is superseded by [0012](0012-no-sinks-from-installed-packages.md), which removed them
 
 ## Context
 

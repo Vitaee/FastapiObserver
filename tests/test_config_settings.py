@@ -126,11 +126,10 @@ def test_runtime_control_settings_from_env(monkeypatch: pytest.MonkeyPatch) -> N
     assert settings.token_env_var == "CONTROL_TOKEN"
 
 
-def test_list_settings_read_csv_or_json_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("METRICS_EXCLUDE_PATHS", "/health,/ready")
-    monkeypatch.setenv("OBS_LOG_SINKS", '["acme"]')
+@pytest.mark.parametrize("value", ["/health,/ready", '["/health", "/ready"]'])
+def test_list_settings_read_csv_or_json_from_env(
+    monkeypatch: pytest.MonkeyPatch, value: str
+) -> None:
+    monkeypatch.setenv("METRICS_EXCLUDE_PATHS", value)
 
-    settings = ObservabilitySettings()
-
-    assert settings.metrics_exclude_paths == ("/health", "/ready")
-    assert settings.log_sinks == ("acme",)
+    assert ObservabilitySettings().metrics_exclude_paths == ("/health", "/ready")

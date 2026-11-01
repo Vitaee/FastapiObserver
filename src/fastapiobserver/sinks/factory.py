@@ -7,7 +7,6 @@ if TYPE_CHECKING:
     from ..config import ObservabilitySettings
 
 from .builtin import RotatingFileSink, StdoutSink
-from .discovery import discover_entry_point_sinks
 from .logtail.sink import LogtailSink
 from .registry import get_registered_sinks
 
@@ -53,8 +52,7 @@ def build_sink_handlers(
             )
         )
 
-    # Add entry-point sinks named in OBS_LOG_SINKS
-    discover_entry_point_sinks(settings.log_sinks)
+    # Add sinks registered with register_sink()
     for sink in get_registered_sinks().values():
         try:
             handlers.append((sink.create_handler(formatter), sink.name))

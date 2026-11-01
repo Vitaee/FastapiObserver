@@ -12,7 +12,6 @@ from fastapiobserver.sinks import (
     _LogtailHandler,
     build_sink_handlers,
     clear_sinks,
-    discover_entry_point_sinks,
     get_registered_sinks,
     register_sink,
     unregister_sink,
@@ -187,68 +186,6 @@ def test_logtail_queue_empty_race(monkeypatch: Any) -> None:
     handler.emit(record)
     handler.close()
 
-def test_discover_entry_point_sinks_exceptions(monkeypatch: Any) -> None:
-    clear_sinks()
-    import importlib.metadata
-
-    # 1. Test when discovery throws a master exception
-    def mock_entry_points_error(*args, **kwargs):
-        raise RuntimeError("cannot load eps")
-
-    monkeypatch.setattr(importlib.metadata, "entry_points", mock_entry_points_error)
-    discover_entry_point_sinks()  # Should handle the Exception gracefully
-
-    # 2. Test when factory throws an exception
-    class BadEP:
-        name = "bad_ep"
-        def load(self):
-            def factory():
-                raise ValueError("cannot construct")
-            return factory
-
-    def mock_entry_points_success(*args, **kwargs):
-        if kwargs.get("group") == "fastapiobserver.log_sinks":
-            return [BadEP()]
-        return []
-
-    monkeypatch.setattr(importlib.metadata, "entry_points", mock_entry_points_success)
-    discover_entry_point_sinks(["bad_ep"])
-
-    assert len(get_registered_sinks()) == 0
-
-
-def test_entry_point_sinks_load_only_when_enabled(monkeypatch: Any, caplog: Any) -> None:
-    clear_sinks()
-    import importlib.metadata
-
-    loaded: list[str] = []
-
-    class EntryPoint:
-        def __init__(self, name: str) -> None:
-            self.name = name
-
-        def load(self) -> Any:
-            loaded.append(self.name)
-            return StdoutSink
-
-    monkeypatch.setattr(
-        importlib.metadata,
-        "entry_points",
-        lambda **kwargs: [EntryPoint("wanted"), EntryPoint("unwanted")],
-    )
-    try:
-        with caplog.at_level(logging.WARNING, logger="fastapiobserver.sinks"):
-            discover_entry_point_sinks(["wanted", "typo"])
-
-        assert loaded == ["wanted"]  # "unwanted" is never imported
-        assert "stdout" in get_registered_sinks()
-        assert {record.getMessage() for record in caplog.records} == {
-            "sinks.entry_point.not_enabled",
-            "sinks.entry_point.missing",
-        }
-    finally:
-        clear_sinks()
-
 def test_sink_registry() -> None:
     clear_sinks()
 
@@ -290,12 +227,6 @@ def test_build_sink_handlers_creates_configured_sinks() -> None:
         assert "stdout" in names
         assert "rotating_file" in names
         assert "logtail" in names
-
-def test_discover_entry_point_sinks_no_crash_on_missing() -> None:
-    # Should safely handle when no entry points exist
-    clear_sinks()
-    discover_entry_point_sinks()
-    # It shouldn't crash
 
 def test_sinks_registry_contract() -> None:
     from fastapiobserver.sinks import register_sink, get_registered_sinks, clear_sinks, StdoutSink
@@ -340,3 +271,15 @@ def test_sinks_build_handlers_contract() -> None:
     assert handlers[1][1] == "stdout"
 
     assert handlers[0][1] == "stdout"
+
+
+def test_obs_log_sinks_is_reported_as_no_longer_read(monkeypatch: Any, caplog: Any) -> None:
+    from fastapi import FastAPI
+
+    from fastapiobserver import install_observability
+
+    monkeypatch.setenv("OBS_LOG_SINKS", "acme")
+    with caplog.at_level(logging.WARNING, logger="fastapiobserver.fastapi"):
+        install_observability(FastAPI(), ObservabilitySettings(), metrics_enabled=False)
+
+    assert "observability.log_sinks_removed" in [r.getMessage() for r in caplog.records]

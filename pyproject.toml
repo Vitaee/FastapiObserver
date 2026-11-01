@@ -93,6 +93,7 @@ dev = [
     "pytest>=9.2.0",
     "pytest-randomly>=5.0.0",
     "ruff>=0.17.3",
+    "strawberry-graphql>=0.339.1",
     "cyclonedx-bom>=7.6.0",
     "uvicorn>=0.54.0",
 ]
