@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [1.15.0] - 2026-11-01
+
 ### Security
 - With body capture on (`OBS_LOG_REQUEST_BODY` or `OBS_LOG_RESPONSE_BODY`), captured bodies were written without redaction, so a login request's `password` or a returned `token` appeared in plain text. Values of sensitive keys are now redacted in JSON and form bodies, including a value the length limit cut off. Affected: every earlier release with body capture on.
 
