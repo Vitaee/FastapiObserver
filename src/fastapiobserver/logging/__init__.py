@@ -15,6 +15,7 @@ from .queueing import (
     get_log_queue_stats,
 )
 from .setup import (
+    flush_logging,
     get_log_level,
     get_managed_output_handlers,
     set_log_level,
@@ -35,6 +36,7 @@ __all__ = [
     "SinkCircuitBreakerSnapshot",
     "StructuredJsonFormatter",
     "TraceContextFilter",
+    "flush_logging",
     "get_log_bytes_by_route",
     "get_log_level",
     "get_log_queue_stats",

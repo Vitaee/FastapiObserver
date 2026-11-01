@@ -194,14 +194,13 @@ def test_resolve_request_id_contract() -> None:
 def test_extract_route_template_contract() -> None:
     from fastapiobserver.middleware import _extract_route_template
 
-    assert _extract_route_template({}, "/raw", 200) == "/raw"
-    assert _extract_route_template({}, "/raw", 404) == "<unmatched>"
+    assert _extract_route_template({}) == "<unmatched>"
 
     scope = {
         "endpoint": lambda: None,
         "route": type("Route", (), {"path": "/users/{user_id}"})(),
     }
-    assert _extract_route_template(scope, "/raw", 404) == "/users/{user_id}"
+    assert _extract_route_template(scope) == "/users/{user_id}"
 
 
 def test_cancelled_request_is_logged_as_cancelled_not_as_a_server_error(caplog) -> None:
@@ -240,3 +239,45 @@ def test_cancelled_request_is_logged_as_cancelled_not_as_a_server_error(caplog) 
         ("request.cancelled", logging.WARNING, 499),
         ("request.cancelled", logging.WARNING, 200),
     ]
+
+
+def test_captured_bodies_have_sensitive_values_redacted(caplog) -> None:
+    from fastapiobserver import SecurityPolicy
+
+    app = FastAPI()
+
+    @app.post("/login")
+    def login(credentials: dict[str, str]) -> dict[str, str]:
+        return {"token": "abc.def.ghi", "user": credentials["username"]}
+
+    install_observability(
+        app,
+        ObservabilitySettings(app_name="test", service="svc", environment="test"),
+        security_policy=SecurityPolicy(log_request_body=True, log_response_body=True),
+        metrics_enabled=False,
+    )
+    with caplog.at_level(logging.INFO, logger="fastapiobserver.middleware"):
+        TestClient(app).post("/login", json={"username": "ada", "password": "hunter2"})
+
+    event = next(r.event for r in caplog.records if "request_body" in getattr(r, "event", {}))
+    assert event["request_body"] == '{"username":"ada","password":"***"}'
+    assert event["response_body"] == '{"token":"***","user":"ada"}'
+
+
+@pytest.mark.parametrize(
+    ("body", "expected"),
+    [
+        ('{"access_token": "abc.de', '{"access_token": "***"'),  # cut off by max_body_length
+        ("username=ada&password=hunter2&x=1", "username=ada&password=***&x=1"),
+        (
+            '{"user":{"secret":7},"items":[{"token":"t"}]}',
+            '{"user":{"secret":"***"},"items":[{"token":"***"}]}',
+        ),
+        ('{"note":"no secrets, 10:00"}', '{"note":"no secrets, 10:00"}'),
+    ],
+)
+def test_redact_body_handles_cut_off_form_and_nested_bodies(body: str, expected: str) -> None:
+    from fastapiobserver import SecurityPolicy
+    from fastapiobserver.security.redaction import redact_body
+
+    assert redact_body(body, SecurityPolicy()) == expected

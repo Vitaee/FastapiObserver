@@ -5,6 +5,7 @@ import logging
 import logging.handlers
 import queue
 import threading
+import time
 from typing import Literal, cast
 
 from ..config import ObservabilitySettings
@@ -42,6 +43,33 @@ def shutdown_logging() -> None:
             queue_capacity=0,
             overflow_policy="drop_oldest",
         )
+
+
+def flush_logging(timeout_seconds: float = 5.0) -> None:
+    """Wait until queued records are written, then flush the outputs.
+
+    Logging keeps running, for other apps in the process and for this one if it
+    starts again. ``atexit`` stops it when the process exits.
+    """
+    import fastapiobserver.logging.state as state
+
+    listener = state._QUEUE_LISTENER
+    if listener is None:
+        return
+    log_queue = cast(queue.Queue[logging.LogRecord], listener.queue)
+    deadline = time.monotonic() + timeout_seconds
+    # The listener marks each record done once its handlers have run.
+    while log_queue.unfinished_tasks and time.monotonic() < deadline:
+        time.sleep(0.005)
+    for handler in list(state._MANAGED_OUTPUT_HANDLERS):
+        try:
+            handler.flush()
+        except Exception:
+            _LOGGER.debug(
+                "logging.output_handler.flush_failed",
+                exc_info=True,
+                extra={"_skip_enrichers": True},
+            )
 
 
 def _teardown_handlers_locked(suppress_errors: bool = True) -> None:

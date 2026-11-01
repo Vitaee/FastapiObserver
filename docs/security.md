@@ -46,6 +46,10 @@ policy = SecurityPolicy(
 )
 ```
 
+### Body capture
+
+Captured bodies are cut at `OBS_MAX_BODY_LENGTH` bytes, then the values of sensitive keys are redacted in JSON (`"password": "..."`) and form (`password=...`) bodies, including a value the cut left unfinished. Bodies are matched as text, not parsed, so a secret under a key that isn't in the redacted fields, or in free text, is written as it is. In `drop` mode, values in bodies are masked, since a cut-off pair can't be removed cleanly.
+
 ### Body capture media-type guard
 
 ```python

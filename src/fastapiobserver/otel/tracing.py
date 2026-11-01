@@ -10,7 +10,7 @@ from fastapi import FastAPI
 
 from ..config import ObservabilitySettings
 from ..request_context import get_request_state
-from .lifecycle import close_on_app_shutdown
+from .lifecycle import flush_on_app_shutdown
 from .native import trace_natively
 from .resource import (
     build_excluded_urls_csv,
@@ -109,8 +109,7 @@ def install_otel(
             "opentelemetry.instrumentation.fastapi"
         ).FastAPIInstrumentor.instrument_app(app, **instrument_kwargs)
 
-    if provider_owned:
-        close_on_app_shutdown(app, tracer_provider, shutdown=True)
+    flush_on_app_shutdown(app, tracer_provider)
 
     _OTEL_INSTALLED_APPS.add(app)
 

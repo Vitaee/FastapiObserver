@@ -244,3 +244,15 @@ def test_hidden_routes_added_after_install_are_not_traced(
 
     server_spans = [s.name for s in exporter.get_finished_spans() if s.kind.name == "SERVER"]
     assert server_spans == ["GET /visible"]
+
+
+def test_explicit_otel_settings_name_the_service_like_the_metrics_do() -> None:
+    pytest.importorskip("opentelemetry.sdk.resources")
+    from fastapiobserver.otel.resource import create_otel_resource
+
+    settings = ObservabilitySettings(service="orders", version="2.3.1", environment="prod")
+    resource = create_otel_resource(settings, OTelSettings(enabled=True))
+
+    assert resource.attributes["service.name"] == "orders"
+    assert resource.attributes["service.version"] == "2.3.1"
+    assert resource.attributes["deployment.environment.name"] == "prod"

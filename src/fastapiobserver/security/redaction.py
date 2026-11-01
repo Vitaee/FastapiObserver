@@ -1,6 +1,8 @@
 import functools
 import hashlib
 import hmac
+import json
+import re
 import secrets
 from collections.abc import Mapping
 from typing import Any
@@ -11,6 +13,12 @@ from .policy import _DROP, SecurityPolicy
 MAX_SANITIZE_DEPTH = 32
 _SCALAR_TYPES = frozenset({str, int, float, bool})
 _PROCESS_KEY = secrets.token_bytes(32)  # for policies without a hash_key
+# A JSON "key": value or a form key=value pair in a captured body. The value may
+# be cut off where the capture stopped.
+_BODY_PAIR = re.compile(
+    r'(?P<quote>"?)(?P<key>[\w.-]+)(?P=quote)(?P<sep>\s*[:=]\s*)'
+    r'(?P<value>"(?:[^"\\]|\\.)*"?|[^\s,&"{}\[\]]*)'
+)
 
 
 @functools.lru_cache(maxsize=64)
@@ -42,6 +50,26 @@ def _redact_value(value: Any, policy: SecurityPolicy) -> Any:
         digest = hmac.new(key, str(value).encode("utf-8"), hashlib.sha256).hexdigest()
         return f"hmac-sha256:{digest}"
     return policy.mask_text
+
+
+def redact_body(body: str, policy: SecurityPolicy) -> str:
+    """*body* with the values of sensitive keys redacted, in JSON and form bodies.
+
+    Captured bodies are cut at ``max_body_length``, so they're matched as text
+    rather than parsed. ``drop`` mode masks instead: a cut-off pair can't be
+    removed cleanly.
+    """
+    sensitive_fields = _policy_key_sets(policy)[0]
+
+    def redact(match: re.Match[str]) -> str:
+        if _normalize_key(match["key"]) not in sensitive_fields:
+            return match[0]
+        redacted = _redact_value(match["value"].strip('"'), policy)
+        text = policy.mask_text if redacted is _DROP else str(redacted)
+        quote = match["quote"]
+        return f"{quote}{match['key']}{quote}{match['sep']}{json.dumps(text) if quote else text}"
+
+    return _BODY_PAIR.sub(redact, body)
 
 
 def sanitize_event(data: dict[str, Any], policy: SecurityPolicy) -> dict[str, Any]:
@@ -175,4 +203,4 @@ def is_body_capturable(content_type: str | None, policy: SecurityPolicy) -> bool
             return True
     return False
 
-__all__ = ["sanitize_event", "is_body_capturable"]
+__all__ = ["sanitize_event", "redact_body", "is_body_capturable"]

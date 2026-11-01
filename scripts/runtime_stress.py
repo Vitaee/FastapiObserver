@@ -35,10 +35,10 @@ from fastapiobserver.logging import get_log_queue_stats, setup_logging, shutdown
 import fastapiobserver.logging.state as logging_state
 
 try:
-    import httpx
+    import httpx2
 except ImportError as exc:  # pragma: no cover - runtime dependency guard
     raise SystemExit(
-        "Missing dependency `httpx`. Install dev dependencies before running:\n"
+        "Missing dependency `httpx2`. Install dev dependencies before running:\n"
         "  python -m pip install -e '.[dev,prometheus,otel]'"
     ) from exc
 
@@ -140,9 +140,23 @@ def _logging_state_clean() -> tuple[bool, str]:
     return True, "clean"
 
 
+def _logging_running_once() -> tuple[bool, str]:
+    """Logging keeps running after an app's lifespan ends, with one handler, not one per install."""
+    root_handlers = [
+        handler
+        for handler in logging.getLogger().handlers
+        if handler in logging_state._MANAGED_HANDLERS
+    ]
+    if logging_state._QUEUE_LISTENER is None:
+        return False, "queue_listener_stopped"
+    if len(root_handlers) != 1:
+        return False, f"managed_root_handlers={len(root_handlers)}"
+    return True, "running_once"
+
+
 def _log_runtime_noise_reduction() -> None:
     """Keep stress harness output concise in CI logs."""
-    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpx2").setLevel(logging.WARNING)
     logging.getLogger("fastapiobserver.middleware").setLevel(logging.WARNING)
 
 
@@ -202,10 +216,11 @@ async def _check_lifecycle_churn(iterations: int) -> tuple[str, dict[str, Any]]:
         install_observability(app, settings, metrics_enabled=False)
         async with app.router.lifespan_context(app):
             pass
-        clean, reason = _logging_state_clean()
-        if not clean:
+        running_once, reason = _logging_running_once()
+        if not running_once:
             raise RuntimeError(f"lifecycle_leak iteration={i} reason={reason}")
 
+    shutdown_logging()
     return f"iterations={iterations}", {"iterations": iterations}
 
 
@@ -242,10 +257,10 @@ async def _check_request_stress(
     settings = _build_settings(app_name="stress-requests", queue_size=32)
     install_observability(app, settings, metrics_enabled=False)
 
-    transport = httpx.ASGITransport(app=app)
+    transport = httpx2.ASGITransport(app=app)
 
     async with app.router.lifespan_context(app):
-        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        async with httpx2.AsyncClient(transport=transport, base_url="http://test") as client:
             semaphore = asyncio.Semaphore(request_concurrency)
 
             async def _request(i: int) -> int:

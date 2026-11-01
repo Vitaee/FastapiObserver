@@ -43,6 +43,8 @@ class TraceContextFilter(logging.Filter):
                 if span_context and span_context.is_valid:
                     trace_id = f"{span_context.trace_id:032x}"
                     span_id = f"{span_context.span_id:016x}"
+                    # For OTLP export, which runs on another thread.
+                    record._otel_span_context = span_context
             except Exception:
                 _LOGGER.debug(
                     "trace_context_filter.otel_lookup_failed",

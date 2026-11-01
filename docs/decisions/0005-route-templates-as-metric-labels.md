@@ -1,6 +1,6 @@
 # 0005: Route templates, not paths, as metric labels
 
-**Status:** accepted · **Reviewed:** 2026-10-31
+**Status:** partly superseded by [0011](0011-every-unmatched-request-shares-one-label.md), for requests without a template · **Reviewed:** 2026-10-31
 
 ## Context
 

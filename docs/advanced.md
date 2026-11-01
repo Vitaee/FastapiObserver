@@ -54,30 +54,9 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"])
 
 ### Multi-worker Gunicorn
 
-> [!WARNING]
-> `--preload-app` is dangerous if visibility is initialized at the module level.
->
-> When `--preload-app` is used, the application is loaded into the master process *before* forking the worker processes. `fastapi-observer` uses a highly-performant background thread (`QueueListener`) for non-blocking logging, and OpenTelemetry similarly spawns background export threads.
->
-> Threads **do not survive** a process fork. If you call `install_observability()` at the module level (e.g., right under `app = FastAPI()`), the background threads will be created in the master process, and all workers will silently drop logs because their logging threads never started.
->
-> **How to fix:** Either remove `--preload-app`, OR initialize observability inside the explicit FastAPI `lifespan` context manager so it starts safely after the fork inside each worker:
->
-> ```python
-> from fastapi import FastAPI
-> from fastapiobserver import ObservabilitySettings, install_observability, observability_lifespan
->
-> settings = ObservabilitySettings(service="api")
->
-> @asynccontextmanager
-> async def lifespan(app: FastAPI):
->     install_observability(app, settings) # Safely initializes per-worker
->     async with observability_lifespan(app):
->         yield # App serves requests here
->         # Graceful shutdown of queues, OTel, and DB hooks happens safely on exit
->
-> app = FastAPI(lifespan=lifespan)
-> ```
+With `--preload-app`, gunicorn imports your app, and so runs `install_observability()`, in the master process, then forks the workers. Threads don't survive a fork, so each worker starts a new log writer thread after the fork, with fresh locks and an empty queue. Logs work with or without `--preload-app`. The event-loop watchdog and the thread-pool watcher start in each worker's lifespan.
+
+OpenTelemetry's batch processors restart their threads after a fork too. gRPC channels created before a fork don't work reliably in the child, though. With `--preload-app` and tracing or OTLP logs on, set `OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf`, or leave `--preload-app` off.
 
 #### Prometheus Multiprocess Mode
 
@@ -162,9 +141,11 @@ Breaker metrics exposed on `/metrics`:
 
 ### Logging Shutdown Lifecycle
 
-`install_observability()` now registers graceful logging teardown on FastAPI
-shutdown and also uses an `atexit` fallback. This reduces lost log records
-during process termination.
+When the app's lifespan ends, `install_observability()` waits for queued log
+records to be written, flushes the outputs and flushes OpenTelemetry providers.
+Logging and providers keep running, because other apps in the process share
+them and a reused `TestClient` starts the app again. They're stopped at process
+exit: logging by its `atexit` hook, OpenTelemetry providers by their own.
 
 For explicit control during the App lifecycle, we highly recommend wrapping your app's lifespan with the newly provided `observability_lifespan`:
 
