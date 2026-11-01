@@ -2,7 +2,7 @@
 
 This folder holds the same small FastAPI service twice.
 
-## Before: `main.py` and four modules (239 lines)
+## Before: `main.py` (26 lines) and four modules (239 lines)
 
 | File | Lines | What it does |
 |---|---:|---|
@@ -20,7 +20,7 @@ uvicorn main:app --reload
 
 ## After: `migrated_main.py` (26 lines)
 
-The four modules and the `/metrics` route are gone. `main.py` calls one function instead:
+The four modules and the `/metrics` route are gone. `migrated_main.py` calls one function instead:
 
 ```python
 from fastapiobserver import ObservabilitySettings, install_observability

@@ -4,7 +4,7 @@
 
 | Data | Format | How it leaves the app |
 |---|---|---|
-| Logs | JSON lines on stdout, and optionally OTLP | A log collector reads stdout, or set `OBS_OTEL_LOGS_ENABLED=true` |
+| Logs | JSON lines on stdout, and optionally OTLP | A log collector reads stdout, or set `OBS_OTEL_LOGS_ENABLED=true` with `OBS_OTEL_LOGS_MODE=both` or `otlp` |
 | Metrics | Prometheus text at `/metrics`, and optionally OTLP | Prometheus scrapes it, or set `OBS_OTEL_METRICS_ENABLED=true` |
 | Traces | OTLP | `OBS_OTEL_ENABLED=true` and `OTEL_EXPORTER_OTLP_ENDPOINT` |
 

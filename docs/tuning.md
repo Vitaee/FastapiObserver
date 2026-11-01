@@ -6,21 +6,22 @@ For high-throughput services (e.g. `10k+ RPS`), apply these exact variables to m
 
 ### 1. Head-Based Sampling
 
-Tracing 100% of requests is too expensive at scale. You should configure `fastapi-observer` to respect upstream trace flags, while only sampling a fraction of net-new requests:
+Tracing 100% of requests is too expensive at scale. Sampling is always parent-based by trace ID: a request keeps its caller's decision, and new traces are sampled at `OTEL_TRACES_SAMPLER_ARG`. `OTEL_TRACES_SAMPLER` isn't read.
 
 ```bash
 # Keep the parent's sample decision if it exists, otherwise sample 5%
-export OTEL_TRACES_SAMPLER="parentbased_traceidratio"
 export OTEL_TRACES_SAMPLER_ARG="0.05"
 ```
 
 ### 2. Exclude Noisy URLs from the SDK
 
-Do not waste cycles generating spans for health checks or static assets. `fastapi-observer` will auto-derive metrics exclusions, but you can explicitly drop them from tracing at the C-extension level:
+Do not waste cycles generating spans for health checks or static assets. The metrics path, `OBS_METRICS_EXCLUDE_PATHS`, FastAPI's docs routes and the control endpoint are already left out of traces, each matched as a whole path. To leave out more, extend that list:
 
 ```bash
-export OTEL_PYTHON_FASTAPI_EXCLUDED_URLS="healthz,metrics,favicon.ico"
+export OBS_METRICS_EXCLUDE_PATHS="/metrics,/health,/healthz,/docs,/openapi.json,/favicon.ico"
 ```
+
+Setting `OBS_OTEL_EXCLUDED_URLS` or `OTEL_PYTHON_FASTAPI_EXCLUDED_URLS` instead replaces the whole list. Their entries are regular expressions searched anywhere in the URL, so anchor them (`^/health$`).
 
 ### 3. Cap Span Attributes
 

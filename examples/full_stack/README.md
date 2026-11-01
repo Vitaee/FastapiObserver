@@ -103,7 +103,7 @@ The **"FastAPI Observer — API Overview"** dashboard is pre-loaded with 7 panel
 | **Error Rate per Route** | 4xx/5xx errors with color-coded severity |
 | **CPU & Memory Usage** | Process resource consumption (dual axis) |
 | **Request Duration P50/P95/P99** | Percentile latencies over time |
-| **Active Requests (In-Flight)** | Current request count gauge |
+| **Request Rate (req/s)** | Total requests per second |
 | **API Logs** | Live structured JSON logs from Loki |
 
 ### 4. Switch between services

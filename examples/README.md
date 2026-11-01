@@ -28,10 +28,6 @@ uvicorn examples.basic_app:app --reload
 | [`otel_app.py`](otel_app.py) | **(Requires `[otel]`)** Shows OTel instrumentation. Demonstrates how to inject standard traces and custom resource attributes (`k8s.namespace`, etc.) into spans and correlating logs. |
 | [`db_tracing_app.py`](db_tracing_app.py) | **(Requires `[otel,otel-sqlalchemy]`)** Shows SQLCommenter integration. It patches an async SQLAlchemy engine to inject trace IDs directly into raw SQL database queries as comments. |
 
-### Security & Compliance
-| File | Description |
-|---|---|
-
 ## Full-Stack Deployments
 
 If you have Docker installed, you can spin up a fully pre-configured observability stack (Prometheus, Loki, Tempo, Grafana) to see how these libraries behave in a production-like environment:
@@ -47,7 +43,7 @@ Open `http://localhost:3000` (admin/admin) to view the dashboards.
 ### [`k8s/`](k8s/)
 A complete Kubernetes setup leveraging Kustomize to deploy the `fastapi-observer` example applications alongside an OpenTelemetry Collector and the LGTM stack (Loki, Grafana, Tempo, Prometheus).
 ```bash
-kubectl apply -k examples/k8s/
+kubectl kustomize --load-restrictor=LoadRestrictionsNone examples/k8s | kubectl apply -f -
 ```
 
 ### [`time_saved/`](time_saved/)
@@ -59,4 +55,4 @@ docker compose up
 
 ---
 
-*Note: For `db_tracing_app.py`, you can test against the Postgres or MySQL databases provided in the `time_saved` or `full_stack` environments by passing the `DATABASE_URL` environment variable before starting `uvicorn`.*
+*Note: `db_tracing_app.py` uses an in-memory SQLite database unless `DATABASE_URL` points at your own Postgres or MySQL; the URL formats are in the file's comments.*

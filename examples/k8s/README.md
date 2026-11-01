@@ -27,4 +27,4 @@ kubectl -n observability port-forward svc/grafana 3000:3000
 
 Then open [http://localhost:3000](http://localhost:3000).
 
-For full instructions, see [`kubernetes.md`](../../kubernetes.md).
+For full instructions, see [`kubernetes.md`](../../docs/kubernetes.md).

@@ -110,7 +110,7 @@ New requests keep starting while every thread and connection is stuck, so a dead
 
 - The thread pool is watched once the app's lifespan starts.
 - Database pools are watched for the engines passed as `install_observability(app, db_engine=engine)`, with or without tracing. Pools without a limit, such as `NullPool`, are skipped.
-- With metrics on, `/metrics` shows the same numbers as gauges: `fastapiobserver_threadpool_busy`, `fastapiobserver_threadpool_limit`, `fastapiobserver_threadpool_waiting`, `fastapiobserver_db_pool_checked_out{engine}` and `fastapiobserver_db_pool_limit{engine}`.
+- With metrics on, `/metrics` shows the same numbers as gauges: `fastapiobserver_threadpool_busy`, `fastapiobserver_threadpool_limit`, `fastapiobserver_threadpool_waiting`, `fastapiobserver_db_pool_checked_out{engine}` and `fastapiobserver_db_pool_limit{engine}`. In Prometheus multiprocess mode these gauges aren't exported, because they describe one worker; the warnings still appear in each worker's logs.
 - Neither AnyIO nor SQLAlchemy reports how long one call waited, so there's no wait time per request.
 
 ## JSON Schema Contract
@@ -146,7 +146,7 @@ Example request log:
   "version": "0.1.0",
   "log_schema_version": "1.0.0",
   "library": "fastapiobserver",
-  "library_version": "1.3.1",
+  "library_version": "2.0.0",
   "request_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
   "trace_id": "0af7651916cd43dd8448eb211c80319c",
   "span_id": "b7ad6b7169203331",
@@ -203,7 +203,7 @@ install_observability(app, settings)
 - Set `OBS_LOG_DIR` to also enable rotating file logs.
 - With OTel logs enabled, `logs_mode` can be `local_json`, `otlp`, or `both`.
 - Uvicorn loggers are routed into the same structured pipeline. `install_observability()` drops uvicorn's access log line, the same way `uvicorn --no-access-log` does, because `request.completed` carries the same fields. To keep it anyway, set `logging.getLogger("uvicorn.access").propagate = True` after `install_observability()`.
-- Logging shutdown is handled on FastAPI lifespan shutdown and `atexit`.
+- Queued logs are written out when the FastAPI lifespan ends; logging stops at process exit (`atexit`).
 
 ## Queue and Sink Resilience Controls
 
@@ -241,7 +241,7 @@ curl -i http://localhost:8000/orders/42
 - `message=request.failed`
 - `error.type`, `error.stacktrace`, `error.fingerprint`
 
-5. Under load, inspect queue/sink metrics on `/metrics` (if Prometheus is enabled).
+5. Under load, inspect queue/sink metrics on `/metrics` (with Prometheus on, in a single process).
 
 ## Production Best Practices
 

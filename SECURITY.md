@@ -6,8 +6,8 @@ Security fixes go into the latest minor release. Upgrade to the newest `fastapi-
 
 | Version | Supported |
 |---|---|
-| 1.5.x | Yes |
-| Older | No |
+| 2.0.x | Yes |
+| < 2.0 | No |
 
 ## Reporting a vulnerability
 
