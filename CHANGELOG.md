@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [2.0.0] - 2026-11-01
+
 ### Breaking Changes
 - Every environment variable the library owns now starts with `OBS_`: `LOG_LEVEL` is `OBS_LOG_LEVEL`, `METRICS_ENABLED` is `OBS_METRICS_ENABLED`, `OTEL_ENABLED` is `OBS_OTEL_ENABLED`, and so on. For OpenTelemetry the library reads the specification's variables instead of its own: `OTEL_TRACES_SAMPLER_ARG`, `OTEL_RESOURCE_ATTRIBUTES`, `OTEL_METRIC_EXPORT_INTERVAL`, and `OTEL_EXPORTER_OTLP_*` for every signal's endpoint and protocol. `OTEL_SERVICE_NAME` now names the service on logs and metrics too, unless `OBS_SERVICE_NAME` is set, and `OTEL_SDK_DISABLED=true` turns all OpenTelemetry export off. At startup, `observability.settings_retired` lists any 1.x variable still set with its replacement. **Every deployment needs its variables renamed**; see the upgrade table in the configuration guide and decision record 0013.
 - The top-level `fastapiobserver` package exports 27 names instead of 77. The rest are still importable from their submodules, such as `fastapiobserver.security.sanitize_event` or `fastapiobserver.db_tracing.instrument_sqlalchemy`, without the same promise of stability. **Imports of a removed name need the submodule's path.**
