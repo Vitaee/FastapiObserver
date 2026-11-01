@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 
 import typing
 from typing import Any
@@ -397,10 +398,15 @@ def test_one_apps_shutdown_leaves_logging_running_for_others_and_restarts(
             client.get("/ping")
     logging_module.flush_logging()
 
+    lines = [
+        json.loads(line)
+        for line in capsys.readouterr().out.splitlines()
+        if line.startswith("{")
+    ]
     # Distinct request IDs: a handler another test left behind may repeat lines.
     request_ids = {
-        line.split('"request_id":"', 1)[1].split('"', 1)[0]
-        for line in capsys.readouterr().out.splitlines()
-        if '"message":"request.completed"' in line and '"url.path":"/ping"' in line
+        line["request_id"]
+        for line in lines
+        if line["message"] == "request.completed" and line["event"]["path"] == "/ping"
     }
     assert len(request_ids) == 2
