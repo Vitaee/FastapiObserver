@@ -60,7 +60,7 @@ Design details:
 
 Outbound calls carry the current request ID, so a request keeps one ID across every service it passes through, and searching your logs for that ID finds all of them. This works without tracing turned on.
 
-- `inject_trace_headers()` adds it as `REQUEST_ID_HEADER` (`x-request-id` by default). Without OpenTelemetry installed, that is the only header it adds.
+- `inject_trace_headers()` adds it as `OBS_REQUEST_ID_HEADER` (`x-request-id` by default). Without OpenTelemetry installed, that is the only header it adds.
 - With the `[otel]` extra, `install_observability()` adds the request ID to OpenTelemetry's global propagator, so clients it instruments, such as `instrument_httpx_client()` and `instrument_requests_session()`, send it next to `traceparent`.
 - A request ID header you set yourself is kept.
 

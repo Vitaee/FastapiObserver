@@ -42,8 +42,8 @@ flowchart TB
   app -- "SQLAlchemy" --> db[("Database")]
   logs --> stdout
   mw --> metrics
-  app -- "OTEL_ENABLED" --> otlp
-  logs -. "OTEL_LOGS_ENABLED" .-> otlp
+  app -- "OBS_OTEL_ENABLED" --> otlp
+  logs -. "OBS_OTEL_LOGS_ENABLED" .-> otlp
   stdout --> shipper
   metrics -- "scrape" --> prom
   otlp --> collector
@@ -61,7 +61,7 @@ flowchart TB
   class shipper,logstore,prom,collector,traces,grafana ext
 ```
 
-Purple is fastapi-observer, green is where data leaves the process, and orange is what you run already. Optional parts are left out: the runtime control endpoint, the Logtail sink and the tamper-evident audit log.
+Purple is fastapi-observer, green is where data leaves the process, and orange is what you run already. The optional runtime control endpoint is left out.
 
 ## What `install_observability()` Wires Up
 
@@ -91,7 +91,7 @@ sequenceDiagram
   M->>M: Request state in a ContextVar, seen by sync code in the thread pool too
   M->>A: Call the app
   A-)L: Your log records, with request_id and trace_id added
-  Note over A,L: Records below LOG_LEVEL, or from a request that isn't sampled, are held on the request
+  Note over A,L: Records below OBS_LOG_LEVEL, or from a request that isn't sampled, are held on the request
   A-->>M: Response, exception or cancellation
   M-->>C: Response with an X-Request-ID header
   alt status below 400
@@ -110,7 +110,7 @@ sequenceDiagram
 ```
 
 - The request ID comes from `X-Request-ID` only when the peer is a trusted proxy. Otherwise it's a new UUID. Outbound calls from clients OpenTelemetry instruments, such as `httpx` and `requests`, forward it along with `traceparent`.
-- A request that takes `LOG_SLOW_REQUEST_MS` or longer has its sampled-out records written too, and so does every request that fails.
+- A request that takes `OBS_LOG_SLOW_REQUEST_MS` or longer has its sampled-out records written too, and so does every request that fails.
 - The request line is redacted before it's written. With tracing on, it also counts the request's database queries and outbound HTTP calls (`db` and `http`, each with `count` and `ms`).
 - Requests no route matches, such as scanners, CORS preflights and requests an auth middleware rejects, share one `<unmatched>` metrics label, and made-up methods share `_OTHER`. No client can add a time series per URL or per method.
 
@@ -123,7 +123,7 @@ flowchart TB
   subgraph handler["Queue handler, on the caller's thread, no I/O"]
     direction TB
     ctx["Add request_id,<br/>trace_id, span_id"]
-    held{"Below LOG_LEVEL<br/>or not sampled?"}
+    held{"Below OBS_LOG_LEVEL<br/>or not sampled?"}
     hold["Hold on the request<br/>newest 200"]
     full{"Queue full?"}
     ctx --> held
@@ -134,8 +134,8 @@ flowchart TB
 
   rec --> ctx
   hold -- "request ends fine" --> dropped(["Dropped"])
-  full -- "no" --> queue[["Bounded queue, LOG_QUEUE_MAX_SIZE"]]
-  full -- "yes: LOG_QUEUE_OVERFLOW_POLICY<br/>drop_oldest, drop_newest or block" --> queue
+  full -- "no" --> queue[["Bounded queue, OBS_LOG_QUEUE_MAX_SIZE"]]
+  full -- "yes: OBS_LOG_QUEUE_OVERFLOW_POLICY<br/>drop_oldest, drop_newest or block" --> queue
 
   subgraph listener["Listener thread, one per process"]
     direction TB
@@ -145,18 +145,18 @@ flowchart TB
   queue --> breaker
   fmt --> stdout["stdout"]
   fmt --> file["Rotating file"]
-  fmt --> logtail["Logtail, with a<br/>dead-letter file"]
+  fmt --> custom["Sinks added with register_sink()"]
   fmt --> otlp["OTLP log exporter"]
 
   classDef lib fill:#6366f11f,stroke:#6366f1,stroke-width:1.5px
   classDef out fill:#10b9811f,stroke:#10b981,stroke-width:1.5px
   classDef muted fill:#94a3b81f,stroke:#94a3b8
   class ctx,held,hold,full,queue,breaker,fmt lib
-  class stdout,file,logtail,otlp out
+  class stdout,file,custom,otlp out
   class rec,dropped muted
 ```
 
-- **Holding is off by default.** It's on only with `LOG_LEVEL_ON_ERROR` set, or `LOG_SAMPLE_RATE` below 1. `WARNING` and higher are never held.
+- **Holding is off by default.** It's on only with `OBS_LOG_LEVEL_ON_ERROR` set, or `OBS_LOG_SAMPLE_RATE` below 1. `WARNING` and higher are never held.
 - **Your code never waits on I/O.** The calling thread only adds context and puts the record on the queue. Formatting, redaction and writing happen on the listener thread, so a slow stdout or a down log service can't stall the event loop.
 - **Overload is counted, not hidden.** `/metrics` shows the queue's size, enqueued, dropped and blocked records, each sink's circuit-breaker state, and log bytes per route.
 - **After a fork**, as in gunicorn with `--preload`, the child process gets a new queue, new locks and a new listener thread. It doesn't touch anything the parent's threads could have been holding.
@@ -214,7 +214,7 @@ The project is now organized as focused subpackages instead of large monolithic 
 
 - `fastapiobserver/logging/`: formatter, queueing, filters, setup lifecycle, sink circuit-breakers.
 - `fastapiobserver/middleware/`: request logging orchestration, context, IP resolution, headers, body capture, metrics hooks.
-- `fastapiobserver/sinks/`: sink protocol, registry/discovery, built-ins, factory wiring, Logtail + DLQ implementation.
+- `fastapiobserver/sinks/`: sink protocol, registry, built-in stdout and file sinks, and the factory that assembles them.
 - `fastapiobserver/metrics/`: backend contract and registry; `prometheus.py` holds the Prometheus backend, the `/metrics` endpoint (rendered by `prometheus_client`) and multiprocess helpers.
 - `fastapiobserver/security/`: policy/settings models, normalization helpers, redaction engine, trusted-proxy utilities.
 - `fastapiobserver/otel/`: OTel settings/resource/tracing/logs/metrics/lifecycle helpers.

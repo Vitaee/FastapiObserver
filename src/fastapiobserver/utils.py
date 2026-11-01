@@ -21,13 +21,13 @@ def normalize_path(path: str, *, default: str = "/") -> str:
 
 
 class InternalSettingsBase(BaseSettings):
-    """Base class for all environment settings models with common configuration."""
+    """Base class for the models that read settings from the environment.
 
-    model_config = SettingsConfigDict(
-        extra="ignore",
-        case_sensitive=False,
-        populate_by_name=True,
-    )
+    Each field is read from its alias only. Matching field names too would read
+    variables nobody meant for this library, such as ``PATH`` or ``ENABLED``.
+    """
+
+    model_config = SettingsConfigDict(extra="ignore", case_sensitive=False)
 
 
 

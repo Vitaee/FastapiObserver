@@ -11,10 +11,10 @@ import pytest
 from fastapiobserver import (
     OTelSettings,
     ObservabilitySettings,
-    RequestIdFilter,
     StructuredJsonFormatter,
     install_observability,
 )
+from fastapiobserver.logging import RequestIdFilter
 import fastapiobserver.otel.tracing as otel_tracing_module
 from fastapiobserver.logging import TraceContextFilter
 

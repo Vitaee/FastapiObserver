@@ -55,8 +55,6 @@ nav:
       - Database Tracing: db-tracing.md
       - GraphQL: graphql.md
       - Loguru: loguru.md
-      - Logtail Sink: logtail-sink.md
-      - Audit Logging: audit-logging.md
       - Plugins: plugins.md
   - Operations:
       - Architecture: architecture.md
@@ -79,4 +77,5 @@ nav:
       - 0010 Trace with FastAPI's OpenTelemetry: decisions/0010-trace-with-fastapis-own-opentelemetry.md
       - 0011 One label for unmatched requests: decisions/0011-every-unmatched-request-shares-one-label.md
       - 0012 No sinks from installed packages: decisions/0012-no-sinks-from-installed-packages.md
+      - 0013 Every setting has one name: decisions/0013-every-setting-has-one-name.md
   - Contributing: contributing.md

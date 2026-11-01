@@ -1,15 +1,12 @@
 import logging
 import os
 import tempfile
-import time
 from typing import Any
 
 from fastapiobserver import ObservabilitySettings
 from fastapiobserver.sinks import (
-    LogtailSink,
     RotatingFileSink,
     StdoutSink,
-    _LogtailHandler,
     build_sink_handlers,
     clear_sinks,
     get_registered_sinks,
@@ -35,156 +32,6 @@ def test_rotating_file_sink() -> None:
         assert isinstance(handler, logging.handlers.RotatingFileHandler)
         assert handler.formatter is formatter
         assert handler.baseFilename == os.path.join(d, "test.log")
-
-def test_logtail_sink_drop_limits() -> None:
-    formatter = logging.Formatter()
-    sink = LogtailSink(source_token="test_token", batch_size=2, flush_interval=0.1)
-    assert sink.name == "logtail"
-
-    handler = sink.create_handler(formatter)
-    assert getattr(handler, "name", None) or handler
-
-def test_logtail_sink_flushing_and_errors(monkeypatch: Any) -> None:
-    formatter = logging.Formatter()
-
-    # Needs to be wrapped to expose `LogtailSink`'s internal queue since
-    # create_handler() returns the thread wrapper Handler
-    handler = _LogtailHandler(
-        endpoint="http://example.com",
-        source_token="test",
-        batch_size=2,
-        flush_interval=0.01,
-        max_retries=2,
-        max_queue_size=2,
-    )
-    handler.setFormatter(formatter)
-
-    record = logging.LogRecord(
-        name="test", level=logging.INFO, pathname="test.py", lineno=1,
-        msg="test message", args=(), exc_info=None
-    )
-
-    calls: list[bytes] = []
-
-    class MockResponse:
-        status = 200
-        def __enter__(self): return self
-        def __exit__(self, *args): pass
-
-    def mock_urlopen(req, timeout=10):
-        calls.append(req.data)
-        return MockResponse()
-
-    monkeypatch.setattr("urllib.request.urlopen", mock_urlopen)
-
-    # 1. Fill queue to trigger drops
-    handler.emit(record)
-    handler.emit(record)
-    handler.emit(record)  # Drop oldest
-
-    # We put 1 item successfully since queue limit is 2 but the worker consumed 0
-    # because of synthetic races, so items 2 and 3 dropped old elements
-    time.sleep(0.01) # guarantee flush doesn't interleave
-    assert handler.drop_count >= 1
-
-    # 2. Let it flush
-    time.sleep(0.05)
-    assert len(calls) >= 1
-
-    # 3. Simulate HTTP error
-    def mock_urlopen_error(req, timeout=10):
-        import urllib.error
-        raise urllib.error.HTTPError("url", 400, "Bad Request", {}, None)  # type: ignore
-
-    monkeypatch.setattr("urllib.request.urlopen", mock_urlopen_error)
-    handler.emit(record)
-    time.sleep(0.05)
-
-    assert handler.error_count >= 1
-
-    handler.close()
-
-def test_logtail_retryable_error(monkeypatch: Any) -> None:
-    formatter = logging.Formatter()
-    handler = _LogtailHandler(
-        endpoint="http://example.com", source_token="test",
-        batch_size=1, flush_interval=0.01,
-        max_retries=2, max_queue_size=2,
-    )
-    handler.setFormatter(formatter)
-
-    class MockErrorResponse:
-        status = 500
-        def __enter__(self): return self
-        def __exit__(self, *args): pass
-
-    def mock_urlopen_500(req, timeout=10):
-        import urllib.error
-        raise urllib.error.HTTPError("url", 500, "Internal Error", {}, None)  # type: ignore
-
-    monkeypatch.setattr("urllib.request.urlopen", mock_urlopen_500)
-
-    # We will patch time.sleep to not wait during the test
-    monkeypatch.setattr("time.sleep", lambda x: None)
-
-    record = logging.LogRecord(
-        name="test", level=logging.INFO, pathname="test.py", lineno=1,
-        msg="test message", args=(), exc_info=None
-    )
-    handler.emit(record)
-
-    # We synchronously drain the queue bypassing the thread flush timer
-    # so we're not racing the worker thread sleep
-    handler._drain_and_send()
-
-    assert handler.error_count >= 1
-    handler.close()
-
-def test_logtail_format_exception() -> None:
-    handler = _LogtailHandler(
-        endpoint="http://example.com", source_token="test",
-        batch_size=1, flush_interval=0.01,
-        max_retries=1, max_queue_size=2,
-    )
-    # Give it a formatter that throws an exception to hit the outer except
-    class BadFormatter(logging.Formatter):
-        def format(self, record):
-            raise ValueError("bad format")
-
-    handler.setFormatter(BadFormatter())
-
-    record = logging.LogRecord(
-        name="test", level=logging.INFO, pathname="test.py", lineno=1,
-        msg="test message", args=(), exc_info=None
-    )
-    handler.emit(record)
-    assert handler.drop_count == 0  # didn't put anything
-    handler.close()
-
-def test_logtail_queue_empty_race(monkeypatch: Any) -> None:
-    # Coverage for queue.Empty during drop oldest and queue.Full on retry
-    handler = _LogtailHandler(
-        endpoint="http://example.com", source_token="test",
-        batch_size=1, flush_interval=0.01,
-        max_retries=1, max_queue_size=1,
-    )
-
-    # Mock the internal queue artificially to trigger the precise except blocks
-    import queue
-    class RaceyQueue(queue.Queue):
-        def put_nowait(self, item):
-            raise queue.Full()
-        def get_nowait(self):
-            raise queue.Empty()
-
-    handler._queue = RaceyQueue(maxsize=1)  # type: ignore
-
-    record = logging.LogRecord(
-        name="test", level=logging.INFO, pathname="test.py", lineno=1,
-        msg="test message", args=(), exc_info=None
-    )
-    handler.emit(record)
-    handler.close()
 
 def test_sink_registry() -> None:
     clear_sinks()
@@ -216,8 +63,6 @@ def test_build_sink_handlers_creates_configured_sinks() -> None:
             service="test",
             environment="test",
             log_dir=d,
-            logtail_enabled=True,
-            logtail_source_token="secret",
         )
         formatter = logging.Formatter()
 
@@ -226,7 +71,6 @@ def test_build_sink_handlers_creates_configured_sinks() -> None:
         names = [n for _, n in handlers_with_names]
         assert "stdout" in names
         assert "rotating_file" in names
-        assert "logtail" in names
 
 def test_sinks_registry_contract() -> None:
     from fastapiobserver.sinks import register_sink, get_registered_sinks, clear_sinks, StdoutSink
@@ -273,13 +117,22 @@ def test_sinks_build_handlers_contract() -> None:
     assert handlers[0][1] == "stdout"
 
 
-def test_obs_log_sinks_is_reported_as_no_longer_read(monkeypatch: Any, caplog: Any) -> None:
+def test_retired_settings_are_reported_with_their_replacements(
+    monkeypatch: Any, caplog: Any
+) -> None:
     from fastapi import FastAPI
 
     from fastapiobserver import install_observability
 
     monkeypatch.setenv("OBS_LOG_SINKS", "acme")
+    monkeypatch.setenv("LOG_LEVEL", "DEBUG")
+    monkeypatch.setenv("METRICS_ENABLED", "true")
+    monkeypatch.setenv("OBS_METRICS_ENABLED", "true")  # replacement set: not reported
     with caplog.at_level(logging.WARNING, logger="fastapiobserver.fastapi"):
         install_observability(FastAPI(), ObservabilitySettings(), metrics_enabled=False)
 
-    assert "observability.log_sinks_removed" in [r.getMessage() for r in caplog.records]
+    [record] = [r for r in caplog.records if r.getMessage() == "observability.settings_retired"]
+    assert record.event["replacements"] == {
+        "OBS_LOG_SINKS": "register_sink() in code",
+        "LOG_LEVEL": "OBS_LOG_LEVEL",
+    }

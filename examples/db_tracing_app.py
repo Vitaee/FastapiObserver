@@ -6,7 +6,7 @@ Prerequisites:
     pip install sqlalchemy aiosqlite
 
 Run this:
-    OTEL_ENABLED=true uvicorn examples.db_tracing_app:app --reload
+    OBS_OTEL_ENABLED=true uvicorn examples.db_tracing_app:app --reload
 
 What happens under the hood:
     1. The SQLAlchemy `create_async_engine` is dynamically instrumented by OpenTelemetry.

@@ -6,72 +6,67 @@ import pytest
 
 from fastapiobserver.otel import OTelLogsSettings
 
+_VARS = (
+    "OBS_OTEL_LOGS_ENABLED",
+    "OBS_OTEL_LOGS_MODE",
+    "OTEL_EXPORTER_OTLP_LOGS_PROTOCOL",
+    "OTEL_EXPORTER_OTLP_PROTOCOL",
+    "OTEL_SDK_DISABLED",
+)
 
-def test_from_env_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
-    """When no env vars are set, from_env returns defaults."""
-    monkeypatch.delenv("OTEL_LOGS_ENABLED", raising=False)
-    monkeypatch.delenv("OTEL_LOGS_MODE", raising=False)
-    monkeypatch.delenv("OTEL_LOGS_ENDPOINT", raising=False)
-    monkeypatch.delenv("OTEL_LOGS_PROTOCOL", raising=False)
 
+@pytest.fixture(autouse=True)
+def _clean_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    for name in _VARS:
+        monkeypatch.delenv(name, raising=False)
+
+
+def test_from_env_defaults() -> None:
     settings = OTelLogsSettings.from_env()
 
     assert settings.enabled is False
     assert settings.logs_mode == "local_json"
-    assert settings.otlp_endpoint is None
+    assert settings.otlp_endpoint is None  # the exporter reads the endpoint variables
     assert settings.protocol == "grpc"
 
 
 def test_from_env_reads_all_vars(monkeypatch: pytest.MonkeyPatch) -> None:
-    """All env vars are correctly read."""
-    monkeypatch.setenv("OTEL_LOGS_ENABLED", "true")
-    monkeypatch.setenv("OTEL_LOGS_MODE", "both")
-    monkeypatch.setenv("OTEL_LOGS_ENDPOINT", "http://collector:4317")
-    monkeypatch.setenv("OTEL_LOGS_PROTOCOL", "grpc")
+    monkeypatch.setenv("OBS_OTEL_LOGS_ENABLED", "true")
+    monkeypatch.setenv("OBS_OTEL_LOGS_MODE", "both")
+    monkeypatch.setenv("OTEL_EXPORTER_OTLP_LOGS_PROTOCOL", "http/protobuf")
 
     settings = OTelLogsSettings.from_env()
 
     assert settings.enabled is True
     assert settings.logs_mode == "both"
-    assert settings.otlp_endpoint == "http://collector:4317"
-    assert settings.protocol == "grpc"
-
-
-def test_from_env_http_protocol(monkeypatch: pytest.MonkeyPatch) -> None:
-    """http/protobuf protocol is correctly parsed."""
-    monkeypatch.setenv("OTEL_LOGS_ENABLED", "true")
-    monkeypatch.setenv("OTEL_LOGS_PROTOCOL", "http/protobuf")
-    monkeypatch.delenv("OTEL_LOGS_MODE", raising=False)
-    monkeypatch.delenv("OTEL_LOGS_ENDPOINT", raising=False)
-
-    settings = OTelLogsSettings.from_env()
-
     assert settings.protocol == "http/protobuf"
+
+
+def test_from_env_falls_back_to_the_shared_protocol(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("OTEL_EXPORTER_OTLP_PROTOCOL", "http/protobuf")
+
+    assert OTelLogsSettings.from_env().protocol == "http/protobuf"
+
+
+def test_from_env_signal_protocol_wins_over_the_shared_one(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OTEL_EXPORTER_OTLP_PROTOCOL", "http/protobuf")
+    monkeypatch.setenv("OTEL_EXPORTER_OTLP_LOGS_PROTOCOL", "grpc")
+
+    assert OTelLogsSettings.from_env().protocol == "grpc"
 
 
 def test_from_env_invalid_mode_defaults_to_local_json(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Invalid logs_mode falls back to local_json."""
-    monkeypatch.setenv("OTEL_LOGS_MODE", "invalid_mode")
-    monkeypatch.delenv("OTEL_LOGS_ENABLED", raising=False)
-    monkeypatch.delenv("OTEL_LOGS_ENDPOINT", raising=False)
-    monkeypatch.delenv("OTEL_LOGS_PROTOCOL", raising=False)
+    monkeypatch.setenv("OBS_OTEL_LOGS_MODE", "invalid_mode")
 
-    settings = OTelLogsSettings.from_env()
-
-    assert settings.logs_mode == "local_json"
+    assert OTelLogsSettings.from_env().logs_mode == "local_json"
 
 
-def test_from_env_otlp_only_mode(monkeypatch: pytest.MonkeyPatch) -> None:
-    """logs_mode='otlp' is correctly parsed."""
-    monkeypatch.setenv("OTEL_LOGS_ENABLED", "true")
-    monkeypatch.setenv("OTEL_LOGS_MODE", "otlp")
-    monkeypatch.setenv("OTEL_LOGS_ENDPOINT", "http://localhost:4317")
-    monkeypatch.delenv("OTEL_LOGS_PROTOCOL", raising=False)
+def test_sdk_disabled_turns_log_export_off(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("OBS_OTEL_LOGS_ENABLED", "true")
+    monkeypatch.setenv("OTEL_SDK_DISABLED", "true")
 
-    settings = OTelLogsSettings.from_env()
-
-    assert settings.enabled is True
-    assert settings.logs_mode == "otlp"
-    assert settings.otlp_endpoint == "http://localhost:4317"
+    assert OTelLogsSettings.from_env().enabled is False

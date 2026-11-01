@@ -138,11 +138,14 @@ def test_unhandled_exception_marks_the_server_span_once(
     in_memory = pytest.importorskip("opentelemetry.sdk.trace.export.in_memory_span_exporter")
     import fastapiobserver.otel.tracing as otel_tracing_module
     from fastapiobserver import OTelSettings
+    from fastapiobserver.otel.native import native_telemetry_config
 
     exporter = in_memory.InMemorySpanExporter()
     monkeypatch.setattr(otel_tracing_module, "build_otlp_exporter", lambda *_: exporter)
 
     app = FastAPI(telemetry=telemetry)  # type: ignore[arg-type]
+    if telemetry.get("tracing", True) and native_telemetry_config(app) is None:
+        pytest.skip("FastAPI traces requests itself from 0.142")
 
     @app.get("/boom-span")
     def boom() -> None:

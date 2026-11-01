@@ -8,7 +8,8 @@ import time
 
 import pytest
 
-from fastapiobserver import LOG_SCHEMA_VERSION, ObservabilitySettings, SecurityPolicy
+from fastapiobserver import ObservabilitySettings, SecurityPolicy
+from fastapiobserver.logging import LOG_SCHEMA_VERSION
 from fastapiobserver import __version__ as package_version
 from fastapiobserver.logging import StructuredJsonFormatter, setup_logging, shutdown_logging
 from fastapiobserver.plugins import register_log_filter
@@ -332,8 +333,8 @@ def test_formatter_built_by_dictconfig_reads_settings_from_env(
 ) -> None:
     # Server log configs (gunicorn logconfig_dict, Granian --log-config) build the
     # formatter by name, without arguments.
-    monkeypatch.setenv("APP_NAME", "orders-api")
-    monkeypatch.setenv("SERVICE_NAME", "orders")
+    monkeypatch.setenv("OBS_APP_NAME", "orders-api")
+    monkeypatch.setenv("OBS_SERVICE_NAME", "orders")
     logging.config.dictConfig({
         "version": 1,
         "disable_existing_loggers": False,

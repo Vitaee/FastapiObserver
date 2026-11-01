@@ -11,7 +11,6 @@ The `examples/` directory contains runnable demos:
 | [`security_presets_app.py`](https://github.com/Vitaee/FastapiObserver/tree/main/examples/security_presets_app.py) | Preset-based security policy |
 | [`allowlist_app.py`](https://github.com/Vitaee/FastapiObserver/tree/main/examples/allowlist_app.py) | Allowlist-only sanitization |
 | [`otel_app.py`](https://github.com/Vitaee/FastapiObserver/tree/main/examples/otel_app.py) | OTel tracing and resource attributes |
-| [`audit_app.py`](https://github.com/Vitaee/FastapiObserver/tree/main/examples/audit_app.py) | Tamper-evident cryptographic log signatures |
 | [`db_tracing_app.py`](https://github.com/Vitaee/FastapiObserver/tree/main/examples/db_tracing_app.py) | SQLCommenter and database trace injection |
 | [`graphql_app.py`](https://github.com/Vitaee/FastapiObserver/tree/main/examples/graphql_app.py) | Native Strawberry GraphQL observability |
 | [`benchmarks/`](https://github.com/Vitaee/FastapiObserver/tree/main/examples/benchmarks/) | Baseline vs observer benchmark harness |

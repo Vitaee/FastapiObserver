@@ -111,15 +111,15 @@ def test_otel_settings_parse_extra_resource_attributes_from_env(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv(
-        "OTEL_EXTRA_RESOURCE_ATTRIBUTES",
-        "k8s.namespace=prod,custom.team=platform",
+        "OTEL_RESOURCE_ATTRIBUTES",
+        "k8s.namespace=prod,custom.team=platform%20team",
     )
 
     settings = OTelSettings.from_env()
 
     assert settings.extra_resource_attributes == {
         "k8s.namespace": "prod",
-        "custom.team": "platform",
+        "custom.team": "platform team",  # values are percent-encoded
     }
 
 

@@ -4,6 +4,33 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Breaking Changes
+- Every environment variable the library owns now starts with `OBS_`: `LOG_LEVEL` is `OBS_LOG_LEVEL`, `METRICS_ENABLED` is `OBS_METRICS_ENABLED`, `OTEL_ENABLED` is `OBS_OTEL_ENABLED`, and so on. For OpenTelemetry the library reads the specification's variables instead of its own: `OTEL_TRACES_SAMPLER_ARG`, `OTEL_RESOURCE_ATTRIBUTES`, `OTEL_METRIC_EXPORT_INTERVAL`, and `OTEL_EXPORTER_OTLP_*` for every signal's endpoint and protocol. `OTEL_SERVICE_NAME` now names the service on logs and metrics too, unless `OBS_SERVICE_NAME` is set, and `OTEL_SDK_DISABLED=true` turns all OpenTelemetry export off. At startup, `observability.settings_retired` lists any 1.x variable still set with its replacement. **Every deployment needs its variables renamed**; see the upgrade table in the configuration guide and decision record 0013.
+- The top-level `fastapiobserver` package exports 27 names instead of 77. The rest are still importable from their submodules, such as `fastapiobserver.security.sanitize_event` or `fastapiobserver.db_tracing.instrument_sqlalchemy`, without the same promise of stability. **Imports of a removed name need the submodule's path.**
+- `OTelSettings` no longer reads `OTEL_SERVICE_VERSION` or `OTEL_ENVIRONMENT`, and `OTelSettings.from_env()` takes no arguments. Traces use `OBS_APP_VERSION` and `OBS_ENVIRONMENT`, which `OTEL_RESOURCE_ATTRIBUTES` can override.
+- Calling `install_observability()` a second time on the same app now changes nothing and logs `observability.already_installed`. It used to replace logging and metrics but keep the first call's middleware.
+
+### Security
+- A variable named like a settings field was read as that setting: `ENABLED=true` turned on the runtime control plane and OTLP export, and the control plane's path came from `PATH`. Settings are now read only from their documented names. Affected: every earlier release.
+
+### Fixed
+- Trace exclusions matched anywhere in the URL, so excluding `/health` also stopped tracing `/healthcare`, and `/metrics` stopped `/api/metrics/x`. They now match whole paths, and hidden routes with path parameters, such as `/items/{item_id}`, are excluded from traces too, as they already were from metrics.
+- Exclusions set explicitly, with `OBS_OTEL_EXCLUDED_URLS` or OpenTelemetry's `OTEL_PYTHON_*_EXCLUDED_URLS`, were extended with the discovered routes when the app started. They're now used as given. An empty `OBS_METRICS_EXCLUDE_PATHS` excludes nothing instead of falling back to the defaults.
+- OTLP log and metric export ignored `OTEL_EXPORTER_OTLP_PROTOCOL` and always used gRPC unless their own variables were set.
+- Exemplars carried the trace ID of requests whose trace wasn't sampled, so they linked to traces that were never exported. Only sampled traces get one now.
+- Metric labels collapsed a path segment that only started with digits: `/auth/2fa` was labelled `/auth/:idfa`. Only whole numeric, hex and UUID segments become `:id`.
+- In Prometheus multiprocess mode, the log queue, log volume, sink, thread pool and database pool metrics were left out without a word. Startup now logs `metrics.multiprocess.process_stats_unavailable`.
+- `OBS_PROFILE` cleared and restored the whole process environment while settings were read, so changes other threads made meanwhile were lost. It now adds and removes only its own defaults.
+
+### Removed
+- The tamper-evident audit log: `AuditChainFormatter`, `AuditKeyProvider`, `LocalHMACProvider`, `verify_audit_chain`, `AuditVerificationResult`, the `audit` extra, the `audit_key_provider` argument, the `OBS_AUDIT_*` settings and `scripts/verify_audit_chain.py`.
+- The Logtail sink and its dead-letter queue: `LogtailSink`, the `LOGTAIL_*` settings, the `fastapiobserver_dlq_*` metrics and `scripts/replay_dlq.py`. To keep sending logs to Better Stack, register a handler of your own with `register_sink()`.
+- `scripts/deploy_pypi.sh`, which uploaded with a token. Releases use Trusted Publishing.
+
+### Changed
+- The package is marked `Development Status :: 4 - Beta` until every claim in the README has a test behind it.
+- CI also tests the oldest dependency versions `pyproject.toml` allows and the `orjson` encoder, and builds and installs the wheel on every pull request. It no longer generates an SBOM that was never kept.
+
 ## [1.16.0] - 2026-11-01
 
 ### Fixed

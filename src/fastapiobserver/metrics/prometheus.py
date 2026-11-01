@@ -69,12 +69,13 @@ def mark_prometheus_process_dead(pid: int) -> None:
 
 
 def _get_trace_exemplar() -> dict[str, str] | None:
-    """Current OTel trace ID as a Prometheus exemplar, or ``None`` without a valid span."""
+    """Current OTel trace ID as a Prometheus exemplar, or ``None`` unless the trace
+    is sampled: an unsampled trace is never exported, so the link would lead nowhere."""
     try:
         from opentelemetry import trace as otel_trace
 
         ctx = otel_trace.get_current_span().get_span_context()
-        if ctx and ctx.is_valid:
+        if ctx and ctx.is_valid and ctx.trace_flags.sampled:
             return {"TraceID": f"{ctx.trace_id:032x}"}
     except Exception:
         pass
@@ -82,8 +83,7 @@ def _get_trace_exemplar() -> dict[str, str] | None:
 
 
 class _LogQueueMetricsCollector:
-    """Exposes log-queue, log volume, Logtail DLQ and sink circuit-breaker stats at
-    scrape time."""
+    """Exposes log-queue, log volume and sink circuit-breaker stats at scrape time."""
 
     def collect(self) -> Iterator[Any]:
         from prometheus_client.core import CounterMetricFamily, GaugeMetricFamily
@@ -93,7 +93,6 @@ class _LogQueueMetricsCollector:
             get_log_queue_stats,
             get_sink_circuit_breaker_stats,
         )
-        from ..sinks import get_logtail_dlq_stats
 
         queue = get_log_queue_stats()
         yield GaugeMetricFamily(
@@ -145,26 +144,6 @@ class _LogQueueMetricsCollector:
         for route, size in sorted(get_log_bytes_by_route().items()):
             log_bytes.add_metric([route], float(size))
         yield log_bytes
-
-        dlq = get_logtail_dlq_stats()
-        written = CounterMetricFamily(
-            "fastapiobserver_dlq_written_total",
-            "Total payloads written to local DLQ.",
-            labels=["reason"],
-        )
-        written.add_metric(["queue_overflow"], float(dlq["written_queue_overflow"]))
-        written.add_metric(["send_failed"], float(dlq["written_send_failed"]))
-        yield written
-        yield CounterMetricFamily(
-            "fastapiobserver_dlq_write_failures_total",
-            "Total failures when attempting to write payloads to the DLQ disk.",
-            value=float(dlq["failures"]),
-        )
-        yield CounterMetricFamily(
-            "fastapiobserver_dlq_bytes_total",
-            "Total bytes written to the DLQ disk.",
-            value=float(dlq["bytes"]),
-        )
 
         sinks = sorted(get_sink_circuit_breaker_stats().items())
         if not sinks:
@@ -236,6 +215,21 @@ class _PoolMetricsCollector:
 def _register_collectors() -> None:
     # Per-worker stats would be meaningless once aggregated across processes.
     if _multiprocess_dir():
+        _LOGGER.warning(
+            "metrics.multiprocess.process_stats_unavailable",
+            extra={
+                "event": {
+                    "message": (
+                        "In multiprocess mode /metrics has request metrics only: the "
+                        "log queue, log volume, sink, thread pool and database pool "
+                        "metrics describe one worker, so they aren't exported. The "
+                        "threadpool.saturated and db.pool_exhausted warnings still "
+                        "appear in each worker's logs."
+                    ),
+                },
+                "_skip_enrichers": True,
+            },
+        )
         return
     from ..logging.volume import start_counting
 
