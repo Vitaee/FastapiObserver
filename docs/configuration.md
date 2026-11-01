@@ -4,7 +4,7 @@
 
 The library supports configuration from code and env vars. Every variable it owns starts with `OBS_`. For OpenTelemetry it reads the [specification's variables](https://opentelemetry.io/docs/specs/otel/configuration/sdk-environment-variables/), such as `OTEL_SERVICE_NAME` and `OTEL_EXPORTER_OTLP_ENDPOINT`. Below are the most relevant env vars by area.
 
-To see what took effect, look for the `observability.configured` line that `install_observability()` writes at startup. It lists the active profile, log level, metrics path, OpenTelemetry endpoint and sampling, redaction mode, trusted networks, control plane path and enabled sinks. Endpoint credentials, query strings and tokens are left out.
+To see what took effect, look for the `observability.configured` line that `install_observability()` writes at startup. It lists the active profile, log level and sampling, metrics path, OpenTelemetry endpoint, protocol and sampling, OTLP log and metric export, redaction mode, trusted networks and control plane path. Endpoint credentials, query strings and tokens are left out.
 
 ```json
 {"message": "observability.configured", "event": {"profile": "production", "log_level": "INFO", "metrics_path": null, "tracing": true, "otlp_endpoint": "http://collector:4317", "trace_sampling_ratio": 0.1, "redaction_mode": "drop", "trusted_cidrs": ["10.0.0.0/8", "..."], "control_plane": null}}
@@ -60,7 +60,7 @@ Notes:
 | `OBS_METRICS_ENABLED` | `false` | Enable metrics backend |
 | `OBS_METRICS_BACKEND` | `prometheus` | Registered backend name used by `install_observability()` |
 | `OBS_METRICS_PATH` | `/metrics` | Metrics endpoint path |
-| `OBS_METRICS_EXCLUDE_PATHS` | `/metrics,/health,/healthz,/docs,/openapi.json` | Skip metrics for noisy endpoints. Comma-separated or a JSON array |
+| `OBS_METRICS_EXCLUDE_PATHS` | `/metrics,/health,/healthz,/docs,/openapi.json` | Skip metrics for noisy endpoints. Comma-separated or a JSON array. Empty drops these defaults; the metrics path, FastAPI's docs routes and routes with `include_in_schema=False` are still skipped once the app starts |
 | `OBS_METRICS_EXEMPLARS_ENABLED` | `false` | Enable exemplars where supported |
 | `OBS_METRICS_FORMAT` | `negotiate` | `negotiate` lets `prometheus_client` pick from the `Accept` header; `openmetrics` or `prometheus` always serve that format. Responses are gzipped when the scraper accepts it |
 

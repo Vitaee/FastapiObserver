@@ -40,7 +40,7 @@ curl http://localhost:8002/hello/world
 ### 4. Observe the Results
 
 * **Console Output**: Look at both terminal windows. Both emit functionally identical JSON logs with trace and request injection.
-* **Jaeger (Tracing)**: Navigate to `http://localhost:16686` and search for traces under the `hard-way-api` and `easy-way-api` services. Notice they both feature identical spans spanning the FastAPI lifecycle.
+* **Jaeger (Tracing)**: Navigate to `http://localhost:16686` and search for traces under the `hard-way-api` and `easy-way-api` services. Both produce a server span per request; on FastAPI 0.142+ the easy way also has FastAPI's own spans for dependencies, the endpoint and serialization.
 * **Prometheus (Metrics)**: Navigate to `http://localhost:9090` and query `http_requests_total`. Notice how both correctly avoid cardinality explosions by parsing the literal `/hello/{name}` route instead of `/hello/world`.
 
 ### 5. Expected Output Parity
@@ -54,7 +54,7 @@ Both the hand-rolled ~160 line script and the ~30 line `fastapiobserver` script 
 ```
 **The Easy Way:**
 ```json
-{"timestamp":"2026-02-21T00:27:41.354913+00:00","level":"INFO","logger":"fastapiobserver.middleware","message":"request.completed","app_name":"easy-way-api","service":"easy-way-api","request_id":"75...14","trace_id":"2d...72","span_id":"be...dd","event":{"method":"GET","path":"/hello/world","status_code":200,"duration_ms":1.193,"client_ip":"127.0.0.1","error_type":"ok","http.request.method":"GET","url.path":"/hello/world","http.response.status_code":200}}
+{"timestamp":"2026-02-21T00:27:41.354913+00:00","level":"INFO","logger":"fastapiobserver.middleware","message":"request.completed","app_name":"easy-way-api","service":"easy-way-api","environment":"development","version":"0.0.0","log_schema_version":"1.0.0","library":"fastapiobserver","library_version":"2.0.0","request_id":"75...14","trace_id":"2d...72","span_id":"be...dd","event":{"method":"GET","path":"/hello/world","status_code":200,"duration_ms":1.193,"client_ip":"127.0.0.1","error_type":"ok","http.request.method":"GET","url.path":"/hello/world","http.response.status_code":200}}
 ```
 
 #### Prometheus Metrics (Scraped on /metrics)

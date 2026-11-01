@@ -186,7 +186,7 @@ spec:
           command: ["/bin/sh", "-c"]
           args:
             - |
-              python -m pip install --no-cache-dir "fastapi-observer[all]==0.1.1" uvicorn httpx &&
+              python -m pip install --no-cache-dir "fastapi-observer[all]>=2.0,<3" uvicorn httpx &&
               uvicorn app:app --host 0.0.0.0 --port 8000 --app-dir /opt/app --log-level warning
           ports:
             - containerPort: 8000
@@ -304,7 +304,7 @@ spec:
           command: ["/bin/sh", "-c"]
           args:
             - |
-              python -m pip install --no-cache-dir "fastapi-observer[all]==0.1.1" uvicorn httpx &&
+              python -m pip install --no-cache-dir "fastapi-observer[all]>=2.0,<3" uvicorn httpx &&
               uvicorn app:app --host 0.0.0.0 --port 8000 --app-dir /opt/app --log-level warning
           ports:
             - containerPort: 8000
@@ -422,7 +422,7 @@ spec:
           command: ["/bin/sh", "-c"]
           args:
             - |
-              python -m pip install --no-cache-dir "fastapi-observer[all]==0.1.1" uvicorn httpx &&
+              python -m pip install --no-cache-dir "fastapi-observer[all]>=2.0,<3" uvicorn httpx &&
               uvicorn app:app --host 0.0.0.0 --port 8000 --app-dir /opt/app --log-level warning
           ports:
             - containerPort: 8000

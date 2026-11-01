@@ -158,7 +158,7 @@ flowchart TB
 
 - **Holding is off by default.** It's on only with `OBS_LOG_LEVEL_ON_ERROR` set, or `OBS_LOG_SAMPLE_RATE` below 1. `WARNING` and higher are never held.
 - **Your code never waits on I/O.** The calling thread only adds context and puts the record on the queue. Formatting, redaction and writing happen on the listener thread, so a slow stdout or a down log service can't stall the event loop.
-- **Overload is counted, not hidden.** `/metrics` shows the queue's size, enqueued, dropped and blocked records, each sink's circuit-breaker state, and log bytes per route.
+- **Overload is counted, not hidden.** `/metrics` shows the queue's size, enqueued, dropped and blocked records, each sink's circuit-breaker state, and log bytes per route (in Prometheus multiprocess mode these per-worker metrics aren't exported).
 - **After a fork**, as in gunicorn with `--preload`, the child process gets a new queue, new locks and a new listener thread. It doesn't touch anything the parent's threads could have been holding.
 - **When the app stops**, its lifespan waits for the queue to be written and flushes the outputs, but leaves logging running: other apps in the process share it, and a reused TestClient starts the app again. `atexit` stops the listener when the process exits.
 
@@ -206,7 +206,7 @@ At application lifespan start, observability scans registered routes and auto-di
 - FastAPI utility routes such as `/docs`, `/redoc`, `/openapi.json`
 - Routes marked `include_in_schema=False`
 
-Discovered paths are normalized (including dynamic path variants like `/:id`) and used for metrics exclusion, with active OTel middleware exclusions updated when present.
+Discovered paths are normalized (including dynamic path variants like `/:id`) and used for metrics exclusion. They're added to the trace exclusions too, unless those were set explicitly, with `OBS_OTEL_EXCLUDED_URLS` or OpenTelemetry's `OTEL_PYTHON_*_EXCLUDED_URLS`.
 
 ### Internal Package Layout (Contributor Map)
 
@@ -219,6 +219,6 @@ The project is now organized as focused subpackages instead of large monolithic 
 - `fastapiobserver/security/`: policy/settings models, normalization helpers, redaction engine, trusted-proxy utilities.
 - `fastapiobserver/otel/`: OTel settings/resource/tracing/logs/metrics/lifecycle helpers.
 
-Public imports remain backward-compatible via package facades (`__init__.py` re-exports).
+The top-level `fastapiobserver` package exports only the names in its `__init__.py`. Everything else is imported from its submodule, without the same promise of stability.
 
 ---

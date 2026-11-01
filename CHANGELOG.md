@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+- On FastAPI 0.142+, the Strawberry extension named FastAPI's endpoint span after the GraphQL operation instead of the request's server span, so trace lists still showed `POST /graphql`. It now names and tags the server span, with FastAPI's own tracing and with OpenTelemetry's instrumentation. Affected: 1.12.0 to 2.0.0.
+- `.env.example` still used the 1.x variable names and listed the removed Logtail sink. It now uses the 2.0 names and shows the settings for finding slow and failing requests.
+- The Kubernetes demo installed fastapi-observer 0.1.1 while setting 2.0 variables, so it traced nothing. It now installs 2.x.
+- Docs that no longer matched the code are corrected: `OTEL_TRACES_SAMPLER` and `OTEL_PYTHON_FASTAPI_EXCLUDED_URLS` advice in the tuning guide, what multiprocess mode leaves out of `/metrics`, provider and logging shutdown, gunicorn's `--preload` flag, the supported versions in `SECURITY.md`, and the version the benchmarks were measured with.
+
 ## [2.0.0] - 2026-11-01
 
 ### Breaking Changes

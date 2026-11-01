@@ -21,6 +21,7 @@ The hand-wired version also has to get these details right, which the library ha
 
 ### Setup
 
+- Measured with fastapi-observer 1.5.0, before 1.12.0 moved tracing to FastAPI's own OpenTelemetry support. The tracing rows (S3 to S5) predate that change.
 - Apple M1 (8 cores), Python 3.13.15, FastAPI 0.162.0, Starlette 1.10.0, uvicorn 0.54.0 with 1 worker.
 - Load from ApacheBench on the same machine: `ab -k -c 200`, `POST /items` with a small JSON body. The handler validates the body and awaits `asyncio.sleep(0.015)` to stand in for I/O.
 - Tracing scenarios export spans over OTLP/gRPC to the Jaeger all-in-one container from `examples/time_saved/docker-compose.yml`.
@@ -58,6 +59,6 @@ The handler spends its time waiting, so a single worker is limited by CPU, and r
 | H4 | 648 µs | 463 µs |
 
 - **The added time is a fixed cost per request, not a percentage.** A handler that spends 5 ms on database calls still pays about 45 µs for logging, under 1%. Most of it is building, redacting and serializing the JSON log line. S0 is not free of logging either: uvicorn's plain-text access line, which the library replaces with `request.completed`, costs about 20 µs per request on its own.
-- **Tracing is the expensive part, and most of it is OpenTelemetry itself.** Its FastAPI instrumentation creates three spans per request (the server span plus ASGI receive and send spans) and the SDK serializes and exports them. A hand-wired OpenTelemetry setup pays the same cost.
+- **Tracing is the expensive part, and most of it is OpenTelemetry itself.** In the measured version, its FastAPI instrumentation created three spans per request (the server span plus ASGI receive and send spans), which the SDK serializes and exports. Since 1.12.0, on FastAPI 0.142+, the spans are FastAPI's own: a server span plus spans for dependencies, the endpoint and serialization. A hand-wired OpenTelemetry setup pays the same cost.
 - **With every feature on, the library handles 31% more requests than the hand-wired example** (S4 vs H4), even though S4 also captures request and response bodies. The hand-wired example uses `@app.middleware("http")`, which runs each request through extra tasks and memory streams and writes log lines synchronously. The library uses a plain ASGI middleware and writes logs from a background thread.
 - **A stopped collector does not stall requests** (S5). Throughput goes up slightly because spans that cannot be delivered are dropped instead of being sent.

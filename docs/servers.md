@@ -2,7 +2,7 @@
 
 `fastapi-observer` runs inside your app, so it works the same under any ASGI server: one JSON line per request and your own `logging` calls as JSON. What differs is the server's own log lines (startup, workers, signals). This page shows how to get those as JSON too, so every line from the process has the same shape and service fields.
 
-The server configs below build `fastapiobserver.StructuredJsonFormatter` by name. Without arguments it reads the same environment variables as `install_observability()` (`OBS_APP_NAME`, `OBS_SERVICE_NAME`, `OBS_ENVIRONMENT`, `OBS_APP_VERSION`, redaction settings), so server lines carry the same fields as request lines.
+The server configs below build `fastapiobserver.StructuredJsonFormatter` by name. Without arguments it reads the same environment variables as `install_observability()` (`OBS_APP_NAME`, `OBS_SERVICE_NAME`, `OBS_ENVIRONMENT`, `OBS_APP_VERSION`, redaction settings), so server lines carry the same fields as request lines. `OBS_PROFILE` defaults aren't applied here, so set the variables themselves (for example `OBS_REDACTION_PRESET`) if server lines must be redacted the same way.
 
 ## uvicorn
 

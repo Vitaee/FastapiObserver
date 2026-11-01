@@ -53,9 +53,9 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"])
 
 ### Multi-worker Gunicorn
 
-With `--preload-app`, gunicorn imports your app, and so runs `install_observability()`, in the master process, then forks the workers. Threads don't survive a fork, so each worker starts a new log writer thread after the fork, with fresh locks and an empty queue. Logs work with or without `--preload-app`. The event-loop watchdog and the thread-pool watcher start in each worker's lifespan.
+With `--preload`, gunicorn imports your app, and so runs `install_observability()`, in the master process, then forks the workers. Threads don't survive a fork, so each worker starts a new log writer thread after the fork, with fresh locks and an empty queue. Logs work with or without `--preload`. The event-loop watchdog and the thread-pool watcher start in each worker's lifespan.
 
-OpenTelemetry's batch processors restart their threads after a fork too. gRPC channels created before a fork don't work reliably in the child, though. With `--preload-app` and tracing or OTLP logs on, set `OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf`, or leave `--preload-app` off.
+OpenTelemetry's batch processors restart their threads after a fork too. gRPC channels created before a fork don't work reliably in the child, though. With `--preload` and tracing or OTLP logs on, set `OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf`, or leave `--preload` off.
 
 #### Prometheus Multiprocess Mode
 
@@ -77,6 +77,8 @@ def child_exit(server, worker):
     mark_prometheus_process_dead(worker.pid)
 ```
 
+In multiprocess mode `/metrics` has request metrics only. The log queue, log volume, sink circuit-breaker, thread pool and database pool metrics describe one worker, so they aren't exported, and startup logs `metrics.multiprocess.process_stats_unavailable`. The `threadpool.saturated` and `db.pool_exhausted` warnings still appear in each worker's logs.
+
 ### Bounded queue and overflow policy
 
 Use queue controls to define behavior under sustained log pressure:
@@ -92,7 +94,7 @@ settings = ObservabilitySettings(
 )
 ```
 
-Queue pressure metrics exposed on `/metrics` (Prometheus mode):
+Queue pressure metrics exposed on `/metrics` (Prometheus, not in multiprocess mode):
 - `fastapiobserver_log_queue_size`
 - `fastapiobserver_log_queue_capacity`
 - `fastapiobserver_log_queue_overflow_policy_info`
@@ -132,7 +134,7 @@ settings = ObservabilitySettings(
 )
 ```
 
-Breaker metrics exposed on `/metrics`:
+Breaker metrics exposed on `/metrics` (not in multiprocess mode):
 - `fastapiobserver_sink_circuit_breaker_state_info{sink,state}`
 - `fastapiobserver_sink_circuit_breaker_failures_total{sink}`
 - `fastapiobserver_sink_circuit_breaker_skipped_total{sink}`

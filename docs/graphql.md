@@ -100,8 +100,8 @@ Request logs get GraphQL operation context:
 
 ### Traces (when OTel is enabled)
 
-- Span name changes from `POST /graphql` to `graphql.operation.GetUsersQuery`
-- Span attribute is added: `graphql.operation.name=GetUsersQuery`
+- The request's server span is renamed from `POST /graphql` to `graphql.operation.GetUsersQuery`, whether FastAPI traces the request itself (0.142+) or OpenTelemetry's instrumentation does.
+- It gets the attribute `graphql.operation.name=GetUsersQuery`.
 
 This makes dashboards and trace search much more actionable for GraphQL traffic.
 
@@ -119,7 +119,7 @@ curl -X POST http://localhost:8000/graphql \
 - `user_context.graphql.operation_name = "GetUsersQuery"`
 
 3. If OTel is enabled, confirm in your tracing backend:
-- Span name is `graphql.operation.GetUsersQuery`
+- The request's server span is named `graphql.operation.GetUsersQuery`
 - Span attribute `graphql.operation.name` exists
 
 4. Send a request without operation name and confirm fallback:

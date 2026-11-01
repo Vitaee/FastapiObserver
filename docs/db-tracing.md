@@ -49,7 +49,7 @@ SELECT * FROM users /*db_driver='asyncpg',traceparent='00-<trace-id>-<span-id>-0
 
 ## Connection pool usage
 
-Engines passed as `db_engine` are also watched for a full connection pool, with or without tracing. A `db.pool_exhausted` warning is written when every connection is checked out, and with metrics on there are pool gauges. See [full thread and database pools](logging.md#full-thread-and-database-pools).
+Engines passed as `db_engine` are also watched for a full connection pool, with or without tracing. A `db.pool_exhausted` warning is written when every connection is checked out, and with metrics on there are pool gauges (not in Prometheus multiprocess mode, where only the warning remains). See [full thread and database pools](logging.md#full-thread-and-database-pools).
 
 ## Query count and time on the request line
 

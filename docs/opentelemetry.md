@@ -54,7 +54,7 @@ Design details:
 - Supports runtime sampling updates through the control plane.
 - Sends OTel logs in OTLP mode with the same sanitization policy.
 - Supports optional OTLP metrics export for unified OTel backends.
-- Flushes and shuts down its providers when the app's lifespan ends, after the log queue has drained; on process exit the SDK's own `atexit` hook takes over.
+- Flushes its providers when the app's lifespan ends, after the log queue has drained, and leaves them running for other apps in the process; the SDK's own `atexit` hook shuts them down at process exit.
 
 ### Request ID forwarding
 
