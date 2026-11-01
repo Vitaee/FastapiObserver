@@ -53,6 +53,10 @@ class RequestState:
     """
 
     scope: Mapping[str, Any]
+    # The recording span current when the request reached the middleware: its
+    # server span, since tracing wraps the whole app. Spans opened inside, such as
+    # FastAPI's endpoint span, would hide it from code that runs later.
+    span: Any = None
     user_context: dict[str, Any] | None = None
     sampled: bool | None = None  # decided at its first record that needs it
     held_logs: deque[logging.LogRecord] | None = None

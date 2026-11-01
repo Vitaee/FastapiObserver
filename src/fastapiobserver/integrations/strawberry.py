@@ -2,7 +2,7 @@
 
 ``StrawberryObservabilityExtension`` puts the GraphQL operation name into the
 request's user context, so every log line of the request carries it, and names
-the current OpenTelemetry span after it.
+the request's OpenTelemetry server span after it.
 
 Strawberry stays an optional dependency: it's imported only when this module is.
 """
@@ -14,7 +14,7 @@ from collections.abc import Iterator
 
 from strawberry.extensions import SchemaExtension
 
-from ..request_context import get_user_context, set_user_context
+from ..request_context import get_request_state, get_user_context, set_user_context
 
 _LOGGER = logging.getLogger("fastapiobserver.integrations.strawberry")
 
@@ -46,7 +46,14 @@ class StrawberryObservabilityExtension(SchemaExtension):
         try:
             from opentelemetry import trace as otel_trace
 
-            span = otel_trace.get_current_span()
+            # The request's server span, which trace lists show. On FastAPI 0.142+
+            # the current span here is FastAPI's endpoint span inside it.
+            state = get_request_state()
+            span = (
+                state.span
+                if state is not None and state.span is not None
+                else otel_trace.get_current_span()
+            )
             if span.is_recording():
                 span.update_name(f"graphql.operation.{op_name}")
                 span.set_attribute("graphql.operation.name", op_name)

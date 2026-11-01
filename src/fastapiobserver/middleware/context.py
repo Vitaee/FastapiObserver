@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import re
+import sys
 import uuid
+from typing import Any
 
 from starlette.types import Scope
 
@@ -34,6 +36,14 @@ def _parse_traceparent(traceparent: str | None) -> tuple[str | None, str | None]
     return match.group(1), match.group(2)
 
 
+def _recording_span() -> Any:
+    # Setting up tracing imports OpenTelemetry, so without that import there's no
+    # span to find, and apps without tracing never pay for importing it.
+    otel_trace = sys.modules.get("opentelemetry.trace")
+    span = otel_trace.get_current_span() if otel_trace is not None else None
+    return span if span is not None and span.is_recording() else None
+
+
 def _resolve_request_id(candidate: str | None, trust_candidate: bool) -> str:
     if trust_candidate and candidate and REQUEST_ID_PATTERN.match(candidate):
         return candidate
@@ -50,7 +60,7 @@ class _RequestContextManager:
         headers: list[tuple[bytes, bytes]],
         trusted_source: bool,
     ) -> str:
-        set_request_state(RequestState(scope))
+        set_request_state(RequestState(scope, span=_recording_span()))
         request_id_header = _get_header(headers, self._request_id_header_bytes)
         request_id = _resolve_request_id(request_id_header, trusted_source)
         set_request_id(request_id)
