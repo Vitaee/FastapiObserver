@@ -142,6 +142,21 @@ def install_observability(
     if runtime_control_settings and runtime_control_settings.enabled:
         mount_control_plane(app, runtime_control_settings, trusted_proxy_policy)
 
+    if os.getenv("OBS_LOG_SINKS"):
+        # No longer read. Without this, a package's sink would stop getting logs silently.
+        _LOGGER.warning(
+            "observability.log_sinks_removed",
+            extra={
+                "event": {
+                    "message": (
+                        "OBS_LOG_SINKS is no longer read: sinks aren't loaded from installed "
+                        "packages any more. Register the sink in code with register_sink()."
+                    ),
+                },
+                "_skip_enrichers": True,
+            },
+        )
+
     if security_policy.redaction_mode == "hash" and security_policy.hash_key is None:
         _LOGGER.warning(
             "observability.redaction.hash_key_missing",
@@ -195,7 +210,6 @@ def install_observability(
                 "control_plane": (
                     runtime_control_settings.path if runtime_control_settings.enabled else None
                 ),
-                "log_sinks": list(settings.log_sinks),
             },
             "_skip_enrichers": True,
         },

@@ -19,7 +19,12 @@ from .resource import (
     has_configured_provider,
     import_otel_module,
 )
-from .settings import OTelSettings, get_trace_sampling_ratio, set_trace_sampling_ratio
+from .settings import (
+    OTelSettings,
+    get_trace_sampling_ratio,
+    mark_runtime_sampler_installed,
+    set_trace_sampling_ratio,
+)
 
 _LOGGER = logging.getLogger("fastapiobserver.otel")
 _OTEL_INSTALLED_APPS: weakref.WeakSet[FastAPI] = weakref.WeakSet()
@@ -79,6 +84,7 @@ def install_otel(
             trace_export.BatchSpanProcessor(build_otlp_exporter("traces", otel_settings))
         )
         trace_api.set_tracer_provider(tracer_provider)
+        mark_runtime_sampler_installed()
     elif otel_settings.otlp_endpoint:
         _LOGGER.warning(
             "otel.external_provider.detected",

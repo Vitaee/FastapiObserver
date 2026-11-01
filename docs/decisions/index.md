@@ -15,6 +15,7 @@ Each record says what was decided, the evidence for it and what it cost. Read th
 | [0009](0009-sample-logs-per-request-by-trace-id.md) | Sample logs per request, by trace ID | A request's `INFO` lines are kept or dropped together, the same way as its trace in every service. Failed and slow requests are always kept. |
 | [0010](0010-trace-with-fastapis-own-opentelemetry.md) | Trace with FastAPI's own OpenTelemetry | On FastAPI 0.142+, FastAPI traces requests itself, and its own log export stays off so error logs go through redaction. |
 | [0011](0011-every-unmatched-request-shares-one-label.md) | Every unmatched request shares one label | Preflights, rejected requests and scanners share `<unmatched>`, and made-up methods share `_OTHER`. |
+| [0012](0012-no-sinks-from-installed-packages.md) | No sinks from installed packages | Custom sinks are registered in code with `register_sink()`. The entry-point loader and `OBS_LOG_SINKS` are gone. |
 
 ## Writing a new record
 

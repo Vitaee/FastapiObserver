@@ -96,13 +96,6 @@ def parse_csv(
     return items or default
 
 
-def parse_csv_tuple(value: Any, default: tuple[str, ...]) -> tuple[str, ...]:
-    parsed = parse_csv(value, default=default, optional=False)
-    if isinstance(parsed, tuple):
-        return parsed
-    return default
-
-
 def normalize_protocol(
     value: object,
     *,

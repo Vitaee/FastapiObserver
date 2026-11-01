@@ -22,7 +22,7 @@ This integration restores per-operation visibility while keeping your existing F
 | Faster incident triage | See which GraphQL operation is causing errors/latency, not just `/graphql` |
 | Better trace readability | Span names become `graphql.operation.<operation_name>` |
 | Cleaner log correlation | Structured logs include `user_context.graphql.operation_name` |
-| Low coupling | Extension is duck-typed; no hard `strawberry-graphql` dependency in `fastapi-observer` core |
+| Low coupling | `strawberry-graphql` stays optional: it's imported only when you import the extension |
 | Safe failure behavior | Integration failures degrade gracefully and do not crash request handling |
 
 ## Prerequisites
@@ -137,8 +137,9 @@ Expected fallback in context:
 
 | Scenario | Behavior |
 |---|---|
+| Operation named in the query but not in `operationName` | The name is read after parsing, so it's still found |
 | Missing/unknown operation name | Falls back to `AnonymousOperation` |
-| Strawberry execution context parsing error | Error is swallowed; request continues |
+| Query fails to parse or validate | The operation doesn't execute, so no name is added |
 | OpenTelemetry package not present | Log enrichment still works; trace rename is skipped |
 | Existing `user_context` already set | Existing keys are preserved and `graphql.operation_name` is merged |
 | `user_context["graphql"]` is non-dict | Extension does not overwrite it; use a dict shape for GraphQL context |

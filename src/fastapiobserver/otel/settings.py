@@ -14,6 +14,7 @@ from ..utils import EnvLoadable, InternalSettingsBase, normalize_protocol
 OTEL_PROTOCOLS = {"grpc", "http/protobuf"}
 _RUNTIME_LOCK = threading.RLock()
 _RUNTIME_TRACE_SAMPLING_RATIO = 1.0
+_RUNTIME_SAMPLER_INSTALLED = False
 
 
 class _BaseOTelSettings(EnvLoadable, BaseModel):
@@ -132,6 +133,20 @@ def set_trace_sampling_ratio(ratio: float) -> float:
         global _RUNTIME_TRACE_SAMPLING_RATIO
         _RUNTIME_TRACE_SAMPLING_RATIO = value
     return value
+
+
+def mark_runtime_sampler_installed() -> None:
+    global _RUNTIME_SAMPLER_INSTALLED
+    _RUNTIME_SAMPLER_INSTALLED = True
+
+
+def runtime_sampler_installed() -> bool:
+    """Whether traces are sampled at the ratio set here.
+
+    False with no tracing, or with a tracer provider the app set up itself,
+    whose own sampler decides.
+    """
+    return _RUNTIME_SAMPLER_INSTALLED
 
 
 # ---------------------------------------------------------------------------

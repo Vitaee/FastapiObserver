@@ -108,17 +108,19 @@ Queue pressure metrics exposed on `/metrics` (Prometheus mode):
 ### Sink circuit breaker
 
 Every output sink is wrapped with a circuit breaker so a failing sink does not
-degrade request-path logging. This includes custom sinks registered via the
-`LogSink` protocol.
-The core package stays intentionally lean; provider-specific sinks can be added
-as optional packages without changing `install_observability()`.
+degrade request-path logging. This includes custom sinks.
 
-A package provides a sink through the `fastapiobserver.log_sinks` entry-point
-group. Installing it isn't enough: list its entry-point name in `OBS_LOG_SINKS`
-(for example `OBS_LOG_SINKS=acme`), so a dependency can't start receiving your
-logs on its own. Entry points that are installed but not listed are never
-imported; a `sinks.entry_point.not_enabled` warning names them, and
-`sinks.entry_point.missing` names listed sinks that aren't installed.
+To send logs somewhere else, write a class with a `name` and a
+`create_handler(formatter)` method (the `LogSink` protocol), and register it
+before calling `install_observability()`. Its handler gets the same redacted
+JSON lines as stdout, on the log queue's listener thread:
+
+```python
+from fastapiobserver import register_sink
+
+register_sink(MySink())
+install_observability(app, settings)
+```
 
 ```python
 settings = ObservabilitySettings(

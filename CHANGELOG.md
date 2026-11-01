@@ -4,6 +4,20 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+- The Strawberry extension made every GraphQL request fail with a 500 on current Strawberry (0.339.1). It didn't subclass Strawberry's `SchemaExtension`, and Strawberry calls methods it lacked. It now subclasses it, works with both sync and async execution, and reads the operation name after the query is parsed, so an operation named only in the query text is found. Its tests now run against real Strawberry instead of mocks.
+- The runtime control plane answered an `Authorization` header with non-ASCII characters with a 500 instead of a 401.
+- The runtime control plane accepted a `trace_sampling_ratio` and reported it applied even when nothing used it: with tracing off, or with a tracer provider the app set up itself. It now answers `409`, and `GET` returns `null` for the ratio.
+
+### Added
+- The runtime control plane logs every change as `control_plane.settings_changed`, with what was requested, the settings it replaced, the caller's IP address and the process ID. It's written before the change, so raising the log level can't drop it. Responses include `process_id`, since a change applies to the process that served the request.
+
+### Removed
+- Log sinks from installed packages: the `fastapiobserver.log_sinks` entry-point group, the `OBS_LOG_SINKS` setting (`ObservabilitySettings.log_sinks`) and `fastapiobserver.sinks.discover_entry_point_sinks`. No package is known to provide one. Register a custom sink in code with `register_sink()`. If `OBS_LOG_SINKS` is still set, startup logs `observability.log_sinks_removed`. **Apps that loaded a sink this way need one `register_sink()` call.** See decision record 0012.
+
+### Changed
+- Importing `fastapiobserver.integrations.strawberry` without Strawberry installed now raises `ImportError`. The extension couldn't work without Strawberry before either.
+
 ## [1.15.0] - 2026-11-01
 
 ### Security

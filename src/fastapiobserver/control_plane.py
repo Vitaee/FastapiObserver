@@ -12,6 +12,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from .logging import get_log_level, set_log_level
 from .otel import get_trace_sampling_ratio, set_trace_sampling_ratio
+from .otel.settings import runtime_sampler_installed
 from .security import TrustedProxyPolicy, is_trusted_client_ip, resolve_client_ip
 from .utils import EnvLoadable, normalize_path
 
@@ -21,6 +22,7 @@ __all__ = [
     "mount_control_plane",
 ]
 
+_LOGGER = logging.getLogger("fastapiobserver.control_plane")
 _MOUNTED_CONTROL_PATHS: weakref.WeakKeyDictionary[FastAPI, set[str]] = weakref.WeakKeyDictionary()
 
 class RuntimeControlSettings(EnvLoadable, BaseModel):
@@ -94,8 +96,9 @@ def mount_control_plane(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Unauthorized",
             )
-        expected = f"Bearer {current_token}"
-        if not authorization or not secrets.compare_digest(authorization, expected):
+        expected = f"Bearer {current_token}".encode()
+        # Bytes: compare_digest rejects str with non-ASCII characters by raising.
+        if not authorization or not secrets.compare_digest(authorization.encode(), expected):
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Unauthorized",
@@ -112,9 +115,32 @@ def mount_control_plane(
         return _current_runtime_settings()
 
     @router.post("")
-    async def update_settings(payload: ControlPlanePayload) -> dict[str, object]:
-        if payload.log_level:
-            _set_log_level(payload.log_level)
+    async def update_settings(
+        payload: ControlPlanePayload, request: Request
+    ) -> dict[str, object]:
+        level = _parse_log_level(payload.log_level) if payload.log_level else None
+        if payload.trace_sampling_ratio is not None and not runtime_sampler_installed():
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    "Trace sampling isn't controlled here: tracing is off, or the "
+                    "app's own tracer provider decides it."
+                ),
+            )
+        # Logged before the change, so a higher new level can't drop the record.
+        _LOGGER.warning(
+            "control_plane.settings_changed",
+            extra={
+                "event": {
+                    "requested": payload.model_dump(exclude_none=True),
+                    "previous": _current_runtime_settings(),
+                    "client_ip": request.client.host if request.client else None,
+                },
+                "_skip_enrichers": True,
+            },
+        )
+        if level is not None:
+            set_log_level(level)
         if payload.trace_sampling_ratio is not None:
             set_trace_sampling_ratio(payload.trace_sampling_ratio)
         return _current_runtime_settings()
@@ -139,20 +165,23 @@ def _is_trusted_caller(request: Request, policy: TrustedProxyPolicy) -> bool:
 def _current_runtime_settings() -> dict[str, object]:
     return {
         "log_level": get_log_level(),
-        "trace_sampling_ratio": get_trace_sampling_ratio(),
+        "trace_sampling_ratio": (
+            get_trace_sampling_ratio() if runtime_sampler_installed() else None
+        ),
+        # Changes apply to this process only. Each worker of a multi-worker
+        # server has its own settings.
+        "process_id": os.getpid(),
     }
 
 
-def _set_log_level(value: str) -> None:
-    normalized = value.upper().strip()
-    level = logging.getLevelName(normalized)
+def _parse_log_level(value: str) -> int:
+    level = logging.getLevelName(value.upper().strip())
     if not isinstance(level, int):
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=f"Invalid log level: {value}",
         )
-
-    set_log_level(level)
+    return level
 
 
 class _RuntimeControlEnvSettings(BaseSettings):
