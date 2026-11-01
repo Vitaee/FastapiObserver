@@ -274,3 +274,109 @@ def test_log_bytes_are_counted_once_per_line_by_route_and_exported() -> None:
     assert get_log_bytes_by_route()[route] - before == sum(len(line) for line in request_lines)
     output = prometheus_client.generate_latest().decode()
     assert f'fastapiobserver_log_bytes_total{{route="{route}"}}' in output
+
+
+def _n_plus_one_app(engine: Any, *, async_engine: bool = False) -> FastAPI:
+    from sqlalchemy import text
+
+    app = FastAPI()
+    if async_engine:
+
+        @app.get("/orders")
+        async def list_orders_async() -> dict[str, str]:
+            async with engine.connect() as conn:
+                for order_id in range(12):
+                    await conn.execute(text("SELECT :order_id"), {"order_id": order_id})
+            return {}
+
+    else:
+
+        @app.get("/orders")
+        def list_orders() -> dict[str, str]:
+            with engine.connect() as conn:
+                for order_id in range(12):
+                    conn.execute(text("SELECT :order_id"), {"order_id": order_id})
+            return {}
+
+    return app
+
+
+def _request_db_totals_and_warnings(
+    app: FastAPI, settings: ObservabilitySettings, **install: Any
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    install_observability(app, settings, metrics_enabled=False, **install)
+    collector = _capture_logs(settings)
+    client = TestClient(app)
+    client.get("/orders")
+    client.get("/orders")
+    shutdown_logging()
+    [first, _] = [p["event"] for p in collector.payloads if p["message"] == "request.completed"]
+    warnings = [p["event"] for p in collector.payloads if p["message"] == "db.n_plus_one"]
+    return first, warnings
+
+
+def test_sqlalchemy_queries_are_counted_and_n_plus_one_reported_without_tracing() -> None:
+    sqlalchemy = pytest.importorskip("sqlalchemy")
+    engine = sqlalchemy.create_engine("sqlite://")
+    settings = ObservabilitySettings()
+
+    first, warnings = _request_db_totals_and_warnings(
+        _n_plus_one_app(engine), settings, db_engine=engine
+    )
+
+    assert first["db"]["count"] == 12
+    assert first["db"]["ms"] > 0
+    assert warnings == [{"method": "GET", "route": "/orders", "statement": "SELECT ?", "count": 12}]
+
+
+def test_async_sqlalchemy_queries_are_counted_without_tracing() -> None:
+    pytest.importorskip("aiosqlite")
+    asyncio_ext = pytest.importorskip("sqlalchemy.ext.asyncio")
+    from sqlalchemy.pool import NullPool
+
+    engine = asyncio_ext.create_async_engine("sqlite+aiosqlite://", poolclass=NullPool)
+    settings = ObservabilitySettings()
+
+    first, warnings = _request_db_totals_and_warnings(
+        _n_plus_one_app(engine, async_engine=True), settings, db_engine=engine
+    )
+
+    assert first["db"]["count"] == 12
+    assert [w["count"] for w in warnings] == [12]
+
+
+def test_sqlalchemy_queries_count_once_with_tracing_on(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sqlalchemy = pytest.importorskip("sqlalchemy")
+    in_memory = pytest.importorskip("opentelemetry.sdk.trace.export.in_memory_span_exporter")
+    trace_api = pytest.importorskip("opentelemetry.trace")
+    from fastapiobserver.db_queries import SQLALCHEMY_INSTRUMENTATION, count_queries
+
+    monkeypatch.setattr(
+        otel_tracing_module, "build_otlp_exporter", lambda *_: in_memory.InMemorySpanExporter()
+    )
+    engine = sqlalchemy.create_engine("sqlite://")
+    count_queries(engine)
+    settings = ObservabilitySettings()
+    app = FastAPI()
+
+    @app.get("/orders")
+    def list_orders() -> dict[str, str]:
+        # Each query as SQLAlchemy's instrumentation would trace it, where it can.
+        tracer = trace_api.get_tracer(SQLALCHEMY_INSTRUMENTATION)
+        with engine.connect() as conn:
+            for order_id in range(12):
+                with tracer.start_as_current_span(
+                    "SELECT",
+                    kind=trace_api.SpanKind.CLIENT,
+                    attributes={"db.system": "sqlite", "db.statement": "SELECT ?"},
+                ):
+                    conn.execute(sqlalchemy.text("SELECT :order_id"), {"order_id": order_id})
+        return {}
+
+    first, _ = _request_db_totals_and_warnings(
+        app, settings, otel_settings=OTelSettings(enabled=True)
+    )
+
+    assert first["db"]["count"] == 12

@@ -9,6 +9,7 @@ from typing import Any
 from fastapi import FastAPI
 
 from ..config import ObservabilitySettings
+from ..db_queries import SQLALCHEMY_INSTRUMENTATION
 from ..request_context import get_request_state
 from .lifecycle import flush_on_app_shutdown
 from .exclusions import build_excluded_urls_csv
@@ -125,6 +126,7 @@ def _request_call_totals(trace_api: Any, trace_sdk: Any) -> Any:
     an outbound HTTP call, to its request's ``db`` or ``http`` totals.
 
     It sees only spans that are sampled, from clients that are instrumented.
+    SQLAlchemy's are skipped: its queries are counted from its own events.
     """
     client_kind = trace_api.SpanKind.CLIENT
 
@@ -132,6 +134,9 @@ def _request_call_totals(trace_api: Any, trace_sdk: Any) -> Any:
         def on_end(self, span: Any) -> None:
             request_state = get_request_state()
             if request_state is None or span.kind != client_kind or span.end_time is None:
+                return
+            scope = span.instrumentation_scope
+            if scope is not None and scope.name == SQLALCHEMY_INSTRUMENTATION:
                 return
             attributes = span.attributes or {}
             seconds = (span.end_time - span.start_time) / 1e9

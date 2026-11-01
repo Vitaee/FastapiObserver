@@ -111,7 +111,7 @@ sequenceDiagram
 
 - The request ID comes from `X-Request-ID` only when the peer is a trusted proxy. Otherwise it's a new UUID. Outbound calls from clients OpenTelemetry instruments, such as `httpx` and `requests`, forward it along with `traceparent`.
 - A request that takes `OBS_LOG_SLOW_REQUEST_MS` or longer has its sampled-out records written too, and so does every request that fails.
-- The request line is redacted before it's written. With tracing on, it also counts the request's database queries and outbound HTTP calls (`db` and `http`, each with `count` and `ms`).
+- The request line is redacted before it's written. It also counts the request's database queries and outbound HTTP calls (`db` and `http`, each with `count` and `ms`): SQLAlchemy queries from SQLAlchemy's own events, everything else from client spans when tracing is on.
 - Requests no route matches, such as scanners, CORS preflights and requests an auth middleware rejects, share one `<unmatched>` metrics label, and made-up methods share `_OTHER`. No client can add a time series per URL or per method.
 
 ## The log pipeline

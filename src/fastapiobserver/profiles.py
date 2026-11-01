@@ -12,6 +12,9 @@ _PROFILE_DEFAULTS: dict[str, dict[str, str]] = {
         "OBS_LOG_LEVEL": "INFO",
         "OBS_LOG_QUEUE_MAX_SIZE": "20000",
         "OBS_REDACTION_PRESET": "strict",
+        # Costs nothing per request; see decision record 0014. Held DEBUG logs
+        # (OBS_LOG_LEVEL_ON_ERROR) stay opt-in: each held record costs CPU.
+        "OBS_LOOP_BLOCK_THRESHOLD_MS": "250",
     },
 }
 
