@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-from fastapiobserver.otel.lifecycle import close_on_app_shutdown
+from fastapiobserver.otel.lifecycle import flush_on_app_shutdown
 
 
 class _Provider:
@@ -28,30 +28,22 @@ def _run_lifespan(app: FastAPI) -> None:
     asyncio.run(_cycle())
 
 
-def test_close_on_app_shutdown_runs_once_per_app_and_provider() -> None:
+def test_flush_on_app_shutdown_flushes_each_lifespan_and_never_shuts_down() -> None:
+    # The provider is global, and the app may start again, as a reused TestClient
+    # does. Process exit shuts it down through the SDK's own atexit hook.
     app = FastAPI()
     calls: list[str] = []
     provider = _Provider(calls)
 
-    close_on_app_shutdown(app, provider, shutdown=True)
-    close_on_app_shutdown(app, provider, shutdown=True)
+    flush_on_app_shutdown(app, provider)
+    flush_on_app_shutdown(app, provider)
 
     _run_lifespan(app)
     _run_lifespan(app)
-    assert calls == ["shutdown"]
+    assert calls == ["flush", "flush"]
 
 
-def test_close_on_app_shutdown_only_flushes_providers_we_do_not_own() -> None:
-    app = FastAPI()
-    calls: list[str] = []
-
-    close_on_app_shutdown(app, _Provider(calls), shutdown=False)
-
-    _run_lifespan(app)
-    assert calls == ["flush"]
-
-
-def test_close_on_app_shutdown_runs_after_custom_lifespan() -> None:
+def test_flush_on_app_shutdown_runs_after_custom_lifespan() -> None:
     events: list[str] = []
 
     @asynccontextmanager
@@ -61,7 +53,7 @@ def test_close_on_app_shutdown_runs_after_custom_lifespan() -> None:
         events.append("app-shutdown")
 
     app = FastAPI(lifespan=lifespan)
-    close_on_app_shutdown(app, _Provider(events), shutdown=True)
+    flush_on_app_shutdown(app, _Provider(events))
 
     _run_lifespan(app)
-    assert events == ["startup", "app-shutdown", "shutdown"]
+    assert events == ["startup", "app-shutdown", "flush"]

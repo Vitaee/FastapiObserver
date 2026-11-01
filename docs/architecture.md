@@ -72,7 +72,7 @@ Purple is fastapi-observer, green is where data leaves the process, and orange i
 5. Optional OTel logs/metrics setup when OTLP settings are enabled.
 6. Request logging middleware with sanitization and context cleanup.
 7. Runtime control endpoint when runtime control is enabled.
-8. Lifespan-based teardown hooks for logging and SQLAlchemy instrumentation cleanup.
+8. A lifespan hook that writes out queued logs and flushes OpenTelemetry providers when the app stops.
 
 ## One request
 
@@ -112,7 +112,7 @@ sequenceDiagram
 - The request ID comes from `X-Request-ID` only when the peer is a trusted proxy. Otherwise it's a new UUID. Outbound calls from clients OpenTelemetry instruments, such as `httpx` and `requests`, forward it along with `traceparent`.
 - A request that takes `LOG_SLOW_REQUEST_MS` or longer has its sampled-out records written too, and so does every request that fails.
 - The request line is redacted before it's written. With tracing on, it also counts the request's database queries and outbound HTTP calls (`db` and `http`, each with `count` and `ms`).
-- 404s for paths no route matches share one `<unmatched>` metrics label, so scanners can't add a time series per URL.
+- Requests no route matches, such as scanners, CORS preflights and requests an auth middleware rejects, share one `<unmatched>` metrics label, and made-up methods share `_OTHER`. No client can add a time series per URL or per method.
 
 ## The log pipeline
 
@@ -160,7 +160,7 @@ flowchart TB
 - **Your code never waits on I/O.** The calling thread only adds context and puts the record on the queue. Formatting, redaction and writing happen on the listener thread, so a slow stdout or a down log service can't stall the event loop.
 - **Overload is counted, not hidden.** `/metrics` shows the queue's size, enqueued, dropped and blocked records, each sink's circuit-breaker state, and log bytes per route.
 - **After a fork**, as in gunicorn with `--preload`, the child process gets a new queue, new locks and a new listener thread. It doesn't touch anything the parent's threads could have been holding.
-- **On shutdown**, the lifespan, or `atexit` without one, stops the listener after it writes what's left in the queue.
+- **When the app stops**, its lifespan waits for the queue to be written and flushes the outputs, but leaves logging running: other apps in the process share it, and a reused TestClient starts the app again. `atexit` stops the listener when the process exits.
 
 ## Diagnosing "slow, but CPU is low"
 

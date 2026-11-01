@@ -15,10 +15,9 @@ from fastapi import FastAPI
 
 from .config import ObservabilitySettings
 from .control_plane import RuntimeControlSettings, mount_control_plane
-from .logging import setup_logging, shutdown_logging
+from .logging import flush_logging, setup_logging
 from .loop_watchdog import EventLoopWatchdog
 from .profiles import apply_profile_context
-from .db_tracing import uninstrument_sqlalchemy
 from .metrics import (
     MetricsBackend,
     build_metrics_backend,
@@ -47,7 +46,6 @@ _ROUTE_PARAM_PATTERN = re.compile(r"\{[^{}]+\}")
 @dataclass
 class ObservabilityRuntimeState:
     settings: ObservabilitySettings
-    teardown_done: bool = False
     excluded_urls: frozenset[str] = frozenset()
 
 
@@ -86,11 +84,7 @@ def install_observability(
         otel_metrics_settings = otel_metrics_settings or OTelMetricsSettings.from_env()
         runtime_control_settings = runtime_control_settings or RuntimeControlSettings.from_env()
 
-    # Legacy fallback guard
-    app.state._observability_teardown_done = False
-
-    # Mark a fresh install cycle so shutdown executes once per lifecycle.
-    # Ensure settings are stored on state for lifespan to access
+    # Settings for the lifespan to read.
     app.state._observability_state = ObservabilityRuntimeState(settings=settings)
 
     # --- 1 & 2. Structured logging + OTLP Logs ---
@@ -409,7 +403,7 @@ def _build_exclude_path_variants(path: str) -> set[str]:
 
 @asynccontextmanager
 async def observability_lifespan(app: FastAPI) -> typing.AsyncGenerator[typing.Any, None]:
-    """A native FastAPI lifespan context manager for graceful observability teardown.
+    """A FastAPI lifespan context manager that writes out queued logs when the app stops.
     
     Developers can yield from this manager directly in their app's lifespan:
     
@@ -447,9 +441,8 @@ def _register_logging_shutdown_hook(app: FastAPI) -> None:
     ) -> typing.AsyncGenerator[typing.Any, None]:
         async with observability_lifespan(app_inst):
             if original_lifespan:
-                # If the user is explicitly using observability_lifespan inside their
-                # original_lifespan, this will safely no-op during cleanup because
-                # _teardown_observability is idempotent.
+                # If the user also enters observability_lifespan in their own
+                # lifespan, the queue is just flushed twice.
                 async with original_lifespan(app_inst) as state:
                     yield state
             else:
@@ -460,19 +453,9 @@ def _register_logging_shutdown_hook(app: FastAPI) -> None:
 
 
 def _teardown_observability(app: FastAPI) -> None:
-    state = _get_runtime_state(app)
-    if state:
-        if state.teardown_done:
-            return
-    elif getattr(app.state, "_observability_teardown_done", False):
-        return
-    
-    shutdown_logging()
-    uninstrument_sqlalchemy()
-    
-    if state:
-        state.teardown_done = True
-    else:
-        app.state._observability_teardown_done = True
+    # Logging and SQLAlchemy instrumentation are shared by every app in the
+    # process, and this app may start again, as a reused TestClient does. So
+    # write out what's queued and leave them running; atexit stops logging.
+    flush_logging()
 
 __all__ = ["install_observability", "observability_lifespan"]

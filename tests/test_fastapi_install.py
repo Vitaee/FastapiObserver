@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 
 import typing
 from typing import Any
@@ -8,6 +9,7 @@ import logging
 
 import pytest
 from fastapi import FastAPI
+from fastapi.testclient import TestClient
 
 import fastapiobserver.fastapi as fastapi_module
 from fastapiobserver import (
@@ -166,7 +168,7 @@ def test_install_observability_registers_logging_shutdown_hook_once(
     def mock_shutdown() -> None:
         mock_calls.append(1)
 
-    monkeypatch.setattr(fastapi_module, "shutdown_logging", mock_shutdown)
+    monkeypatch.setattr(fastapi_module, "flush_logging", mock_shutdown)
 
     install_observability(app, settings, metrics_enabled=False)
     install_observability(app, settings, metrics_enabled=False)
@@ -188,13 +190,13 @@ def test_custom_observability_lifespan_cleans_up_resources(
 ) -> None:
     app = FastAPI()
     
-    # We will track calls to shutdown_logging
+    # We will track calls to flush_logging
     mock_calls = []
 
     def mock_shutdown() -> None:
         mock_calls.append(1)
 
-    monkeypatch.setattr(fastapi_module, "shutdown_logging", mock_shutdown)
+    monkeypatch.setattr(fastapi_module, "flush_logging", mock_shutdown)
     
     async def _run_explicit_lifespan() -> None:
         async with observability_lifespan(app):
@@ -214,7 +216,7 @@ def test_cleanup_runs_again_after_reinstall(
     def mock_shutdown() -> None:
         mock_calls.append(1)
 
-    monkeypatch.setattr(fastapi_module, "shutdown_logging", mock_shutdown)
+    monkeypatch.setattr(fastapi_module, "flush_logging", mock_shutdown)
 
     async def _run_lifespan_cycle() -> None:
         async with app.router.lifespan_context(app):
@@ -371,3 +373,40 @@ def test_install_logs_the_settings_that_took_effect(
     assert event["redaction_mode"] == "drop"  # from the production profile's strict preset
     assert event["metrics_path"] is None
     assert event["otlp_endpoint"] == "https://collector.internal:4318/v1/traces"
+
+
+def test_one_apps_shutdown_leaves_logging_running_for_others_and_restarts(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    import fastapiobserver.logging as logging_module
+
+    settings = ObservabilitySettings(app_name="test", service="svc", environment="test")
+    first, second = FastAPI(), FastAPI()
+
+    @second.get("/ping")
+    def ping() -> dict[str, bool]:
+        return {"ok": True}
+
+    install_observability(first, settings, metrics_enabled=False)
+    install_observability(second, settings, metrics_enabled=False)
+    with TestClient(first):
+        pass
+
+    client = TestClient(second)
+    for _ in range(2):  # a reused TestClient runs the lifespan twice
+        with client:
+            client.get("/ping")
+    logging_module.flush_logging()
+
+    lines = [
+        json.loads(line)
+        for line in capsys.readouterr().out.splitlines()
+        if line.startswith("{")
+    ]
+    # Distinct request IDs: a handler another test left behind may repeat lines.
+    request_ids = {
+        line["request_id"]
+        for line in lines
+        if line["message"] == "request.completed" and line["event"]["path"] == "/ping"
+    }
+    assert len(request_ids) == 2

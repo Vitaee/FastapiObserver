@@ -142,3 +142,25 @@ def test_logs_from_app_shutdown_reach_otlp_before_provider_shutdown(
 
     bodies = [str(item.log_record.body) for item in exporter.get_finished_logs()]
     assert any("app.stopping" in body for body in bodies)
+
+
+def test_otlp_logs_carry_the_trace_of_the_span_they_were_written_in(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sdk_trace = pytest.importorskip("opentelemetry.sdk.trace")
+    app = FastAPI()
+    exporter = _install_otlp_logs_app(monkeypatch, app)
+
+    tracer = sdk_trace.TracerProvider().get_tracer("test")
+    with tracer.start_as_current_span("work") as span:
+        logging.getLogger("demo").warning("inside.span")
+    _run_lifespan(app)
+
+    [exported] = [
+        item.log_record
+        for item in exporter.get_finished_logs()
+        if "inside.span" in str(item.log_record.body)
+    ]
+    assert exported.trace_id == span.get_span_context().trace_id
+    assert exported.span_id == span.get_span_context().span_id
+    assert "_otel_span_context" not in (exported.attributes or {})

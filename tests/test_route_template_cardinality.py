@@ -22,20 +22,27 @@ class _FakeRoute:
 def test_route_template_preferred_over_raw_path() -> None:
     """When scope has a matched route, use its template."""
     scope = {"route": _FakeRoute("/users/{user_id}")}
-    result = _extract_route_template(scope, "/users/alice", 200)
+    result = _extract_route_template(scope)
     assert result == "/users/{user_id}"
 
 
 def test_unmatched_404_gets_the_shared_label() -> None:
     """No route matched: a 404 must not put its raw path in the label."""
     scope: dict = {}  # no "route" key
-    assert _extract_route_template(scope, "/nonexistent/path", 404) == UNMATCHED_ROUTE
+    assert _extract_route_template(scope) == UNMATCHED_ROUTE
 
 
-def test_plain_route_without_template_keeps_raw_path() -> None:
-    """FastAPI records no route for plain Starlette routes, such as `/metrics`."""
-    scope: dict = {}
-    assert _extract_route_template(scope, "/metrics", 200) == "/metrics"
+def test_plain_starlette_route_is_labelled_by_its_path() -> None:
+    """FastAPI records no route for plain Starlette routes, so they're matched."""
+    from starlette.responses import PlainTextResponse
+
+    app = FastAPI()
+    app.add_route("/plain/{name}", lambda request: PlainTextResponse("ok"))
+    install_observability(app, ObservabilitySettings(metrics_enabled=True))
+    client = TestClient(app)
+    assert client.get("/plain/abc").status_code == 200
+
+    assert 'path="/plain/{name}"' in client.get("/metrics").text
 
 
 def test_fallback_when_route_has_no_path_attr() -> None:
@@ -45,19 +52,19 @@ def test_fallback_when_route_has_no_path_attr() -> None:
         pass
 
     scope = {"route": _MountedRoute()}
-    assert _extract_route_template(scope, "/mounted/raw", 200) == "/mounted/raw"
+    assert _extract_route_template(scope) == UNMATCHED_ROUTE
 
 
 def test_route_is_none() -> None:
     """scope["route"] explicitly set to None."""
     scope = {"route": None}
-    assert _extract_route_template(scope, "/somewhere", 404) == UNMATCHED_ROUTE
+    assert _extract_route_template(scope) == UNMATCHED_ROUTE
 
 
 def test_nested_route_template() -> None:
     """Deeply nested route with multiple parameters."""
     scope = {"route": _FakeRoute("/orgs/{org_id}/teams/{team_id}/members")}
-    result = _extract_route_template(scope, "/orgs/acme-corp/teams/eng/members", 200)
+    result = _extract_route_template(scope)
     assert result == "/orgs/{org_id}/teams/{team_id}/members"
 
 
@@ -123,3 +130,31 @@ def test_routers_included_with_a_prefix_keep_it_in_the_label() -> None:
     }
     assert {"/v1/items/{item_id}", "/v2/items/{item_id}", "/v2/admin/ping"} <= labels
     assert "/items/{item_id}" not in labels
+
+
+def test_preflights_rejections_and_made_up_methods_add_no_series() -> None:
+    from fastapi.middleware.cors import CORSMiddleware
+
+    app = FastAPI()
+    app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"])
+
+    @app.get("/orders/{order_id}")
+    def order(order_id: int) -> dict[str, int]:
+        return {"order_id": order_id}
+
+    install_observability(app, ObservabilitySettings(metrics_enabled=True))
+    client = TestClient(app)
+    preflight = {"Origin": "https://a.example", "Access-Control-Request-Method": "GET"}
+    for i in range(3):
+        assert client.options(f"/random-{i}", headers=preflight).status_code == 200
+        client.request(f"MADEUP{i}", "/orders/1")
+
+    labels = {
+        line.split("{", 1)[1].rsplit("}", 1)[0]
+        for line in client.get("/metrics").text.splitlines()
+        if line.startswith("http_requests_total{")
+    }
+    assert not any("random-" in label or "MADEUP" in label for label in labels)
+    unmatched_preflight = f'method="OPTIONS",path="{UNMATCHED_ROUTE}"'
+    assert any(unmatched_preflight in label for label in labels)
+    assert any('method="_OTHER",path="/orders/{order_id}"' in label for label in labels)

@@ -168,6 +168,7 @@ class OverflowPolicyQueueHandler(logging.handlers.QueueHandler):
         log_queue = cast(queue.Queue[logging.LogRecord], self.queue)
         try:
             log_queue.get_nowait()
+            log_queue.task_done()  # dropped counts as done, or flush_logging() waits for it
             self.telemetry.record_drop_oldest()
         except queue.Empty:
             pass

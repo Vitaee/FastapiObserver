@@ -38,9 +38,11 @@ class _BaseOTelSettings(EnvLoadable, BaseModel):
 class OTelSettings(_BaseOTelSettings):
 
     enabled: bool = False
-    service_name: str = "api"
-    service_version: str = "0.0.0"
-    environment: str = "development"
+    # None: ObservabilitySettings' service, version and environment, so traces
+    # and metrics name the service the same way.
+    service_name: str | None = None
+    service_version: str | None = None
+    environment: str | None = None
     trace_sampling_ratio: float = Field(default=1.0, ge=0.0, le=1.0)
     extra_resource_attributes: dict[str, str] = Field(default_factory=dict)
 

@@ -4,6 +4,20 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Security
+- With body capture on (`OBS_LOG_REQUEST_BODY` or `OBS_LOG_RESPONSE_BODY`), captured bodies were written without redaction, so a login request's `password` or a returned `token` appeared in plain text. Values of sensitive keys are now redacted in JSON and form bodies, including a value the length limit cut off. Affected: every earlier release with body capture on.
+
+### Fixed
+- Requests that matched no route kept their raw path as the metrics `path` label unless they were 404s, and the `method` label was copied from the request. Any anonymous client could add time series without limit, with CORS preflights to random paths, requests an auth middleware rejects, or made-up methods. Every unmatched request is now `<unmatched>`, and methods outside the nine standard ones are `_OTHER`. Plain Starlette routes are labelled by their template instead of their path. **Dashboards that filter on plain routes' old labels need updating.** See decision record 0011.
+- When one app's lifespan ended, it removed the root log handlers and shut down the global OpenTelemetry providers. Other apps in the process, and the same app started again by a reused `TestClient`, then wrote no logs and exported no spans, with no error. The lifespan now writes out what's queued and flushes the providers, and leaves both running; process exit stops them. It also no longer removes SQLAlchemy instrumentation you set up yourself.
+- An explicit `OTelSettings(enabled=True)` sent traces as service `api`, version `0.0.0` and environment `development`, while logs and metrics used the values from `ObservabilitySettings`. Its `service_name`, `service_version` and `environment` now default to those values.
+- OTLP-exported log records had no trace ID, so backends couldn't link them to traces: they're exported on the log queue's listener thread, where no span is current. They now carry the trace and span of the code that wrote them.
+- The gunicorn docs said workers drop logs under `--preload-app`, and suggested calling `install_observability()` in the lifespan, which fails with `Cannot add middleware after an application has started`. Logs work with `--preload-app`. The docs now say so, and recommend OTLP over HTTP with it, since gRPC channels don't survive a fork.
+- The weekly runtime stress harness imported `httpx`, which the dev dependencies no longer install, so its next run would have failed.
+
+### Changed
+- Releases run the test suite before publishing, and only the publish job can write to the repository.
+
 ## [1.14.0] - 2026-11-01
 
 ### Security

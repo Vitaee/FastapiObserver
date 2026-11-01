@@ -8,7 +8,7 @@ from typing import Any
 from fastapi import FastAPI
 
 from ..config import ObservabilitySettings
-from .lifecycle import close_on_app_shutdown
+from .lifecycle import flush_on_app_shutdown
 from .resource import (
     build_otlp_exporter,
     create_otel_resource,
@@ -75,7 +75,7 @@ def install_otel_metrics(
             },
         )
 
-    close_on_app_shutdown(app, meter_provider, shutdown=provider_owned)
+    flush_on_app_shutdown(app, meter_provider)
     _LOGGER.info(
         "otel.metrics.installed",
         extra={

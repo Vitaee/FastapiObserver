@@ -12,13 +12,36 @@ on:
         type: string
 
 permissions:
-  contents: write
-  id-token: write
+  contents: read
 
 jobs:
+  test:
+    # Nothing is published unless the tagged code passes its tests.
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
+
+      - name: Install package and dev dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev,prometheus,otel]"
+
+      - name: Pytest
+        run: python -m pytest -q
+
   publish:
+    needs: test
     runs-on: ubuntu-latest
     environment: pypi
+    permissions:
+      contents: write  # the GitHub release
+      id-token: write  # PyPI Trusted Publishing
 
     steps:
       - name: Checkout

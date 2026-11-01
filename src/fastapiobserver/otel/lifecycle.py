@@ -1,7 +1,9 @@
 """Flush OTel providers when the FastAPI app shuts down.
 
-Process exit needs nothing from us: SDK providers register their own
-``atexit`` shutdown (``shutdown_on_exit=True``).
+Shutting them down is left to process exit: SDK providers register their own
+``atexit`` shutdown (``shutdown_on_exit=True``). A provider is global, so one
+app's lifespan ending mustn't stop it for other apps, or for this one if it
+starts again.
 """
 
 from __future__ import annotations
@@ -18,10 +20,8 @@ _LOGGER = logging.getLogger("fastapiobserver.otel")
 _HOOKED: weakref.WeakKeyDictionary[FastAPI, set[int]] = weakref.WeakKeyDictionary()
 
 
-def close_on_app_shutdown(app: FastAPI | None, provider: Any, *, shutdown: bool) -> None:
-    """Once ``app``'s lifespan ends, shut ``provider`` down (``shutdown=True``,
-    for providers we created) or just flush it (providers owned by someone else).
-    """
+def flush_on_app_shutdown(app: FastAPI | None, provider: Any) -> None:
+    """Each time ``app``'s lifespan ends, export what ``provider`` holds."""
     if app is None:
         return
     hooked = _HOOKED.setdefault(app, set())
@@ -31,27 +31,20 @@ def close_on_app_shutdown(app: FastAPI | None, provider: Any, *, shutdown: bool)
 
     # Wrap the lifespan: Starlette 1.0 removed add_event_handler/on_shutdown.
     original_lifespan = app.router.lifespan_context
-    done = False
 
     @asynccontextmanager
     async def lifespan(app_inst: FastAPI) -> AsyncGenerator[Any, None]:
-        nonlocal done
         try:
             async with original_lifespan(app_inst) as state:
                 yield state
         finally:
-            if not done:
-                done = True
-                try:
-                    if shutdown:  # SDK shutdown() exports pending data first
-                        provider.shutdown()
-                    else:
-                        provider.force_flush()
-                except Exception:
-                    _LOGGER.debug(
-                        "otel.provider.lifecycle.failed",
-                        exc_info=True,
-                        extra={"_skip_enrichers": True},
-                    )
+            try:
+                provider.force_flush()
+            except Exception:
+                _LOGGER.debug(
+                    "otel.provider.lifecycle.failed",
+                    exc_info=True,
+                    extra={"_skip_enrichers": True},
+                )
 
     app.router.lifespan_context = lifespan

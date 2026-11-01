@@ -32,6 +32,11 @@ _MAX_STATEMENT_LENGTH = 1000
 # Quoted strings and numbers, so values written into SQL text never reach a log line.
 # ponytail: misses dollar-quoted and E'' strings; parse SQL if those ever show up.
 _SQL_LITERALS = re.compile(r"'(?:[^']|'')*'|\b\d+(?:\.\d+)?\b")
+# Metric labels take the method only from this set, as OpenTelemetry does, so a
+# client can't add a time series per made-up method.
+_HTTP_METHODS = frozenset(
+    {"GET", "HEAD", "POST", "PUT", "DELETE", "CONNECT", "OPTIONS", "TRACE", "PATCH"}
+)
 
 
 class RequestLoggingMiddleware:
@@ -202,13 +207,15 @@ class RequestLoggingMiddleware:
                 extra={"event": safe_event},
             )
 
-        # Prefer route template for bounded cardinality
-        route_template = _extract_route_template(scope, path, status_code)
+        route_template = _extract_route_template(scope)
+        metric_method = method if method in _HTTP_METHODS else "_OTHER"
         if request_state is not None and request_state.statements:
-            self._report_repeated_statement(method, route_template, request_state.statements)
+            self._report_repeated_statement(
+                metric_method, route_template, request_state.statements
+            )
 
         self.metrics_recorder.observe(
-            method=method,
+            method=metric_method,
             path=route_template,
             status_code=status_code,
             duration_seconds=duration_seconds,

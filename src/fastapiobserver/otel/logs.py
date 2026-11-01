@@ -9,7 +9,7 @@ from fastapi import FastAPI
 
 from ..config import ObservabilitySettings
 from ..security import SecurityPolicy, sanitize_event
-from .lifecycle import close_on_app_shutdown
+from .lifecycle import flush_on_app_shutdown
 from .resource import (
     build_otlp_exporter,
     create_otel_resource,
@@ -39,6 +39,8 @@ class _SanitizingOTLPLogHandler(logging.Handler):
         super().__init__(level=delegate.level)
         self._delegate = delegate
         self._security_policy = security_policy
+        self._otel_context = import_otel_module("opentelemetry.context")
+        self._otel_trace = import_otel_module("opentelemetry.trace")
 
     def emit(self, record: logging.LogRecord) -> None:
         try:
@@ -47,7 +49,19 @@ class _SanitizingOTLPLogHandler(logging.Handler):
                 sanitized_record,
                 self._security_policy,
             )
-            self._delegate.emit(sanitized_record)
+            # Records are exported on the queue's listener thread, where no span
+            # is current, so OpenTelemetry would give them no trace. Make the
+            # span the record was created in current while it's exported.
+            span_context = sanitized_record.__dict__.pop("_otel_span_context", None)
+            if span_context is None:
+                self._delegate.emit(sanitized_record)
+                return
+            span = self._otel_trace.NonRecordingSpan(span_context)
+            token = self._otel_context.attach(self._otel_trace.set_span_in_context(span))
+            try:
+                self._delegate.emit(sanitized_record)
+            finally:
+                self._otel_context.detach(token)
         except Exception:
             self.handleError(record)
 
@@ -158,7 +172,7 @@ def install_otel_logs(
         raw_handler,
         security_policy=policy,
     )
-    close_on_app_shutdown(app, logger_provider, shutdown=provider_owned)
+    flush_on_app_shutdown(app, logger_provider)
     _LOGGER.info(
         "otel.logs.installed",
         extra={
