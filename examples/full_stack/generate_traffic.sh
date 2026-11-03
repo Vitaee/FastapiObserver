@@ -12,6 +12,15 @@ set -euo pipefail
 
 DURATION="${1:-60}"
 APPS="${APPS:-http://localhost:8000 http://localhost:8001 http://localhost:8002}"
+READY_TIMEOUT="${READY_TIMEOUT:-30}"
+
+for value in "$DURATION" "$READY_TIMEOUT"; do
+    if ! [[ "$value" =~ ^[1-9][0-9]*$ ]]; then
+        echo "Duration and READY_TIMEOUT must be a positive integer." >&2
+        exit 2
+    fi
+done
+read -r -a APP_ARRAY <<< "$APPS"
 
 # Colors
 GREEN='\033[0;32m'
@@ -29,7 +38,8 @@ ENDPOINTS=(
     "/users/2"
     "/users/10"
     "/slow"
-    "/error"
+    "/error?status=400"
+    "/error?status=500"
     "/chain"
     "/health"
 )
@@ -45,9 +55,14 @@ echo ""
 
 # Wait for apps to be ready
 echo -e "${YELLOW}⏳ Waiting for services to be ready...${NC}"
-for app in $APPS; do
-    until curl -sf "${app}/health" > /dev/null 2>&1; do
-        sleep 1
+DEADLINE=$((SECONDS + READY_TIMEOUT))
+for app in "${APP_ARRAY[@]}"; do
+    until curl -sf --max-time 1 "${app}/health" > /dev/null 2>&1; do
+        if [ "$SECONDS" -ge "$DEADLINE" ]; then
+            echo "Service not ready within ${READY_TIMEOUT}s: ${app}" >&2
+            exit 1
+        fi
+        sleep 0.2
     done
     echo -e "${GREEN}  ✔ ${app} is ready${NC}"
 done
@@ -64,12 +79,11 @@ echo ""
 
 while [ "$(date +%s)" -lt "$END_TIME" ]; do
     # Pick a random app and endpoint
-    APP_ARRAY=($APPS)
     APP=${APP_ARRAY[$((RANDOM % ${#APP_ARRAY[@]}))]}
     ENDPOINT=${ENDPOINTS[$((RANDOM % ${#ENDPOINTS[@]}))]}
 
     URL="${APP}${ENDPOINT}"
-    STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 "${URL}" 2>/dev/null || echo "000")
+    STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 "${URL}" 2>/dev/null) || STATUS=000
     REQUEST_COUNT=$((REQUEST_COUNT + 1))
 
     ELAPSED=$(($(date +%s) - START_TIME))

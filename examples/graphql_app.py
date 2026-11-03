@@ -1,52 +1,18 @@
-"""
-graphql_app.py — Demonstrates Native Strawberry GraphQL Observability.
+"""Put GraphQL operation names on request logs and the server span.
 
-Prerequisites:
-    pip install strawberry-graphql
-
-Run this:
-    uvicorn examples.graphql_app:app --reload
-
-Then try running a query in the GraphiQL interface at:
-    http://localhost:8000/graphql
-
-Or perform a curl request:
-    curl -X POST http://localhost:8000/graphql \\
-         -H 'Content-Type: application/json' \\
-         -d '{"query": "query GetHello { hello }", "operationName": "GetHello"}'
-
-What happens under the hood:
-  1. The `StrawberryObservabilityExtension` is injected via Duck Typing.
-  2. For every `POST /graphql` request, it intercepts Strawberry's execution context.
-  3. It extracts the `operationName` (e.g., GetHello).
-  4. It injects the `operation_name` into the `user_context["graphql"]` structured log dictionary.
-  5. If OpenTelemetry is enabled, it dynamically renames the opaque HTTP span
-     from `POST /graphql` to `graphql.operation.GetHello` for highly-granular trace views.
+Requires strawberry-graphql. Run: uvicorn examples.graphql_app:app --reload
+POST /graphql with {"query":"query GetHello { hello }"}.
+Enable OBS_OTEL_ENABLED=true with a collector to see the renamed server span.
 """
 
-from fastapi import FastAPI
 import strawberry
+from fastapi import FastAPI
 from strawberry.fastapi import GraphQLRouter
 
-from fastapiobserver import (
-    ObservabilitySettings,
-    install_observability,
-)
+from fastapiobserver import install_observability
 from fastapiobserver.integrations.strawberry import StrawberryObservabilityExtension
 
-app = FastAPI(title="Strawberry GraphQL Example")
 
-settings = ObservabilitySettings(
-    app_name="graphql-api",
-    service="graphql-svc",
-    environment="development",
-)
-
-# --- 1. Install observability ---
-install_observability(app, settings)
-
-
-# --- 2. Define your Strawberry Schema ---
 @strawberry.type
 class Query:
     @strawberry.field
@@ -54,10 +20,7 @@ class Query:
         return "Hello World! Check your logs to see the operation name."
 
 
-schema = strawberry.Schema(
-    query=Query,
-    extensions=[StrawberryObservabilityExtension],  # Inject the Zero-Dependency Extension!
-)
-
-graphql_app = GraphQLRouter(schema)
-app.include_router(graphql_app, prefix="/graphql")
+schema = strawberry.Schema(query=Query, extensions=[StrawberryObservabilityExtension])
+app = FastAPI(title="Strawberry GraphQL Example")
+install_observability(app)
+app.include_router(GraphQLRouter(schema), prefix="/graphql")

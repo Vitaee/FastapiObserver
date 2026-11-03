@@ -1,249 +1,138 @@
-# Full-Stack Observability Demo
+# Diagnose a slow API
 
-**See fastapi-observer in action with Grafana, Prometheus, Loki, and Tempo — all running locally in Docker.**
+One app runs as `app-a`, `app-b` and `app-c`, with Prometheus, Loki, Tempo and
+Grafana. The failure lab creates three bounded failures and shows how to find
+and fix each one. It uses a local SQLite database, so no database service is needed.
 
-This example spins up a complete observability stack with **3 independent FastAPI services** to demonstrate multi-instance monitoring, distributed tracing, and centralized log aggregation.
+## Run
 
----
-
-## Architecture
-
-```
-┌──────────────────────────────────────────────────────────────────┐
-│                        Your Browser                               │
-│                                                                    │
-│   Grafana :3000    app-a :8000    app-b :8001    app-c :8002      │
-└────────┬───────────────┬──────────────┬──────────────┬────────────┘
-         │               │              │              │
-         │               └──────┬───────┴──────────────┘
-         │                      │
-         │            ┌─────────▼──────────┐
-         │            │   OTel Collector    │
-         │            │    :4317 (gRPC)     │
-         │            └────┬─────────┬─────┘
-         │                 │         │
-         │        traces   │         │  logs
-         │                 │         │
-    ┌────▼────┐    ┌───────▼──┐  ┌───▼────┐
-    │Prometheus│    │  Tempo   │  │  Loki  │
-    │  :9090   │    │  :3200   │  │ :3100  │
-    └────┬─────┘    └────┬─────┘  └───┬────┘
-         │               │            │
-         └───────────────┴────────────┘
-                         │
-                  ┌──────▼──────┐
-                  │   Grafana    │
-                  │   :3000     │
-                  └─────────────┘
-```
-
-### Services
-
-| Service | Port | Purpose |
-|---|---|---|
-| **app-a** | `8000` | Primary API — calls app-b and app-c on `/chain` |
-| **app-b** | `8001` | Secondary service |
-| **app-c** | `8002` | Third service |
-| **OTel Collector** | `4317` | Routes OTLP traces → Tempo, logs → Loki |
-| **Prometheus** | `9090` | Scrapes `/metrics` from all 3 apps |
-| **Loki** | `3100` | Log aggregation |
-| **Tempo** | `3200` | Distributed trace storage |
-| **Grafana** | `3000` | Pre-configured dashboards (no login needed) |
-
----
-
-## Quick Start
-
-### Prerequisites
-
-- [Docker](https://docs.docker.com/get-docker/) ≥ 20.10
-- [Docker Compose](https://docs.docker.com/compose/install/) ≥ 2.0
-
-### 1. Start the stack
+From the repository root, with Docker Compose and Python 3.11+:
 
 ```bash
-cd examples/full_stack
-docker compose up --build
+docker compose -f examples/full_stack/docker-compose.yml up --build -d --wait
+python3 examples/full_stack/failure_lab.py
 ```
 
-Wait ~30 seconds for all services to start. You'll see log output from all containers.
-
-### 2. Generate traffic
-
-In a separate terminal:
+Compose waits for the app health checks. The driver uses only Python's standard
+library and exits with an error if the demo is unreachable or a scenario cannot
+be triggered. It prints the warning to look for; the server emits the actual
+warning. Logs can be inspected without Grafana:
 
 ```bash
-cd examples/full_stack
-
-# Run for 60 seconds (default)
-./generate_traffic.sh
-
-# Or specify duration
-./generate_traffic.sh 120
+docker compose -f examples/full_stack/docker-compose.yml logs --no-log-prefix app-a
 ```
 
-The script automatically:
-- Waits for all services to be ready
-- Hits all endpoints across all 3 services
-- Shows real-time status (✔/✗) with color coding
-- Prints a summary at the end
-
-### 3. Open Grafana
-
-Open [http://localhost:3000](http://localhost:3000) in your browser.
-
-> **No login required** — anonymous admin access is enabled for the demo.
-
-The **"FastAPI Observer — API Overview"** dashboard is pre-loaded with 7 panels:
-
-| Panel | What It Shows |
-|---|---|
-| **Request Duration Heatmap** | Latency distribution across histogram buckets |
-| **API Request Count by Route** | Request rate per endpoint (stacked bars) |
-| **Error Rate per Route** | 4xx/5xx errors with color-coded severity |
-| **CPU & Memory Usage** | Process resource consumption (dual axis) |
-| **Request Duration P50/P95/P99** | Percentile latencies over time |
-| **Request Rate (req/s)** | Total requests per second |
-| **API Logs** | Live structured JSON logs from Loki |
-
-### 4. Switch between services
-
-Use the **Service** dropdown at the top of the dashboard to switch between `app-a`, `app-b`, and `app-c`. Each service reports its own metrics and logs independently — this demonstrates that `fastapi-observer` works dynamically across multiple instances.
-
----
-
-## Exploring the Three Pillars
-
-### Metrics (Prometheus)
-
-Go to **Explore → Prometheus** and try these queries:
-
-```promql
-# Request rate by service and route
-sum(rate(http_requests_total[5m])) by (service, path)
-
-# P95 latency by service
-histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket[5m])) by (le, service))
-
-# Error rate (5xx)
-sum(rate(http_requests_total{status_code=~"5.."}[5m])) by (service)
-```
-
-### Logs (Loki)
-
-Go to **Explore → Loki** and try:
+Open [Grafana](http://localhost:3000) and select **Explore → Loki**. This local demo
+has anonymous access enabled. Paste:
 
 ```logql
-# All logs from app-a
-{service_name="app-a"} | json
-
-# Only error logs
-{service_name="app-a"} | json | level="ERROR"
-
-# Logs with a specific trace ID (copy from a trace)
-{service_name="app-a"} | json | trace_id="<your-trace-id>"
+{service_name="app-a"} | json | level="WARNING"
 ```
 
-### Traces (Tempo)
-
-Go to **Explore → Tempo** and:
-
-1. Click **Search** tab
-2. Select **Service Name** = `app-a`
-3. Click **Run Query**
-4. Click any trace to see the span waterfall
-
-For cross-service traces, look for traces from the `/chain` endpoint — they will show spans across `app-a`, `app-b`, and `app-c`.
-
-### Cross-Linking
-
-The datasources are pre-configured with cross-links:
-
-- **Logs → Traces**: Click the `trace_id` field in any Loki log line to jump to the full trace in Tempo
-- **Traces → Logs**: From a trace in Tempo, click "Logs for this span" to see the corresponding log entries in Loki
-- **Metrics → Traces**: When exemplars are enabled, hover a metric point to jump to its trace
-
----
-
-## Available Endpoints
-
-All 3 services expose the same endpoints:
-
-| Endpoint | Description | Purpose |
-|---|---|---|
-| `GET /health` | Health check | Excluded from metrics |
-| `GET /items/{id}` | Item lookup | Normal request flow |
-| `GET /users/{id}` | User lookup | Per-route breakdown |
-| `GET /slow` | Simulated delay (0.5–2s) | Latency histogram |
-| `GET /error` | Random 4xx/5xx errors | Error rate panel |
-| `GET /chain` | Cross-service calls | Distributed tracing |
-| `GET /metrics` | Prometheus metrics | Scraped by Prometheus |
+Warnings are rate-limited: pool warnings appear at most once a minute, and an N+1
+statement is reported once per route and process. Restart `app-a` for fresh warnings
+when repeating the lab:
 
 ```bash
-# Try individual endpoints
-curl http://localhost:8000/items/42
-curl http://localhost:8001/users/1
-curl http://localhost:8002/slow
-curl http://localhost:8000/chain    # Cross-service trace!
+docker compose -f examples/full_stack/docker-compose.yml restart app-a
 ```
 
----
+## Three failures and their fixes
 
-## How It Works
+| Scenario | Trigger | Signal | Fix to try |
+|---|---|---|---|
+| Blocked event loop | `GET /lab/block` calls synchronous `time.sleep` inside `async def` | `event_loop.blocked`, with the blocking stack | `GET /slow` awaits `asyncio.sleep`, leaving the worker responsive |
+| Exhausted database pool | `GET /lab/db-pool` holds the only connection while another request arrives | `db.pool_exhausted`, with checked-out connections and pool limit | Release connections before unrelated I/O; size pools for actual concurrency |
+| N+1 queries | `GET /lab/n-plus-one` fetches IDs, then reads each item separately | `db.n_plus_one`; the request line has `event.db.count=11` | `GET /lab/batched` returns the same ten items in one query |
 
-Each FastAPI service is configured with **6 lines of code**:
+Run one scenario:
 
-```python
-from fastapiobserver import ObservabilitySettings, install_observability
-from fastapiobserver.otel import OTelSettings, OTelLogsSettings
-
-settings = ObservabilitySettings.from_env()
-otel_settings = OTelSettings.from_env()
-otel_logs_settings = OTelLogsSettings.from_env()
-
-install_observability(app, settings, otel_settings=otel_settings, otel_logs_settings=otel_logs_settings)
+```bash
+python3 examples/full_stack/failure_lab.py --scenario event-loop
+python3 examples/full_stack/failure_lab.py --scenario db-pool
+python3 examples/full_stack/failure_lab.py --scenario n-plus-one
 ```
 
-All configuration flows through environment variables defined in `docker-compose.yml`. Each service gets its own `OBS_SERVICE_NAME` and `OTEL_SERVICE_NAME`, making it trivially easy to scale to N instances.
+The pool driver checks `/metrics` to confirm the connection is occupied before
+sending another request. Sleep durations are bounded to three seconds. The lab
+routes deliberately contain bad application code and belong only in this demo.
+The watchdog is enabled at 100 ms in Compose; SQL query counts do not require traces.
 
----
+In **Explore → Prometheus**, inspect:
 
-## Adding Your Own App
+```promql
+fastapiobserver_db_pool_checked_out
+fastapiobserver_db_pool_limit
 
-To add a 4th service to the stack:
-
-1. In `docker-compose.yml`, add a new service:
-
-```yaml
-  app-d:
-    <<: *app-base
-    container_name: app-d
-    ports:
-      - "8003:8000"
-    environment:
-      <<: *app-env
-      OBS_SERVICE_NAME: "app-d"
-      OTEL_SERVICE_NAME: "app-d"
+histogram_quantile(
+  0.95,
+  sum(rate(http_request_duration_seconds_bucket[5m])) by (le, service)
+)
 ```
 
-2. In `config/prometheus.yml`, add a scrape job:
+The **API Overview** dashboard shows request rates, latency, errors, CPU, memory
+and logs. Use its service dropdown to compare the three app instances.
 
-```yaml
-  - job_name: "app-d"
-    static_configs:
-      - targets: ["app-d:8000"]
-        labels:
-          service: "app-d"
+## Cross-service correlation
+
+```bash
+curl -H 'X-Request-ID: demo-chain' http://localhost:8000/chain
 ```
 
-3. `docker compose up --build` — the new service automatically appears in Grafana dropdowns.
+`/chain` forwards the request ID and current W3C trace context to `app-b` and
+`app-c` using `inject_trace_headers()`. Their server spans share the same trace;
+this example does not add HTTP client spans. Find the request's `trace_id` on its
+JSON log line, then follow the link from Loki to Tempo. Search logs by request ID:
 
----
+```logql
+{service_name=~"app-[abc]"} | json | request_id="demo-chain"
+```
+
+The containers call each other over their Compose network. When running outside
+Docker, `TARGET_B` and `TARGET_C` default to `http://localhost:8001` and
+`http://localhost:8002`.
+
+## Other routes and traffic
+
+| Route | Purpose |
+|---|---|
+| `GET /health` | Readiness; excluded from request metrics |
+| `GET /items/42`, `GET /users/1` | Normal requests with a request ID |
+| `GET /slow?seconds=0.5` | A predictable nonblocking delay |
+| `GET /error?status=400` or `status=500` | A deliberate HTTP error; 400, 404, 500 and 503 are supported |
+| `GET /metrics` | Prometheus request, queue and pool metrics |
+
+Generate ordinary traffic for the dashboard:
+
+```bash
+./examples/full_stack/generate_traffic.sh 60
+# One service, with a bounded readiness wait:
+APPS=http://localhost:8000 READY_TIMEOUT=10 ./examples/full_stack/generate_traffic.sh 10
+```
+
+`app-a`, `app-b` and `app-c` listen on ports 8000, 8001 and 8002. Grafana uses 3000,
+Prometheus 9090, Loki 3100 and Tempo 3200. The collector accepts OTLP on 4317/4318.
+Configuration lives in `docker-compose.yml` and `config/`. The image uses SQLAlchemy
+2.0 for SQL tracing compatibility and copies only package inputs into the build.
+SQL comments are disabled so repeated statements remain comparable.
+
+## Without Docker
+
+After the [example dependency setup](../README.md), start one app:
+
+```bash
+OBS_METRICS_ENABLED=true OBS_LOOP_BLOCK_THRESHOLD_MS=100 \
+  uv run uvicorn examples.full_stack.app:app --host 127.0.0.1 --port 8000
+```
+
+Run `python3 examples/full_stack/failure_lab.py` from another terminal. The three
+warnings are written to stdout; no collector or Grafana is required. Set
+`--base-url http://localhost:8001` to use another running instance.
 
 ## Cleanup
 
 ```bash
-docker compose down -v
+docker compose -f examples/full_stack/docker-compose.yml down
+# Also discard this demo's stored logs and traces when they are no longer needed:
+docker compose -f examples/full_stack/docker-compose.yml down --volumes
 ```
-
-This removes all containers and volumes (metric/log/trace data).

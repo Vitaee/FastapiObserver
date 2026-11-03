@@ -1,58 +1,58 @@
-# FastAPI Observer — Examples
+# Examples
 
-This directory contains standalone, runnable examples demonstrating the features of `fastapi-observer`.
-
-## How to Run
-
-Most of the examples are single-file FastAPI applications. You can run them using `uvicorn`:
+Run these from the repository root. For the Python examples and tests:
 
 ```bash
-# Make sure you are in the root directory of the repository
-# and your virtual environment is activated
-uvicorn examples.basic_app:app --reload
+uv sync --extra dev --extra prometheus --extra otel --extra otel-sqlalchemy
+uv run uvicorn examples.basic_app:app --reload
+curl http://localhost:8000/items/42
 ```
 
-## Available Examples
+`install_observability()` manages logging and its lifespan. Settings come from
+`OBS_*` and the standard `OTEL_*` variables; see [configuration](../docs/configuration.md).
 
-### Core Observability
-| File | Description |
-|---|---|
-| [`basic_app.py`](basic_app.py) | The absolute minimum setup. Shows structured JSON logs and request ID injection. |
-| [`security_presets_app.py`](security_presets_app.py) | Demonstrates how to use built-in security presets (`gdpr`, `pci`, `strict`) to automatically redact logs and headers. |
-| [`allowlist_app.py`](allowlist_app.py) | Demonstrates how to implement a strict allowlist-only logging policy. |
-| [`graphql_app.py`](graphql_app.py) | Shows how `fastapi-observer` natively integrates with GraphQL (Strawberry) to capture introspection queries and mutation names. |
+| Example | Try | Demonstrates |
+|---|---|---|
+| [basic_app.py](basic_app.py) | `GET /items/42`, `GET /crash` | One-call setup, request IDs, structured errors |
+| [security_presets_app.py](security_presets_app.py) | `POST /payments` with JSON | PCI field redaction and opt-in JSON body capture |
+| [allowlist_app.py](allowlist_app.py) | `GET /users/42` | Keeping selected event fields while retaining the log envelope |
+| [otel_app.py](otel_app.py) | `GET /orders/42` | Correlated logs and traces; enable `OBS_OTEL_ENABLED=true` with a collector |
+| [db_tracing_app.py](db_tracing_app.py) | `POST /users/ada`, then `GET /users` | Async SQLAlchemy query counts, with optional SQL tracing |
+| [graphql_app.py](graphql_app.py) | `POST /graphql` with `{"query":"query GetHello { hello }"}` | GraphQL operation names in logs and server spans |
 
-### Distributed Tracing & Metrics (OpenTelemetry)
-| File | Description |
-|---|---|
-| [`otel_app.py`](otel_app.py) | **(Requires `[otel]`)** Shows OTel instrumentation. Demonstrates how to inject standard traces and custom resource attributes (`k8s.namespace`, etc.) into spans and correlating logs. |
-| [`db_tracing_app.py`](db_tracing_app.py) | **(Requires `[otel,otel-sqlalchemy]`)** Shows SQLCommenter integration. It patches an async SQLAlchemy engine to inject trace IDs directly into raw SQL database queries as comments. |
+Substitute the module name in the `uvicorn` command. Enable `/metrics` with
+`OBS_METRICS_ENABLED=true`.
+The database example uses an in-memory SQLite database and closes it at shutdown.
+`DATABASE_URL` can select another async SQLAlchemy driver. Its query counts work
+without tracing; SQL spans require a supported instrumentation version.
 
-## Full-Stack Deployments
+## Reproduce and diagnose failures
 
-If you have Docker installed, you can spin up a fully pre-configured observability stack (Prometheus, Loki, Tempo, Grafana) to see how these libraries behave in a production-like environment:
+The [full-stack demo](full_stack/README.md) runs three copies of one app alongside
+Grafana, Prometheus, Loki and Tempo. Its failure lab deliberately blocks the event
+loop, occupies a database pool and runs N+1 queries, then shows the corresponding
+warnings and a batched-query alternative.
 
-### [`full_stack/`](full_stack/)
-A robust Docker Compose environment. It spins up 3 microservices interconnected via OTel propagation, exporting telemetry to a complete Grafana backend stack.
 ```bash
-cd examples/full_stack
-docker compose up --build
+docker compose -f examples/full_stack/docker-compose.yml up --build -d --wait
+python3 examples/full_stack/failure_lab.py
 ```
-Open `http://localhost:3000` (admin/admin) to view the dashboards.
 
-### [`k8s/`](k8s/)
-A complete Kubernetes setup leveraging Kustomize to deploy the `fastapi-observer` example applications alongside an OpenTelemetry Collector and the LGTM stack (Loki, Grafana, Tempo, Prometheus).
+Open [Grafana](http://localhost:3000); no login is required for this local demo.
+The driver uses Python's standard library. Each scenario can also be run on its
+own with `--scenario event-loop`, `db-pool` or `n-plus-one`.
+
+To run the app without Docker or a telemetry backend:
+
 ```bash
-kubectl kustomize --load-restrictor=LoadRestrictionsNone examples/k8s | kubectl apply -f -
+OBS_METRICS_ENABLED=true OBS_LOOP_BLOCK_THRESHOLD_MS=100 \
+  uv run uvicorn examples.full_stack.app:app --host 127.0.0.1 --port 8000
+# In another terminal:
+python3 examples/full_stack/failure_lab.py
 ```
 
-### [`time_saved/`](time_saved/)
-A lightweight Docker setup focusing purely on the minimal backend infrastructure (Jaeger and Prometheus). Ideal for verifying local application traces without the overhead of Loki and Tempo.
-```bash
-cd examples/time_saved
-docker compose up
-```
+Other deployment examples:
 
----
-
-*Note: `db_tracing_app.py` uses an in-memory SQLite database unless `DATABASE_URL` points at your own Postgres or MySQL; the URL formats are in the file's comments.*
+- [Kubernetes](k8s/README.md): Kustomize manifests for the app and telemetry backends.
+- [Time saved](time_saved/README.md): the same app configured by hand and with this library.
+- [Migration](migration_example/migration_made.md): replacing an existing logging setup.

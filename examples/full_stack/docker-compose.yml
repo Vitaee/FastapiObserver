@@ -6,7 +6,7 @@
 # Usage:
 #   docker compose up --build
 #   ./generate_traffic.sh
-#   Open http://localhost:3000 (Grafana, admin/admin)
+#   Open http://localhost:3000 (Grafana, no login needed)
 # ============================================================================
 
 x-app-base: &app-base
@@ -15,9 +15,11 @@ x-app-base: &app-base
     dockerfile: examples/full_stack/Dockerfile
   environment: &app-env
     OBS_ENVIRONMENT: "local"
+    OBS_APP_NAME: "demo-api"
     OBS_APP_VERSION: "1.0.0"
     OBS_LOG_LEVEL: "INFO"
     OBS_METRICS_ENABLED: "true"
+    OBS_LOOP_BLOCK_THRESHOLD_MS: "100"
     OBS_OTEL_ENABLED: "true"
     OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector:4317"
     OTEL_EXPORTER_OTLP_PROTOCOL: "grpc"
@@ -30,46 +32,43 @@ x-app-base: &app-base
     otel-collector:
       condition: service_started
   restart: unless-stopped
+  healthcheck:
+    test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=2)"]
+    interval: 2s
+    timeout: 3s
+    retries: 20
+    start_period: 5s
 
 services:
   # ---------- FastAPI application instances ----------
 
   app-a:
     <<: *app-base
-    container_name: app-a
     ports:
       - "8000:8000"
     environment:
       <<: *app-env
       OBS_SERVICE_NAME: "app-a"
-      OBS_APP_NAME: "demo-api"
-      OTEL_SERVICE_NAME: "app-a"
       TARGET_B: "http://app-b:8000"
       TARGET_C: "http://app-c:8000"
 
   app-b:
     <<: *app-base
-    container_name: app-b
     ports:
       - "8001:8000"
     environment:
       <<: *app-env
       OBS_SERVICE_NAME: "app-b"
-      OBS_APP_NAME: "demo-api"
-      OTEL_SERVICE_NAME: "app-b"
       TARGET_B: "http://app-a:8000"
       TARGET_C: "http://app-c:8000"
 
   app-c:
     <<: *app-base
-    container_name: app-c
     ports:
       - "8002:8000"
     environment:
       <<: *app-env
       OBS_SERVICE_NAME: "app-c"
-      OBS_APP_NAME: "demo-api"
-      OTEL_SERVICE_NAME: "app-c"
       TARGET_B: "http://app-a:8000"
       TARGET_C: "http://app-b:8000"
 
@@ -77,7 +76,6 @@ services:
 
   otel-collector:
     image: otel/opentelemetry-collector-contrib:0.120.0
-    container_name: otel-collector
     command: ["--config=/etc/otel-collector.yml"]
     volumes:
       - ./config/otel-collector.yml:/etc/otel-collector.yml:ro
@@ -95,7 +93,6 @@ services:
 
   prometheus:
     image: prom/prometheus:latest
-    container_name: prometheus
     volumes:
       - ./config/prometheus.yml:/etc/prometheus/prometheus.yml:ro
     ports:
@@ -106,7 +103,6 @@ services:
 
   loki:
     image: grafana/loki:3.4.3
-    container_name: loki
     command: -config.file=/etc/loki/loki.yml
     volumes:
       - ./config/loki.yml:/etc/loki/loki.yml:ro
@@ -119,7 +115,6 @@ services:
 
   tempo:
     image: grafana/tempo:2.7.2
-    container_name: tempo
     command: ["-config.file=/etc/tempo/tempo.yml"]
     volumes:
       - ./config/tempo.yml:/etc/tempo/tempo.yml:ro
@@ -132,7 +127,6 @@ services:
 
   grafana:
     image: grafana/grafana:11.5.2
-    container_name: grafana
     environment:
       GF_AUTH_ANONYMOUS_ENABLED: "true"
       GF_AUTH_ANONYMOUS_ORG_ROLE: "Admin"
