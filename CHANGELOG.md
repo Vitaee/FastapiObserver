@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [2.0.3] - 2026-11-03
+
 ### Added
 - The full-stack example includes a failure-lab driver for blocked event loops, database-pool exhaustion and N+1 queries, plus a one-query alternative. Real-server tests assert the diagnostic warnings and query counts.
 
