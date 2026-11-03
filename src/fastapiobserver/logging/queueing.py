@@ -120,6 +120,23 @@ class LogQueueTelemetry:
 _LOG_QUEUE_TELEMETRY = LogQueueTelemetry()
 
 
+class DrainingQueueListener(logging.handlers.QueueListener):
+    """Wait for space for the stop sentinel after producers have been closed."""
+
+    _sentinel = None
+    _thread: threading.Thread | None
+
+    def enqueue_sentinel(self) -> None:
+        log_queue = cast(queue.Queue[logging.LogRecord | None], self.queue)
+        # A failed, unwrapped sink can kill the consumer while its queue is full.
+        while self._thread is not None and self._thread.is_alive():
+            try:
+                log_queue.put(self._sentinel, timeout=0.1)
+                return
+            except queue.Full:
+                pass
+
+
 class OverflowPolicyQueueHandler(logging.handlers.QueueHandler):
     """Queue handler with explicit overflow policy and queue telemetry."""
 
@@ -135,11 +152,14 @@ class OverflowPolicyQueueHandler(logging.handlers.QueueHandler):
         self.overflow_policy = overflow_policy
         self.block_timeout_seconds = block_timeout_seconds
         self.telemetry = telemetry
+        self._accepting = True
 
     def prepare(self, record: logging.LogRecord) -> logging.LogRecord:
         # The stdlib version formats the record here and drops exc_info, which
         # loses the structured `error` field. The queue stays in-process, so keep
         # exc_info and leave formatting to the listener thread.
+        if not record.args and isinstance(record.msg, str):
+            return record  # nothing to freeze, so no copy (about 1 us a line)
         record = copy.copy(record)
         record.message = record.getMessage()
         record.msg = record.message
@@ -147,22 +167,37 @@ class OverflowPolicyQueueHandler(logging.handlers.QueueHandler):
         return record
 
     def enqueue(self, record: logging.LogRecord) -> None:
+        self.acquire()
         try:
-            self.queue.put_nowait(record)
-            self.telemetry.record_enqueued()
-            return
-        except queue.Full:
-            pass
+            # Also protects direct emit() calls for a request's held records.
+            if not self._accepting:
+                return
+            try:
+                self.queue.put_nowait(record)
+                self.telemetry.record_enqueued()
+                return
+            except queue.Full:
+                pass
 
-        if self.overflow_policy == "drop_newest":
-            self.telemetry.record_drop_newest()
-            return
+            if self.overflow_policy == "drop_newest":
+                self.telemetry.record_drop_newest()
+                return
 
-        if self.overflow_policy == "drop_oldest":
-            self._drop_oldest_then_enqueue(record)
-            return
+            if self.overflow_policy == "drop_oldest":
+                self._drop_oldest_then_enqueue(record)
+                return
 
-        self._block_then_enqueue(record)
+            self._block_then_enqueue(record)
+        finally:
+            self.release()
+
+    def close(self) -> None:
+        self.acquire()
+        try:
+            self._accepting = False
+            super().close()
+        finally:
+            self.release()
 
     def _drop_oldest_then_enqueue(self, record: logging.LogRecord) -> None:
         log_queue = cast(queue.Queue[logging.LogRecord], self.queue)

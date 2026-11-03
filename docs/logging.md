@@ -71,7 +71,7 @@ OBS_LOG_SLOW_REQUEST_MS=1000    # the default
 
 Requests are chosen by trace ID, with the rule OpenTelemetry's `TraceIdRatioBased` sampler uses for `OTEL_TRACES_SAMPLER_ARG`. If every service samples traces that way at the same ratio, a request's lines are written exactly when its trace is kept, in every service. You get whole requests across services, not scattered lines. A lower log ratio keeps a subset of the traced requests. Without a trace ID, the request ID is hashed instead. Services forward it, so they still agree.
 
-The lines of a request that isn't sampled are held until it ends, at most the last 200. In [`request_cpu.py`](https://github.com/Vitaee/FastapiObserver/blob/main/examples/benchmarks/request_cpu.py), `OBS_LOG_SAMPLE_RATE=0.1` took CPU per request from 51 to 38 µs.
+The lines of a request that isn't sampled are held until it ends, at most the last 200. In [`request_cpu.py`](https://github.com/Vitaee/FastapiObserver/blob/main/examples/benchmarks/request_cpu.py), `OBS_LOG_SAMPLE_RATE=0.1` took CPU per request from 45 to 37 µs.
 
 ## Calls that block the event loop
 
@@ -182,6 +182,10 @@ Exception payload:
 function and source line of each frame. The message and line numbers are left out, so
 `user 1 not found` and `user 2 not found` from the same place share one fingerprint.
 
+The user and password of any URL in `error.message` and `error.stacktrace` are masked, so a
+connection error reads `postgresql://***:***@db/app`. OTLP-exported logs carry the same
+masked text in their `exception.message` and `exception.stacktrace` attributes.
+
 ## Minimal Setup
 
 ```python
@@ -216,6 +220,8 @@ The logging pipeline uses a bounded in-memory queue and configurable overflow po
 A circuit breaker around each sink stops a failing sink from slowing the others.
 
 The settings are in the [configuration guide](configuration.md#identity-and-logging). The queue and breaker metrics are listed under [bounded queue](advanced.md#bounded-queue-and-overflow-policy) and [sink circuit breaker](advanced.md#sink-circuit-breaker). Why the queue drops instead of blocking is in [decision 0002](decisions/0002-logs-leave-through-a-queue.md).
+
+`shutdown_logging()` and forced logging reconfiguration stop accepting new records, drain the existing queue and stop its listener before closing sinks. They wait for pending sink writes to finish, including when the queue is full. If stopping the listener fails, its state and sinks are retained so shutdown can be retried.
 
 ## Security and Data Hygiene
 

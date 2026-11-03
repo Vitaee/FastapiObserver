@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import re
 from collections.abc import Mapping
 from typing import Any
 from starlette.exceptions import HTTPException as StarletteHTTPException
@@ -8,15 +7,13 @@ from starlette.routing import Match
 from starlette.types import Scope
 
 from ..request_context import UNMATCHED_ROUTE, route_template
-from ..security import SecurityPolicy, sanitize_event
+from ..security import SecurityPolicy, strip_url_credentials
 from ..security.redaction import redact_body
-
-_CREDENTIAL_RE = re.compile(r"://[^:]+:[^@]+@")
 
 
 def _sanitize_exception_message(msg: str, *, max_length: int = 512) -> str:
     """Strip credential patterns (e.g. ``://user:pass@``) from exception text."""
-    return _CREDENTIAL_RE.sub("://***:***@", msg)[:max_length]
+    return strip_url_credentials(msg)[:max_length]
 
 class _RequestEventBuilder:
     def __init__(self, policy: SecurityPolicy) -> None:
@@ -58,7 +55,9 @@ class _RequestEventBuilder:
             event["exception_message"] = _sanitize_exception_message(str(exception))
         for kind, (count, seconds) in (calls or {}).items():
             event[kind] = {"count": int(count), "ms": round(seconds * 1000, 3)}
-        return sanitize_event(event, self.policy)
+        # Redacted with the rest of the line where it's written or exported
+        # (decision record 0004), on the log thread instead of the request's.
+        return event
 
 
 def _classify_error(status_code: int, error: Exception | None) -> str:

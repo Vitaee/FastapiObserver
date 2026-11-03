@@ -283,8 +283,9 @@ def test_structured_formatter_emits_structured_error_payload() -> None:
     assert payload["error"]["type"] == "RuntimeError"
     assert payload["error"]["message"] == "boom"
     assert "RuntimeError: boom" in payload["error"]["stacktrace"]
-    assert payload["exc_info"] == payload["error"]["stacktrace"]
     assert "fingerprint" in payload["error"]
+    # The stack trace is written once, in `error`.
+    assert "exc_info" not in payload
 
 
 def test_error_fingerprint_groups_by_where_it_was_raised_not_by_message() -> None:

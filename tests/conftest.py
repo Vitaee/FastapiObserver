@@ -13,6 +13,7 @@ from fastapiobserver.request_context import (
     clear_trace_id,
     clear_user_context,
 )
+from fastapiobserver.sinks import clear_sinks
 
 pytest_plugins = ("tests.conftest_otlp",)
 
@@ -22,6 +23,7 @@ def reset_global_state() -> typing.Generator[None, None, None]:
     original_level = root.level
 
     clear_plugins()
+    clear_sinks()
     clear_request_id()
     clear_trace_id()
     clear_span_id()
@@ -32,6 +34,7 @@ def reset_global_state() -> typing.Generator[None, None, None]:
     if textmap is not None:
         importlib.import_module("opentelemetry.propagate").set_global_textmap(textmap)
     clear_plugins()
+    clear_sinks()
     clear_request_id()
     clear_trace_id()
     clear_span_id()

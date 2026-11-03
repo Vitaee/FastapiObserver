@@ -150,17 +150,20 @@ Logging and providers keep running, because other apps in the process share
 them and a reused `TestClient` starts the app again. They're stopped at process
 exit: logging by its `atexit` hook, OpenTelemetry providers by their own.
 
-For explicit control during the App lifecycle, we highly recommend wrapping your app's lifespan with the newly provided `observability_lifespan`:
+`install_observability()` does this by wrapping the app's own lifespan in
+`observability_lifespan`, so an app it set up needs nothing more. Entering
+`observability_lifespan` again inside your lifespan does nothing. Use it
+yourself only when logging comes from `setup_logging()` without
+`install_observability()`:
 
 ```python
 from fastapiobserver import observability_lifespan
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Prepare app dependencies
     async with observability_lifespan(app):
-        yield # App receives traffic
-    # All background threads gracefully flushed here
+        yield  # the app receives traffic
+    # queued log records have been written here
 ```
 
 ### Runtime Stress Harness

@@ -36,7 +36,7 @@ jobs:
             -e ".[dev,prometheus,otel${{ matrix.extras }}]"
 
       - name: Pytest
-        run: python -m pytest -q
+        run: python -m pytest -q --cov
 
   quality:
     runs-on: ubuntu-latest

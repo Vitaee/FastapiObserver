@@ -93,13 +93,26 @@ async def send(message: Any) -> None:
     pass
 
 
-async def cpu_us_per_request(app: FastAPI, requests: int) -> float:
-    start = time.process_time()
+async def cpu_us_per_request(app: FastAPI, requests: int) -> tuple[float, float]:
+    """CPU per request on the calling thread, and in the whole process once the
+    log queue is empty, which adds the background thread's formatting."""
+    process_start, thread_start = time.process_time(), time.thread_time()
     for _ in range(requests):
         await app(dict(SCOPE), receive, send)
+    thread_used = time.thread_time() - thread_start
     while get_log_queue_stats()["queue_size"]:
         time.sleep(0.001)
-    return (time.process_time() - start) / requests * 1e6
+    process_used = time.process_time() - process_start
+    return thread_used / requests * 1e6, process_used / requests * 1e6
+
+
+def report(mode: str, runs: list[tuple[float, float]]) -> None:
+    thread = statistics.median(run[0] for run in runs)
+    process = statistics.median(run[1] for run in runs)
+    print(
+        f"{mode}: {process:.1f} us of CPU per request, {thread:.1f} on the request's thread",
+        file=sys.stderr,
+    )
 
 
 def discard_spans() -> None:
@@ -123,17 +136,18 @@ async def main(mode: str, absolute: bool) -> None:
         await cpu_us_per_request(observed, 2_000)  # warm up
         runs = [await cpu_us_per_request(observed, 5_000) for _ in range(9)]
         shutdown_logging()
-        print(f"{mode}: {statistics.median(runs):.1f} us of CPU per request", file=sys.stderr)
+        report(mode, runs)
         return
     plain, observed = build(None), build(mode)
     await cpu_us_per_request(observed, 2_000)  # warm up
     await cpu_us_per_request(plain, 2_000)
-    overheads = [
-        await cpu_us_per_request(observed, 5_000) - await cpu_us_per_request(plain, 5_000)
-        for _ in range(9)
-    ]
+    overheads = []
+    for _ in range(9):
+        observed_run = await cpu_us_per_request(observed, 5_000)
+        plain_run = await cpu_us_per_request(plain, 5_000)
+        overheads.append((observed_run[0] - plain_run[0], observed_run[1] - plain_run[1]))
     shutdown_logging()
-    print(f"{mode}: {statistics.median(overheads):.1f} us of CPU per request", file=sys.stderr)
+    report(mode, overheads)
 
 
 if __name__ == "__main__":

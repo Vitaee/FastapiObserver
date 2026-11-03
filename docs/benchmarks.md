@@ -17,6 +17,21 @@ The hand-wired version also has to get these details right, which the library ha
 2. **Context cleanup.** Request IDs stored in context variables have to be reset in a `finally` block, or they leak into the next request's logs.
 3. **Blocking writes.** Writing log lines to stdout from the request path blocks the event loop when the reader is slow (for example a container log driver under load). The library queues records and writes them from a background thread with `logging.handlers.QueueListener`.
 
+## CPU per request, in process
+
+[`examples/benchmarks/request_cpu.py`](https://github.com/Vitaee/FastapiObserver/blob/main/examples/benchmarks/request_cpu.py) calls the app directly, with no server or network, and reports the CPU the library adds to each request: on the request's own thread, and in the whole process once the background thread has written the log line. Apple M1, Python 3.14, medians of nine runs:
+
+| Mode | CPU added per request | On the request's thread |
+|---|---|---|
+| `default` | 45 µs | 32 µs |
+| `sampled` (`OBS_LOG_SAMPLE_RATE=0.1`) | 37 µs | 33 µs |
+
+```bash
+python examples/benchmarks/request_cpu.py default > /dev/null
+```
+
+Its other modes are listed in the script.
+
 ## Per-request overhead
 
 ### Setup

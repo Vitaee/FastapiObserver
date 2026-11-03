@@ -8,7 +8,8 @@ from typing import Any, Callable
 from fastapi import FastAPI
 
 from ..config import ObservabilitySettings
-from ..security import SecurityPolicy, sanitize_event
+from ..logging.formatter import _build_structured_error
+from ..security import SecurityPolicy, sanitize_record
 from .lifecycle import flush_on_app_shutdown
 from .resource import (
     build_otlp_exporter,
@@ -21,6 +22,7 @@ from .settings import OTelLogsSettings, OTelSettings
 _LOGGER = logging.getLogger("fastapiobserver.otel")
 _OTLP_LOG_PROCESSOR_KEYS_ATTR = "_fastapiobserver_otlp_log_processor_keys"
 _STANDARD_LOG_RECORD_ATTRS = frozenset(logging.makeLogRecord({}).__dict__)
+_EXCEPTION_FORMATTER = logging.Formatter()
 
 
 class _SanitizingOTLPLogHandler(logging.Handler):
@@ -49,6 +51,13 @@ class _SanitizingOTLPLogHandler(logging.Handler):
                 sanitized_record,
                 self._security_policy,
             )
+            if self.formatter is not None:
+                # Formatted here rather than by the delegate, so the body keeps
+                # its `error` once exc_info is taken off below.
+                sanitized_record.msg = self.formatter.format(sanitized_record)
+                sanitized_record.args = None
+            if sanitized_record.exc_info:
+                _move_exception_to_attributes(sanitized_record)
             # Records are exported on the queue's listener thread, where no span
             # is current, so OpenTelemetry would give them no trace. Make the
             # span the record was created in current while it's exported.
@@ -64,10 +73,6 @@ class _SanitizingOTLPLogHandler(logging.Handler):
                 self._otel_context.detach(token)
         except Exception:
             self.handleError(record)
-
-    def setFormatter(self, fmt: logging.Formatter | None) -> None:  # noqa: N802
-        super().setFormatter(fmt)
-        self._delegate.setFormatter(fmt)
 
     def flush(self) -> None:
         self._delegate.flush()
@@ -221,8 +226,19 @@ def _sanitize_record_custom_attributes(
     if not custom_attributes:
         return
 
-    sanitized_attributes = sanitize_event(custom_attributes, policy)
+    sanitized_attributes = sanitize_record(custom_attributes, policy)
     for key in custom_attributes:
         record.__dict__.pop(key, None)
     for key, value in sanitized_attributes.items():
         record.__dict__[key] = value
+
+
+def _move_exception_to_attributes(record: logging.LogRecord) -> None:
+    """Replace ``exc_info`` with OpenTelemetry's ``exception.*`` attributes, as
+    the JSON line's ``error`` has them: from ``exc_info``, the delegate would
+    export the exception's text with any URL credentials in it."""
+    error = _build_structured_error(record, _EXCEPTION_FORMATTER)
+    for key in ("type", "message", "stacktrace"):
+        if error[key]:
+            record.__dict__[f"exception.{key}"] = error[key]
+    record.exc_info = None

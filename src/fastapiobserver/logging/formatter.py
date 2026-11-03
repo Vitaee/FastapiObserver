@@ -12,7 +12,7 @@ from .._version import __version__
 from ..config import ObservabilitySettings
 from ..plugins import apply_log_enrichers
 from ..request_context import get_request_id, get_span_id, get_trace_id, get_user_context
-from ..security import SecurityPolicy, sanitize_event
+from ..security import SecurityPolicy, sanitize_record, strip_url_credentials
 from ..utils import lazy_import
 from .volume import count_log_bytes
 
@@ -58,7 +58,7 @@ class StructuredJsonFormatter(logging.Formatter):
         self.settings = settings
         self.security_policy = security_policy or SecurityPolicy()
         self._enrich_event = enrich_event or apply_log_enrichers
-        self._sanitize_payload = sanitize_payload or sanitize_event
+        self._sanitize_payload = sanitize_payload or sanitize_record
 
     def format(self, record: logging.LogRecord) -> str:
         payload: dict[str, Any] = {
@@ -96,10 +96,7 @@ class StructuredJsonFormatter(logging.Formatter):
             payload["event"] = event
 
         if record.exc_info:
-            error_payload = _build_structured_error(record, self)
-            payload["error"] = error_payload
-            # Backward-compatible field retained for existing dashboards.
-            payload["exc_info"] = error_payload["stacktrace"]
+            payload["error"] = _build_structured_error(record, self)
 
         if getattr(record, "_skip_enrichers", False):
             enriched_payload = payload
@@ -147,8 +144,9 @@ def _build_structured_error(
 
     exc_type, exc_value, exc_tb = exc_info
     error_type = exc_type.__name__ if exc_type is not None else "Exception"
-    error_message = str(exc_value) if exc_value is not None else ""
-    stacktrace = formatter.formatException(exc_info)
+    # Connection errors repeat the URL they failed on, password included.
+    error_message = strip_url_credentials(str(exc_value)) if exc_value is not None else ""
+    stacktrace = strip_url_credentials(formatter.formatException(exc_info))
     fingerprint = _generate_error_fingerprint(error_type, exc_tb)
 
     return {

@@ -15,7 +15,7 @@ from .circuit_breaker import SinkCircuitBreakerHandler
 from .filters import PluginLogFilter, RequestIdFilter, TraceContextFilter
 from .formatter import StructuredJsonFormatter
 from .held import HeldLogFilter
-from .queueing import OverflowPolicyQueueHandler, _LOG_QUEUE_TELEMETRY
+from .queueing import DrainingQueueListener, OverflowPolicyQueueHandler, _LOG_QUEUE_TELEMETRY
 
 _LOGGER = logging.getLogger("fastapiobserver.logging")
 _UVICORN_LOGGERS = ("uvicorn", "uvicorn.error", "uvicorn.access")
@@ -38,11 +38,12 @@ def shutdown_logging() -> None:
 
     with state._LOGGING_LOCK:
         _teardown_handlers_locked(suppress_errors=True)
-        _LOG_QUEUE_TELEMETRY.reset(
-            log_queue=None,
-            queue_capacity=0,
-            overflow_policy="drop_oldest",
-        )
+        if state._QUEUE_LISTENER is None:
+            _LOG_QUEUE_TELEMETRY.reset(
+                log_queue=None,
+                queue_capacity=0,
+                overflow_policy="drop_oldest",
+            )
 
 
 def flush_logging(timeout_seconds: float = 5.0) -> None:
@@ -78,27 +79,10 @@ def _teardown_handlers_locked(suppress_errors: bool = True) -> None:
 
     errors: list[Exception] = []
 
-    listener = state._QUEUE_LISTENER
-    state._QUEUE_LISTENER = None
-    if listener is not None:
-        try:
-            listener.stop()
-        except Exception as exc:
-            if not suppress_errors:
-                errors.append(exc)
-            _LOGGER.debug(
-                "logging.queue_listener.stop_failed",
-                exc_info=True,
-                extra={"_skip_enrichers": True},
-            )
-
+    # Stop admissions before inserting the sentinel: a late drop_oldest write
+    # could otherwise remove it and leave stop() waiting forever.
     root_logger = logging.getLogger()
-    managed_handlers = [
-        handler
-        for handler in root_logger.handlers
-        if handler in state._MANAGED_HANDLERS
-    ]
-    for handler in managed_handlers:
+    for handler in list(state._MANAGED_HANDLERS):
         root_logger.removeHandler(handler)
         try:
             handler.close()
@@ -110,6 +94,23 @@ def _teardown_handlers_locked(suppress_errors: bool = True) -> None:
                 exc_info=True,
                 extra={"_skip_enrichers": True},
             )
+
+    listener = state._QUEUE_LISTENER
+    if listener is not None:
+        try:
+            listener.stop()
+        except Exception:
+            # A failed stop is not permission to close sinks still in use.
+            # Keep the listener and its outputs available for a later retry.
+            if not suppress_errors:
+                raise
+            _LOGGER.debug(
+                "logging.queue_listener.stop_failed",
+                exc_info=True,
+                extra={"_skip_enrichers": True},
+            )
+            return
+    state._QUEUE_LISTENER = None
 
     for output_handler in state._MANAGED_OUTPUT_HANDLERS:
         try:
@@ -224,7 +225,7 @@ def setup_logging(
         set_log_level(level)
         root_logger.addHandler(queue_handler)
 
-        listener = logging.handlers.QueueListener(
+        listener = DrainingQueueListener(
             log_queue,
             *managed_output_handlers,
             respect_handler_level=True,
@@ -324,7 +325,7 @@ def _restart_queue_listener_in_child() -> None:
             ):
                 handler.queue = new_queue
 
-        new_listener = logging.handlers.QueueListener(
+        new_listener = DrainingQueueListener(
             new_queue,
             *listener.handlers,
             respect_handler_level=listener.respect_handler_level,
