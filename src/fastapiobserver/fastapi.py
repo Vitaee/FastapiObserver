@@ -48,6 +48,7 @@ _ROUTE_PARAM_PATTERN = re.compile(r"\{[^{}]+\}")
 class ObservabilityRuntimeState:
     settings: ObservabilitySettings
     excluded_urls: frozenset[str] = frozenset()
+    lifespan_running: bool = False
 
 
 def install_observability(
@@ -442,17 +443,24 @@ def _build_exclude_path_variants(path: str) -> set[str]:
 @asynccontextmanager
 async def observability_lifespan(app: FastAPI) -> typing.AsyncGenerator[typing.Any, None]:
     """A FastAPI lifespan context manager that writes out queued logs when the app stops.
-    
-    Developers can yield from this manager directly in their app's lifespan:
-    
+
+    ``install_observability()`` already runs it around the app's own lifespan, and
+    entered again inside that one, it does nothing. Enter it yourself only for an
+    app whose logging comes from ``setup_logging()`` alone:
+
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         async with observability_lifespan(app):
             yield
     """
     state = _get_runtime_state(app)
+    if state is not None and state.lifespan_running:
+        # A second watchdog would report each blocked loop twice.
+        yield {}
+        return
     watchdog = None
     if state:
+        state.lifespan_running = True
         _auto_discover_excluded_routes(app, state.settings)
         watch_thread_pool()
         if state.settings.loop_block_threshold_ms:
@@ -464,6 +472,8 @@ async def observability_lifespan(app: FastAPI) -> typing.AsyncGenerator[typing.A
     finally:
         if watchdog:
             watchdog.stop()
+        if state:
+            state.lifespan_running = False  # a reused TestClient starts the app again
         _teardown_observability(app)
 
 
@@ -480,7 +490,7 @@ def _register_logging_shutdown_hook(app: FastAPI) -> None:
         async with observability_lifespan(app_inst):
             if original_lifespan:
                 # If the user also enters observability_lifespan in their own
-                # lifespan, the queue is just flushed twice.
+                # lifespan, that inner one does nothing.
                 async with original_lifespan(app_inst) as state:
                     yield state
             else:

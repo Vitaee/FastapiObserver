@@ -6,6 +6,7 @@ import re
 import secrets
 from collections.abc import Mapping
 from typing import Any
+from urllib.parse import parse_qsl, urlencode
 
 from .normalize import _normalize_key, _normalize_media_type
 from .policy import _DROP, SecurityPolicy
@@ -13,12 +14,10 @@ from .policy import _DROP, SecurityPolicy
 MAX_SANITIZE_DEPTH = 32
 _SCALAR_TYPES = frozenset({str, int, float, bool})
 _PROCESS_KEY = secrets.token_bytes(32)  # for policies without a hash_key
-# A JSON "key": value or a form key=value pair in a captured body. The value may
-# be cut off where the capture stopped.
-_BODY_PAIR = re.compile(
-    r'(?P<quote>"?)(?P<key>[\w.-]+)(?P=quote)(?P<sep>\s*[:=]\s*)'
-    r'(?P<value>"(?:[^"\\]|\\.)*"?|[^\s,&"{}\[\]]*)'
-)
+# The user and password in a URL such as postgresql://user:password@host, which
+# connection errors repeat in their message. Neither part can hold whitespace,
+# "/", "?", "#" or "@" unencoded, so a match never runs past the URL.
+_URL_CREDENTIALS = re.compile(r"://[^\s/?#@:]*:[^\s/?#@]+@")
 
 
 @functools.lru_cache(maxsize=64)
@@ -47,32 +46,81 @@ def _redact_value(value: Any, policy: SecurityPolicy) -> Any:
         # Keyed: a plain hash of an email or phone number is reversed by
         # hashing candidates until one matches.
         key = policy.hash_key.get_secret_value().encode() if policy.hash_key else _PROCESS_KEY
-        digest = hmac.new(key, str(value).encode("utf-8"), hashlib.sha256).hexdigest()
+        # JSON permits escaped unpaired surrogates; hashing them must not fail
+        # request finalization. Valid Unicode keeps its existing byte encoding.
+        encoded = str(value).encode("utf-8", errors="surrogatepass")
+        digest = hmac.new(key, encoded, hashlib.sha256).hexdigest()
         return f"hmac-sha256:{digest}"
     return policy.mask_text
 
 
 def redact_body(body: str, policy: SecurityPolicy) -> str:
-    """*body* with the values of sensitive keys redacted, in JSON and form bodies.
+    """Decode JSON/form keys before redaction; mask bodies that cannot be inspected.
 
-    Captured bodies are cut at ``max_body_length``, so they're matched as text
-    rather than parsed. ``drop`` mode masks instead: a cut-off pair can't be
-    removed cleanly.
+    Capture can cut JSON mid-value, so malformed JSON must never fall back to
+    another parser. Body ``drop`` mode keeps its existing masking behavior.
     """
-    sensitive_fields = _policy_key_sets(policy)[0]
+    if policy.redaction_mode == "drop":
+        policy = policy.model_copy(update={"redaction_mode": "mask"})
+    sensitive_fields, sensitive_headers, header_allowlist, _ = _policy_key_sets(policy)
+    try:
+        value = json.loads(body)
+    except (ValueError, RecursionError):
+        if body.lstrip().startswith(("{", "[", '"', "\ufeff")):
+            return policy.mask_text
+        try:
+            pairs = parse_qsl(body, keep_blank_values=True, strict_parsing=True, errors="strict")
+        except ValueError:
+            return policy.mask_text
+        return urlencode(
+            [
+                (
+                    key,
+                    _redact_value(value, policy)
+                    if _normalize_key(key) in sensitive_fields
+                    else value,
+                )
+                for key, value in pairs
+            ],
+            safe="*",
+        )
+    sanitized = _sanitize_value(
+        value,
+        policy,
+        sensitive_fields,
+        sensitive_headers,
+        parent_is_headers=False,
+        depth=0,
+        header_allowlist=header_allowlist,
+        event_key_allowlist=None,
+    )
+    return json.dumps(sanitized, separators=(",", ":"))
 
-    def redact(match: re.Match[str]) -> str:
-        if _normalize_key(match["key"]) not in sensitive_fields:
-            return match[0]
-        redacted = _redact_value(match["value"].strip('"'), policy)
-        text = policy.mask_text if redacted is _DROP else str(redacted)
-        quote = match["quote"]
-        return f"{quote}{match['key']}{quote}{match['sep']}{json.dumps(text) if quote else text}"
 
-    return _BODY_PAIR.sub(redact, body)
+def strip_url_credentials(text: str) -> str:
+    """*text* with the user and password of every URL in it masked."""
+    return _URL_CREDENTIALS.sub("://***:***@", text)
 
 
 def sanitize_event(data: dict[str, Any], policy: SecurityPolicy) -> dict[str, Any]:
+    """*data* redacted, keeping only the event-key allowlist's keys, if there is one."""
+    return _sanitize(data, policy, apply_event_key_allowlist=True)
+
+
+def sanitize_record(data: dict[str, Any], policy: SecurityPolicy) -> dict[str, Any]:
+    """A log record's fields redacted as by :func:`sanitize_event`, with the
+    event-key allowlist applied to their ``event`` only: the record's own fields,
+    such as ``timestamp`` and ``request_id``, aren't event keys."""
+    sanitized = _sanitize(data, policy, apply_event_key_allowlist=False)
+    event = data.get("event")
+    if policy.event_key_allowlist is not None and isinstance(event, dict) and "event" in sanitized:
+        sanitized["event"] = sanitize_event(event, policy)
+    return sanitized
+
+
+def _sanitize(
+    data: Mapping[str, Any], policy: SecurityPolicy, *, apply_event_key_allowlist: bool
+) -> dict[str, Any]:
     sensitive_fields, sensitive_headers, header_allowlist, event_key_allowlist = (
         _policy_key_sets(policy)
     )
@@ -84,7 +132,7 @@ def sanitize_event(data: dict[str, Any], policy: SecurityPolicy) -> dict[str, An
         parent_is_headers=False,
         depth=0,
         header_allowlist=header_allowlist,
-        event_key_allowlist=event_key_allowlist,
+        event_key_allowlist=event_key_allowlist if apply_event_key_allowlist else None,
     )
 
 
@@ -203,4 +251,10 @@ def is_body_capturable(content_type: str | None, policy: SecurityPolicy) -> bool
             return True
     return False
 
-__all__ = ["sanitize_event", "redact_body", "is_body_capturable"]
+__all__ = [
+    "sanitize_event",
+    "sanitize_record",
+    "redact_body",
+    "strip_url_credentials",
+    "is_body_capturable",
+]

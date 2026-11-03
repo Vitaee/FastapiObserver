@@ -118,3 +118,22 @@ def test_get_log_queue_stats_contract() -> None:
     assert stats["queue_capacity"] == 42
     assert stats["enqueued_total"] == 1
     assert stats["overflow_policy"] == "drop_oldest"
+
+
+def test_prepare_freezes_arguments_and_passes_other_records_through() -> None:
+    handler = OverflowPolicyQueueHandler(
+        queue.Queue(),
+        overflow_policy="drop_oldest",
+        block_timeout_seconds=1.0,
+        telemetry=LogQueueTelemetry(),
+    )
+    plain = _record("request.completed")
+    items = ["a"]
+    with_args = _record("items %s")
+    with_args.args = (items,)
+
+    assert handler.prepare(plain) is plain  # nothing to freeze, so not copied
+    prepared = handler.prepare(with_args)
+    items.append("b")  # changed after the call, before the listener formats it
+    assert prepared is not with_args
+    assert (prepared.getMessage(), prepared.args) == ("items ['a']", None)

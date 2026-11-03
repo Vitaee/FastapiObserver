@@ -48,7 +48,9 @@ policy = SecurityPolicy(
 
 ### Body capture
 
-Captured bodies are cut at `OBS_MAX_BODY_LENGTH` bytes, then the values of sensitive keys are redacted in JSON (`"password": "..."`) and form (`password=...`) bodies, including a value the cut left unfinished. Bodies are matched as text, not parsed, so a secret under a key that isn't in the redacted fields, or in free text, is written as it is. In `drop` mode, values in bodies are masked, since a cut-off pair can't be removed cleanly.
+Captured bodies are cut at `OBS_MAX_BODY_LENGTH` bytes, then parsed as JSON or URL-encoded forms before sensitive keys are checked. JSON escapes and percent-encoded form names are decoded, and nested JSON values are redacted with the same policy as other structured fields. Repeated form fields are preserved.
+
+Malformed or cut-off JSON, invalid forms and unsupported body formats (including free text and binary data) are masked as a whole. A cut-off form value can still be redacted when its key is complete. JSON and forms are re-encoded for the log; application traffic is unchanged. Values under keys outside the redacted fields remain visible. In `drop` mode, sensitive body values continue to be masked.
 
 ### Body capture media-type guard
 

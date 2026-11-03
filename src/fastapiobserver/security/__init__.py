@@ -11,12 +11,19 @@ from .policy import (
     TrustedProxyPolicy,
 )
 from .proxies import is_trusted_client_ip, resolve_client_ip
-from .redaction import is_body_capturable, sanitize_event
+from .redaction import (
+    is_body_capturable,
+    sanitize_event,
+    sanitize_record,
+    strip_url_credentials,
+)
 
 __all__ = [
     "SecurityPolicy",
     "TrustedProxyPolicy",
     "sanitize_event",
+    "sanitize_record",
+    "strip_url_credentials",
     "is_body_capturable",
     "is_trusted_client_ip",
     "resolve_client_ip",

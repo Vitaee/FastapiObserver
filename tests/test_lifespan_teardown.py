@@ -58,9 +58,9 @@ def test_teardown_handlers_chained_errors() -> None:
     import fastapiobserver.logging.state as logging_state
     import pytest
 
-    class BrokenListener:
-        def stop(self) -> None:
-            raise ValueError("Listener stop broke")
+    class FirstBrokenHandler:
+        def close(self) -> None:
+            raise ValueError("First handler close broke")
 
     class BrokenHandler:
         def close(self) -> None:
@@ -70,8 +70,8 @@ def test_teardown_handlers_chained_errors() -> None:
     orig_handlers = list(logging_state._MANAGED_OUTPUT_HANDLERS)
 
     try:
-        logging_state._QUEUE_LISTENER = BrokenListener()  # type: ignore[assignment]
-        logging_state._MANAGED_OUTPUT_HANDLERS[:] = [BrokenHandler(), BrokenHandler()]  # type: ignore[list-item]
+        logging_state._QUEUE_LISTENER = None
+        logging_state._MANAGED_OUTPUT_HANDLERS[:] = [FirstBrokenHandler(), BrokenHandler()]  # type: ignore[list-item]
 
         with pytest.raises(RuntimeError) as exc_info:
             logging_setup._teardown_handlers_locked(suppress_errors=False)

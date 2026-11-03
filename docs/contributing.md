@@ -89,7 +89,7 @@ git config core.hooksPath .githooks
 The pre-push hook runs:
 - `uv run ruff check`
 - `uv run mypy src`
-- `uv run pytest -q`
+- `uv run pytest -q --cov`, which fails below 90% branch coverage, as CI does
 
 ---
 

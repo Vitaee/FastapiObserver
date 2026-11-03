@@ -1,14 +1,17 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import warnings
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from typing import Any
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, Response
+from fastapi.testclient import TestClient
 import pytest
+from pydantic import SecretStr
 
 import fastapiobserver.fastapi as fastapi_module
 from fastapiobserver.fastapi import install_observability
@@ -78,6 +81,70 @@ def test_sanitizing_otlp_handler_sanitizes_custom_attributes() -> None:
     assert record_event["password"] == "secret"
 
 
+@pytest.mark.parametrize(
+    ("body", "media_type", "mode", "expected"),
+    [
+        (r'{"pass\u0077ord":"body-secret"}', "application/json", "mask", '{"password":"***"}'),
+        ("pass%77ord=body-secret", "application/x-www-form-urlencoded", "mask", "password=***"),
+        (r'{"pass\u0077ord":"body-secret', "application/json", "mask", "***"),
+        (
+            r'{"pass\u0077ord":"\ud800"}',
+            "application/json",
+            "hash",
+            '{"password":"hmac-sha256:'
+            '6c82905373e79e4d72bbc6f42eccc81b2c71eb2842e8190053fa24670d66dfc3"}',
+        ),
+    ],
+)
+def test_captured_bodies_are_redacted_in_json_and_otlp_logs(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    body: str,
+    media_type: str,
+    mode: str,
+    expected: str,
+) -> None:
+    from fastapiobserver.logging import shutdown_logging
+    import fastapiobserver.otel.logs as otel_logs_module
+
+    export = pytest.importorskip("opentelemetry.sdk._logs.export")
+    exporter = export.InMemoryLogRecordExporter()
+    monkeypatch.setattr(otel_logs_module, "build_otlp_exporter", lambda *_: exporter)
+    app = FastAPI()
+
+    @app.post("/echo")
+    async def echo(request: Request) -> Response:
+        return Response(await request.body(), media_type=media_type)
+
+    install_observability(
+        app,
+        ObservabilitySettings(),
+        metrics_enabled=False,
+        security_policy=SecurityPolicy(
+            log_request_body=True,
+            log_response_body=True,
+            redaction_mode=mode,
+            hash_key=SecretStr("test-key"),
+        ),
+        otel_logs_settings=OTelLogsSettings(enabled=True, logs_mode="both"),
+    )
+    try:
+        with TestClient(app) as client:
+            response = client.post("/echo", content=body, headers={"content-type": media_type})
+        assert response.content == body.encode()  # Capture must not change application traffic.
+        local = [
+            json.loads(line) for line in capsys.readouterr().out.splitlines() if line[:1] == "{"
+        ]
+        otlp = [json.loads(item.log_record.body) for item in exporter.get_finished_logs()]
+        for records in (local, otlp):
+            [completed] = [row for row in records if row.get("message") == "request.completed"]
+            assert completed["event"]["request_body"] == expected
+            assert completed["event"]["response_body"] == expected
+            assert "body-secret" not in json.dumps(completed)
+    finally:
+        shutdown_logging()
+
+
 def _install_otlp_logs_app(monkeypatch: pytest.MonkeyPatch, app: FastAPI) -> Any:
     in_memory = pytest.importorskip("opentelemetry.sdk._logs.export")
     import fastapiobserver.otel.logs as otel_logs_module
@@ -125,6 +192,33 @@ def test_otlp_logs_are_redacted_without_deprecated_or_root_handler(
         if item.log_record.attributes.get("password")
     ]
     assert exported.log_record.attributes["password"] == "***"
+
+
+def test_otlp_logs_strip_credentials_from_exceptions(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    app = FastAPI()
+    exporter = _install_otlp_logs_app(monkeypatch, app)
+
+    try:
+        raise ConnectionError("could not connect to postgresql://admin:hunter2@db/app")
+    except ConnectionError:
+        logging.getLogger("demo").exception("db.failed")
+    _run_lifespan(app)
+
+    [exported] = [
+        item.log_record
+        for item in exporter.get_finished_logs()
+        if "db.failed" in str(item.log_record.body)
+    ]
+    attributes = dict(exported.attributes or {})
+    assert attributes["exception.type"] == "ConnectionError"
+    assert attributes["exception.message"] == (
+        "could not connect to postgresql://***:***@db/app"
+    )
+    assert "ConnectionError" in attributes["exception.stacktrace"]
+    assert '"error"' in str(exported.body)
+    assert "hunter2" not in str(exported.body) + str(attributes)
 
 
 def test_logs_from_app_shutdown_reach_otlp_before_provider_shutdown(

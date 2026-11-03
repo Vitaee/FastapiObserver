@@ -8,15 +8,17 @@ Covers:
 """
 from __future__ import annotations
 
+import json
 import logging
 
 import pytest
 
+from fastapiobserver import ObservabilitySettings, StructuredJsonFormatter
 from fastapiobserver.middleware.events import (
     _RequestEventBuilder,
     _sanitize_exception_message,
 )
-from fastapiobserver.security import SecurityPolicy, sanitize_event
+from fastapiobserver.security import SecurityPolicy, sanitize_event, strip_url_credentials
 from fastapiobserver.security.redaction import MAX_SANITIZE_DEPTH
 
 
@@ -94,6 +96,33 @@ class TestSanitizeExceptionMessage:
         )
         assert "secret123" not in event["exception_message"]
         assert "://***:***@" in event["exception_message"]
+
+    def test_strips_url_without_user(self) -> None:
+        result = strip_url_credentials("redis://:s3cret@cache:6379/0")
+        assert result == "redis://***:***@cache:6379/0"
+
+    def test_never_matches_past_the_url(self) -> None:
+        text = 'GET http://api:8080/users failed\n    @app.get("/users")'
+        assert strip_url_credentials(text) == text
+
+    def test_formatter_strips_credentials_from_error(self) -> None:
+        formatter = StructuredJsonFormatter(
+            ObservabilitySettings(app_name="t", service="t", environment="t")
+        )
+        try:
+            raise ConnectionError("could not connect to postgresql://admin:hunter2@db/app")
+        except ConnectionError as error:
+            record = logging.LogRecord(
+                "t", logging.ERROR, __file__, 1, "db.failed", None,
+                (type(error), error, error.__traceback__),
+            )
+
+        line = formatter.format(record)
+
+        assert "hunter2" not in line
+        error_payload = json.loads(line)["error"]
+        assert error_payload["message"] == "could not connect to postgresql://***:***@db/app"
+        assert "postgresql://***:***@db/app" in error_payload["stacktrace"]
 
 
 # ---------------------------------------------------------------------------

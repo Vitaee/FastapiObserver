@@ -103,7 +103,7 @@ Since 0.142, FastAPI traces requests on its own once an OpenTelemetry provider i
 - You already send everything to Logfire, Datadog or Sentry: their own FastAPI integrations fit better.
 - Your app isn't built on FastAPI or Starlette.
 
-What it costs: with default settings, about 43 µs of CPU per request on an Apple M1. See the [benchmarks](https://vitaee.github.io/FastapiObserver/benchmarks/), including a comparison with wiring the same stack by hand.
+What it costs: with default settings, about 45 µs of CPU per request on an Apple M1, 32 µs of it on the request's own thread and the rest writing the line on a background thread. See the [benchmarks](https://vitaee.github.io/FastapiObserver/benchmarks/), including a comparison with wiring the same stack by hand.
 
 ## Works with
 

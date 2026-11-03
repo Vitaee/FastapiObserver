@@ -270,7 +270,7 @@ def test_captured_bodies_have_sensitive_values_redacted(caplog) -> None:
 @pytest.mark.parametrize(
     ("body", "expected"),
     [
-        ('{"access_token": "abc.de', '{"access_token": "***"'),  # cut off by max_body_length
+        ('{"access_token": "abc.de', '***'),  # cut off by max_body_length: mask the whole body
         ("username=ada&password=hunter2&x=1", "username=ada&password=***&x=1"),
         (
             '{"user":{"secret":7},"items":[{"token":"t"}]}',

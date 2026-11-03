@@ -17,6 +17,6 @@ echo "[pre-push] Running mypy"
 uv run mypy src
 
 echo "[pre-push] Running pytest"
-uv run pytest -q
+uv run pytest -q --cov
 
 echo "[pre-push] All checks passed."

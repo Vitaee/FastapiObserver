@@ -87,6 +87,7 @@ dev = [
     "mypy>=2.4.1",
     "pip-audit>=2.10.1",
     "pytest>=9.2.0",
+    "pytest-cov>=7.1.0",
     "pytest-randomly>=5.0.0",
     "ruff>=0.17.3",
     "sqlalchemy[asyncio]>=2.0.0",
@@ -125,3 +126,14 @@ ignore_missing_imports = true
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 testpaths = ["tests"]
+
+# Read by `pytest --cov`, as CI and the pre-push hook run it.
+[tool.coverage.run]
+source = ["fastapiobserver"]
+branch = true
+
+[tool.coverage.report]
+# 91% with the newest and with the oldest supported dependencies.
+fail_under = 90
+show_missing = true
+skip_covered = true
