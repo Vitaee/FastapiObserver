@@ -9,7 +9,7 @@ Planned work, in order. Shipped changes are listed in [CHANGELOG.md](CHANGELOG.m
 2.0.0 shipped the smaller core: one name per setting, a 27-name API, and no audit log or Logtail sink. Still open:
 
 - [ ] Back every claim in the README with a test, then mark the package `Development Status :: 5 - Production/Stable`.
-- [ ] Find out why scheduled workflows don't run: Runtime Stress last ran on 13 July 2026 and Upstream has never run.
+- [x] Verify scheduled Runtime Stress and Upstream workflows run (confirmed 3 November 2026).
 - [ ] Decide whether to require FastAPI 0.142 and drop the `FastAPIInstrumentor` fallback.
 
 ## Diagnosis
@@ -22,6 +22,10 @@ Planned work, in order. Shipped changes are listed in [CHANGELOG.md](CHANGELOG.m
 Done when every common failure mode has a named warning.
 
 ## Failure lab
+
+The [full-stack example](examples/full_stack/README.md) reproduces a blocked event loop,
+database-pool exhaustion and N+1 queries, with real-server tests asserting their warnings.
+The other failure modes below remain open.
 
 - [ ] A test per failure mode that triggers it and asserts its warning, run in CI: blocked event loop, thread-pool and database-pool exhaustion, a thread-pool and database deadlock, client disconnect, load-balancer timeout, SIGTERM under load, N+1 queries.
 - [ ] A Docker Compose stack that triggers each one on demand and shows the log line and dashboard panel that catch it.

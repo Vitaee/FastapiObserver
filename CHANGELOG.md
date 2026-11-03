@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- The full-stack example includes a failure-lab driver for blocked event loops, database-pool exhaustion and N+1 queries, plus a one-query alternative. Real-server tests assert the diagnostic warnings and query counts.
+
+### Fixed
+- The examples use the current setup APIs and dependencies, forward request IDs and trace context between demo services, and bound traffic-generator readiness waits. Standalone examples have smoke tests; the async database example closes its engine on shutdown and keeps SQL output in the structured logging pipeline.
+
 ## [2.0.2] - 2026-11-03
 
 ### Security
