@@ -64,7 +64,7 @@ Requires Python 3.11 or newer.
 | `OBS_METRICS_ENABLED` | `true` | Serves Prometheus metrics at `/metrics` (needs `[prometheus]`) |
 | `OBS_OTEL_ENABLED`, `OTEL_EXPORTER_OTLP_ENDPOINT` | `true`, `http://collector:4317` | Sends traces over OTLP and adds `trace_id` to logs (needs `[otel]`) |
 | `OBS_REDACTION_PRESET` | `strict`, `pci`, `gdpr` | Chooses which fields and headers are masked |
-| `OBS_PROFILE` | `development`, `production` | Sensible defaults: `production` sets `INFO` logs, a larger log queue and the `strict` preset |
+| `OBS_PROFILE` | `development`, `production` | Sensible defaults: `production` sets `INFO` logs, a larger log queue, the `strict` preset and the event-loop watchdog |
 
 Explicit variables and Python arguments always win over profile defaults. Every setting is listed in the [configuration guide](https://vitaee.github.io/FastapiObserver/configuration/).
 
@@ -76,7 +76,7 @@ Explicit variables and Python arguments always win over profile defaults. Every 
 - **Prometheus metrics** labelled by route template (`/orders/{order_id}`). Requests no route matches, such as scanners, CORS preflights and requests an auth middleware rejects, share one `<unmatched>` label, and made-up methods share `_OTHER`, so neither IDs nor anonymous clients explode cardinality.
 - **OpenTelemetry traces**, from FastAPI's own support on 0.142 and later, with `trace_id` and `span_id` in every log line, and optional log export over OTLP, redacted like everything else.
 - **Non-blocking log writes.** Lines are written from a background thread, so a slow stdout never stalls the event loop.
-- **Help finding what slows a request down.** Opt-in: a warning with the stack of any sync call that blocks the event loop, and `DEBUG` lines written only for requests that fail. Always on: a warning when the thread pool or a database connection pool is full, the usual cause when latency climbs while CPU stays low. With tracing on, each request line counts its queries and outbound HTTP calls, and a query run once per item (N+1) gets a warning. With metrics on, `/metrics` shows how many bytes of logs each route writes (in a single process), and `OBS_LOG_SAMPLE_RATE` keeps a share of successful requests, chosen by trace ID, while failed and slow requests are always written in full.
+- **Help finding what slows a request down.** A warning with the stack of any sync call that blocks the event loop, on in the `production` profile. A warning when the thread pool or a database connection pool is full, the usual cause when latency climbs while CPU stays low. For the SQLAlchemy engines you pass in, each request line counts its queries, and a query run once per item (N+1) gets a warning, with or without tracing; with tracing on, outbound HTTP calls are counted too. Opt-in: `DEBUG` lines written only for requests that fail. With metrics on, `/metrics` shows how many bytes of logs each route writes (in a single process), and `OBS_LOG_SAMPLE_RATE` keeps a share of successful requests, chosen by trace ID, while failed and slow requests are always written in full.
 
 Optional extras: runtime log-level control, SQLAlchemy, `httpx` and `requests` tracing, Strawberry GraphQL and a Loguru bridge. See the [documentation](https://vitaee.github.io/FastapiObserver/).
 

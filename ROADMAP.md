@@ -14,8 +14,7 @@ Planned work, in order. Shipped changes are listed in [CHANGELOG.md](CHANGELOG.m
 
 ## Diagnosis
 
-- [ ] Count queries and outbound HTTP calls from SQLAlchemy and `httpx` events instead of OpenTelemetry spans, so `db.n_plus_one` and the per-request counts work with tracing off and see every request, not only sampled ones.
-- [ ] Turn the event-loop watchdog on in the `production` profile, at a threshold whose overhead has been measured, and decide whether `OBS_LOG_LEVEL_ON_ERROR` belongs there too.
+- [ ] Count outbound HTTP calls from `httpx` events, so the `http` totals work with tracing off too.
 - [ ] Abandoned requests: notice when the client disconnects (`http.disconnect`) even if nothing cancels the handler, and log how long the request kept running.
 - [ ] Shutdown: on SIGTERM, log the requests in flight, how long draining took and which requests were cut off.
 - [ ] One named warning per failure mode, with the numbers behind it and a `docs_url` pointing at the fix. Named today: `event_loop.blocked`, `threadpool.saturated`, `db.pool_exhausted`, `db.n_plus_one`, `request.cancelled`. Still missing: client disconnect, load-balancer timeout, requests cut off at shutdown.

@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- Queries on the SQLAlchemy engines passed as `db_engine` are counted on the request line (`db`) and checked for N+1 (`db.n_plus_one`) without tracing, on every request instead of only sampled ones. They're counted from SQLAlchemy's own events, so it also works on SQLAlchemy 2.1, which OpenTelemetry's SQLAlchemy instrumentation doesn't support yet. See decision record 0014.
+
+### Changed
+- The `production` profile turns the event-loop watchdog on (`OBS_LOOP_BLOCK_THRESHOLD_MS=250`). It costs nothing measurable per request and about 0.25% of one core per worker while idle. `OBS_LOG_LEVEL_ON_ERROR` stays opt-in, since each held `DEBUG` record costs about 4 µs of CPU.
+- SQLAlchemy's OpenTelemetry spans no longer add to the request's `db` totals, so a query counts once. **An engine traced with `SQLAlchemyInstrumentor` directly, and not passed as `db_engine` or through `instrument_sqlalchemy()`, is no longer counted.**
+
 ## [2.0.1] - 2026-11-01
 
 ### Fixed

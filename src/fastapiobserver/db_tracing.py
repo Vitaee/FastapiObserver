@@ -27,6 +27,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from .db_queries import count_queries
 from .utils import lazy_import
 
 _LOGGER = logging.getLogger("fastapiobserver.db_tracing")
@@ -78,6 +79,8 @@ def instrument_sqlalchemy(
             f"`pip install {_PACKAGE_HINT}`"
         ) from exc
     instrumentor = instrumentor_module.SQLAlchemyInstrumentor()
+    # Its spans aren't counted, so the queries come from SQLAlchemy's events.
+    count_queries(engine)
 
     if not any(known is engine for known in _ENGINES):
         _ENGINES.append(engine)

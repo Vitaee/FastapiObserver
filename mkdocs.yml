@@ -78,4 +78,5 @@ nav:
       - 0011 One label for unmatched requests: decisions/0011-every-unmatched-request-shares-one-label.md
       - 0012 No sinks from installed packages: decisions/0012-no-sinks-from-installed-packages.md
       - 0013 Every setting has one name: decisions/0013-every-setting-has-one-name.md
+      - 0014 Diagnosis without tracing: decisions/0014-diagnosis-without-tracing.md
   - Contributing: contributing.md

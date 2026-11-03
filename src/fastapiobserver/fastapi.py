@@ -14,6 +14,7 @@ from typing import Any, Literal, cast
 from fastapi import FastAPI
 
 from .config import ObservabilitySettings, retired_env_vars
+from .db_queries import count_queries
 from .control_plane import RuntimeControlSettings, mount_control_plane
 from .logging import flush_logging, setup_logging
 from .loop_watchdog import EventLoopWatchdog
@@ -123,7 +124,9 @@ def install_observability(
     if db_engine is not None:
         engines = _as_engine_list(db_engine)
         for engine in engines:
-            watch_db_pool(getattr(engine, "sync_engine", engine))
+            sync_engine = getattr(engine, "sync_engine", engine)
+            watch_db_pool(sync_engine)
+            count_queries(sync_engine)
         if otel_settings and otel_settings.enabled:
             _setup_database_tracing(engines, db_commenter_enabled, db_commenter_options)
 

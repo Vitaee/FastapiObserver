@@ -89,6 +89,8 @@ dev = [
     "pytest>=9.2.0",
     "pytest-randomly>=5.0.0",
     "ruff>=0.17.3",
+    "sqlalchemy[asyncio]>=2.0.0",
+    "aiosqlite>=0.20.0",
     "strawberry-graphql>=0.339.1",
     "uvicorn>=0.54.0",
 ]
