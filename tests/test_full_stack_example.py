@@ -124,8 +124,25 @@ def demo_server(tmp_path_factory: pytest.TempPathFactory):
             thread.join(timeout=2)
 
 
+def test_log_reader_waits_for_a_complete_line(tmp_path: Path) -> None:
+    path = tmp_path / "server.log"
+    path.write_text('{"message":"first"}\n{"message":"sec')
+    assert _records(path) == [{"message": "first"}]
+
+    with path.open("a") as output:
+        output.write('ond"}\n')
+    assert _records(path) == [{"message": "first"}, {"message": "second"}]
+
+    # A complete, malformed record is a real failure and must still be rejected.
+    path.write_text('{"message":}\n')
+    with pytest.raises(json.JSONDecodeError):
+        _records(path)
+
+
 def _records(path: Path) -> list[dict]:
-    return [json.loads(line) for line in path.read_text().splitlines() if line.startswith("{")]
+    # A polling read can catch the writer partway through its last line.
+    lines = path.read_text().split("\n")[:-1]
+    return [json.loads(line) for line in lines if line.startswith("{")]
 
 
 def _request_record(path: Path, request_id: str) -> dict:
