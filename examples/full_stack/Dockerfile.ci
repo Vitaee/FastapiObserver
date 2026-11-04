@@ -1,0 +1,10 @@
+# Release validation installs the exact wheel built by the package job.
+FROM python:3.14.7-slim
+WORKDIR /app
+COPY dist/packages/*.whl /wheels/
+RUN for wheel in /wheels/*.whl; do \
+    pip install --no-cache-dir "$wheel[prometheus,otel,otel-httpx,otel-sqlalchemy]" uvicorn httpx2; \
+    done
+COPY examples/full_stack/app.py .
+EXPOSE 8000
+CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000"]

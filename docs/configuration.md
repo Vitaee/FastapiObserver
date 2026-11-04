@@ -10,7 +10,19 @@ To see what took effect, look for the `observability.configured` line that `inst
 {"message": "observability.configured", "event": {"profile": "production", "log_level": "INFO", "metrics_path": null, "tracing": true, "otlp_endpoint": "http://collector:4317", "trace_sampling_ratio": 0.1, "redaction_mode": "drop", "trusted_cidrs": ["10.0.0.0/8", "..."], "control_plane": null}}
 ```
 
-The line is written at `INFO`, so it's hidden when `OBS_LOG_LEVEL` is `WARNING` or higher.
+The line is written at `INFO`, so the active logging configuration can hide it.
+With the default pipeline, `OBS_LOG_LEVEL=WARNING` or higher hides it.
+
+### Keep application-owned logging
+
+Pass `install_observability(app, configure_logging=False)` to retain existing
+handlers, filters, formatters, levels, sanitization and log export. This is an
+installer option, not an environment variable or an `ObservabilitySettings`
+field. The application's logging configuration then controls output; the
+library does not install its queue, sampling, sinks or OTLP log handler.
+In `observability.configured`, `configure_logging` is `false` and unapplied
+pipeline settings are `null`. Request metrics and optional tracing remain
+independent. See [application-owned logging](logging.md#application-owned-logging).
 
 ### Environment Profiles (`OBS_PROFILE`)
 

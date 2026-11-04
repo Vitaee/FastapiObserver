@@ -26,8 +26,11 @@ To compare two versions, run it with ``PYTHONPATH`` set to each one's ``src``.
 from __future__ import annotations
 
 import asyncio
+import importlib.metadata
+import json
 import logging
 import os
+import platform
 import statistics
 import sys
 import time
@@ -41,7 +44,7 @@ from fastapiobserver import (
     install_observability,
     instrument_httpx_client,
 )
-from fastapiobserver.logging import get_log_queue_stats, shutdown_logging
+from fastapiobserver.logging import flush_logging, shutdown_logging
 from fastapiobserver.loop_watchdog import EventLoopWatchdog
 
 SCOPE = {
@@ -60,6 +63,7 @@ SCOPE = {
 # Settings per mode; "metrics" also turns Prometheus on.
 MODES: dict[str, dict[str, Any]] = {
     "default": {},
+    "application": {},
     "metrics": {},
     "held": {"log_level_on_error": "DEBUG"},
     "sampled": {"log_sample_rate": 0.1},
@@ -102,9 +106,20 @@ def build(mode: str | None, *, http_calls: bool = False) -> FastAPI:
         return {}
 
     if mode is not None:
+        if mode == "application":
+            class ApplicationFormatter(logging.Formatter):
+                def format(self, record: logging.LogRecord) -> str:
+                    return json.dumps({"message": record.getMessage(),
+                                       "request_id": getattr(record, "request_id", None)})
+
+            handler = logging.StreamHandler(sys.stdout)
+            handler.setFormatter(ApplicationFormatter())
+            logging.getLogger().handlers = [handler]
+            logging.getLogger().setLevel(logging.INFO)
         install_observability(
             app,
             ObservabilitySettings(**MODES[mode]),
+            configure_logging=mode != "application",
             metrics_enabled=mode == "metrics",
             otel_settings=OTelSettings(enabled=mode in TELEMETRY),
         )
@@ -135,8 +150,7 @@ async def cpu_us_per_request(app: FastAPI, requests: int) -> tuple[float, float]
     for _ in range(requests):
         await app(dict(SCOPE), receive, send)
     thread_used = time.thread_time() - thread_start
-    while get_log_queue_stats()["queue_size"]:
-        time.sleep(0.001)
+    flush_logging()  # Includes a record already dequeued but still being formatted.
     process_used = time.process_time() - process_start
     return thread_used / requests * 1e6, process_used / requests * 1e6
 
@@ -144,6 +158,17 @@ async def cpu_us_per_request(app: FastAPI, requests: int) -> tuple[float, float]
 def report(mode: str, runs: list[tuple[float, float]]) -> None:
     thread = statistics.median(run[0] for run in runs)
     process = statistics.median(run[1] for run in runs)
+    if "--json" in sys.argv:
+        import fastapiobserver
+        print(json.dumps({
+            "mode": mode, "process_us": process, "thread_us": thread,
+            "samples": runs, "python": platform.python_version(),
+            "platform": platform.platform(), "source": fastapiobserver.__file__,
+            "dependencies": {name: importlib.metadata.version(name) for name in (
+                "fastapi", "starlette", "pydantic-settings",
+            )},
+        }), file=sys.stderr)
+        return
     print(
         f"{mode}: {process:.1f} us of CPU per request, {thread:.1f} on the request's thread",
         file=sys.stderr,
@@ -162,6 +187,9 @@ def discard_spans() -> None:
 
 
 async def main(mode: str, absolute: bool) -> None:
+    requests = int(os.environ.get("BENCH_REQUESTS", "5000"))
+    warmup = int(os.environ.get("BENCH_WARMUP", "2000"))
+    repeats = int(os.environ.get("BENCH_RUNS", "9"))
     http_calls = mode in {"http", "traced-http"}
     if mode in TELEMETRY:
         discard_spans()
@@ -169,19 +197,19 @@ async def main(mode: str, absolute: bool) -> None:
         EventLoopWatchdog(0.25).start()
     if absolute:
         observed = build(mode, http_calls=http_calls)
-        await cpu_us_per_request(observed, 2_000)  # warm up
-        runs = [await cpu_us_per_request(observed, 5_000) for _ in range(9)]
+        await cpu_us_per_request(observed, warmup)
+        runs = [await cpu_us_per_request(observed, requests) for _ in range(repeats)]
         shutdown_logging()
         await close_clients(observed)
         report(mode, runs)
         return
     plain, observed = build(None, http_calls=http_calls), build(mode, http_calls=http_calls)
-    await cpu_us_per_request(observed, 2_000)  # warm up
-    await cpu_us_per_request(plain, 2_000)
+    await cpu_us_per_request(observed, warmup)
+    await cpu_us_per_request(plain, warmup)
     overheads = []
-    for _ in range(9):
-        observed_run = await cpu_us_per_request(observed, 5_000)
-        plain_run = await cpu_us_per_request(plain, 5_000)
+    for _ in range(repeats):
+        observed_run = await cpu_us_per_request(observed, requests)
+        plain_run = await cpu_us_per_request(plain, requests)
         overheads.append((observed_run[0] - plain_run[0], observed_run[1] - plain_run[1]))
     shutdown_logging()
     await close_clients(plain, observed)

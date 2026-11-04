@@ -1,0 +1,10 @@
+services:
+  app-a:
+    build:
+      dockerfile: examples/full_stack/Dockerfile.ci
+  app-b:
+    build:
+      dockerfile: examples/full_stack/Dockerfile.ci
+  app-c:
+    build:
+      dockerfile: examples/full_stack/Dockerfile.ci

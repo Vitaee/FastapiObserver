@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-import re
 import time
 
 from anyio import get_cancelled_exc_class
@@ -29,10 +28,7 @@ from .metrics import _MetricsRecorder
 # in a loop (N+1), which one query with a join or IN would replace.
 # ponytail: fixed threshold; make it a setting if it's too noisy or quiet for someone.
 _N_PLUS_ONE_MIN_REPEATS = 10
-_MAX_STATEMENT_LENGTH = 1000
-# Quoted strings and numbers, so values written into SQL text never reach a log line.
-# ponytail: misses dollar-quoted and E'' strings; parse SQL if those ever show up.
-_SQL_LITERALS = re.compile(r"'(?:[^']|'')*'|\b\d+(?:\.\d+)?\b")
+_MAX_REPORTED_STATEMENTS = 1024
 # Metric labels take the method only from this set, as OpenTelemetry does, so a
 # client can't add a time series per made-up method.
 _HTTP_METHODS = frozenset(
@@ -69,7 +65,7 @@ class RequestLoggingMiddleware:
             metrics_backend=self.metrics_backend,
             logger=self.logger,
         )
-        self._reported_statements: set[tuple[str, str, str]] = set()
+        self._reported_statements: dict[tuple[str, str, str], None] = {}
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http":
@@ -103,9 +99,14 @@ class RequestLoggingMiddleware:
         response_started = False
         response_finished: float | None = None
         response_trailers = False
+        disconnected_at: float | None = None
 
         async def receive_wrapper() -> Message:
+            nonlocal disconnected_at
             message = await receive()
+            if (message["type"] == "http.disconnect" and disconnected_at is None
+                    and response_finished is None):
+                disconnected_at = time.perf_counter()
             request_body_capture.capture_from_message(message, "http.request")
             return message
 
@@ -147,7 +148,7 @@ class RequestLoggingMiddleware:
         try:
             await self.app(
                 scope,
-                receive_wrapper if request_body_enabled else receive,
+                receive_wrapper,
                 send_wrapper,
             )
         except Exception as exc:
@@ -165,6 +166,8 @@ class RequestLoggingMiddleware:
             raise
         finally:
             try:
+                if disconnected_at is not None and not response_started and not had_error:
+                    status_code = 499
                 self._finalize_request(
                     scope=scope,
                     start=start,
@@ -178,6 +181,7 @@ class RequestLoggingMiddleware:
                     had_error=had_error,
                     cancelled=cancelled,
                     response_finished=response_finished,
+                    disconnected_at=disconnected_at,
                 )
             finally:
                 self.context_manager.cleanup()
@@ -196,6 +200,7 @@ class RequestLoggingMiddleware:
         had_error: bool,
         cancelled: bool,
         response_finished: float | None,
+        disconnected_at: float | None,
     ) -> None:
         app_finished = time.perf_counter()
         app_duration_seconds = max(0.0, app_finished - start)
@@ -206,6 +211,8 @@ class RequestLoggingMiddleware:
             level, message = logging.ERROR, "request.failed"
         elif cancelled:
             level, message = logging.WARNING, "request.cancelled"
+        elif disconnected_at is not None:
+            level, message = logging.WARNING, "request.client_disconnected"
         elif status_code >= 500:
             level, message = logging.ERROR, "request.server_error"
         elif status_code >= 400:
@@ -234,6 +241,12 @@ class RequestLoggingMiddleware:
             )
             safe_event["app_duration_ms"] = round(app_duration_seconds * 1000, 3)
             safe_event["response_completed"] = response_finished is not None
+            safe_event["cancelled"] = cancelled
+            safe_event["client_disconnected"] = disconnected_at is not None
+            if disconnected_at is not None:
+                safe_event["after_disconnect_ms"] = round(
+                    max(0.0, app_finished - disconnected_at) * 1000, 3
+                )
             if request_state is not None:
                 for kind, errors in request_state.call_errors.items():
                     safe_event[kind]["errors"] = dict(errors)
@@ -279,14 +292,16 @@ class RequestLoggingMiddleware:
         key = (method, route, statement)
         if count < _N_PLUS_ONE_MIN_REPEATS or key in self._reported_statements:
             return
-        self._reported_statements.add(key)
+        if len(self._reported_statements) >= _MAX_REPORTED_STATEMENTS:
+            del self._reported_statements[next(iter(self._reported_statements))]
+        self._reported_statements[key] = None
         self.logger.warning(
             "db.n_plus_one",
             extra={
                 "event": {
                     "method": method,
                     "route": route,
-                    "statement": _SQL_LITERALS.sub("?", statement)[:_MAX_STATEMENT_LENGTH],
+                    "statement_fingerprint": statement,
                     "count": count,
                 },
             },

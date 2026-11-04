@@ -47,7 +47,8 @@ has anonymous access enabled. Paste:
 ```
 
 Warnings are rate-limited: pool warnings appear at most once a minute, and an N+1
-statement is reported once per route and process. Restart `app-a` for fresh warnings
+statement fingerprint is reported once per route while retained in the bounded
+per-process warning cache. Raw SQL is not logged. Restart `app-a` for fresh warnings
 when repeating the lab:
 
 ```bash

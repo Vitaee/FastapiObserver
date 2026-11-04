@@ -245,7 +245,7 @@ def test_request_line_has_db_and_http_totals_and_n_plus_one_is_reported_once(
     assert warning["event"] == {
         "method": "GET",
         "route": "/orders",
-        "statement": "SELECT * FROM items WHERE order_id = %(order_id)s AND status = ? LIMIT ?",
+        "statement_fingerprint": "3c57e6bd96ffab1a306d453be8db6bce9dfb7418e861eace63b49b08e45d43be",
         "count": 12,
     }
 
@@ -326,7 +326,10 @@ def test_sqlalchemy_queries_are_counted_and_n_plus_one_reported_without_tracing(
 
     assert first["db"]["count"] == 12
     assert first["db"]["ms"] > 0
-    assert warnings == [{"method": "GET", "route": "/orders", "statement": "SELECT ?", "count": 12}]
+    assert warnings == [{
+        "method": "GET", "route": "/orders", "count": 12,
+        "statement_fingerprint": "66cbb3a40d4bbd150b75825ad291a6545399f3098fc1079e4d8b5bb061a6a481",
+    }]
 
 
 def test_async_sqlalchemy_queries_are_counted_without_tracing() -> None:

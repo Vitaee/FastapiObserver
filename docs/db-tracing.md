@@ -53,13 +53,20 @@ Engines passed as `db_engine` are also watched for a full connection pool, with 
 
 ## Query count and time on the request line
 
-Each request line counts the request's database queries and, with tracing on, its outbound HTTP calls:
+Each request line can count database queries and supported outbound HTTP calls
+without tracing:
 
 ```json
 {"message": "request.completed", "event": {"path": "/orders", "duration_ms": 182.4, "db": {"count": 12, "ms": 140.3}, "http": {"count": 1, "ms": 31.0}}}
 ```
 
-`db` counts every query on the engines passed as `db_engine`, from SQLAlchemy's own events, so it works without tracing and on every request. Other database clients, such as Redis or a driver used directly, are counted from their OpenTelemetry spans, so only with tracing on and for sampled requests. `http` counts spans from instrumented HTTP clients, such as `instrument_httpx_client()` and `instrument_requests_session()`.
+`db` counts completed queries on the engines passed as `db_engine`, from SQLAlchemy's successful `after_cursor_execute` events, so it works without tracing and on every request. Failed SQL executions do not currently add to these totals. Other database clients, such as Redis or a driver used directly, are counted from their OpenTelemetry spans, so only with tracing on and for sampled requests.
+
+`http` counts HTTPX/HTTPX2 clients configured with `instrument_httpx_client()`
+and Requests calls configured with `instrument_requests_session()`, including
+failures and timeout categories, independently of tracing. Their client spans
+do not add a second count. Other HTTP clients are counted from sampled spans.
+See [outbound HTTP diagnostics](opentelemetry.md#outbound-http-diagnostics).
 
 ### N+1 queries
 

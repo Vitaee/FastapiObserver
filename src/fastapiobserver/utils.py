@@ -3,11 +3,23 @@ from __future__ import annotations
 import importlib
 import json
 from typing import Any, Callable, TypeVar
+from urllib.parse import urlsplit, urlunsplit
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 _NULLISH_VALUES = frozenset({"none", "null", "unset"})
 TEnvLoadable = TypeVar("TEnvLoadable", bound="EnvLoadable")
+
+
+def endpoint_for_log(endpoint: str | None) -> str | None:
+    """An exporter endpoint without userinfo, query or fragment secrets."""
+    if not endpoint:
+        return None
+    try:
+        parts = urlsplit(endpoint)
+        return urlunsplit((parts.scheme, parts.netloc.rpartition("@")[2], parts.path, "", ""))
+    except ValueError:
+        return "<invalid-endpoint>"
 
 
 def normalize_path(path: str, *, default: str = "/") -> str:

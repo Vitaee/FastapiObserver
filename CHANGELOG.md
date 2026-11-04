@@ -4,6 +4,31 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [2.2.1] - 2026-11-04
+
+### Security
+- Existing OpenTelemetry-provider warnings strip endpoint credentials, query strings and fragments. Sink and queue error fallbacks report a safe summary instead of dumping original log messages, arguments or exceptions to stderr.
+- N+1 diagnostics retain and emit SHA-256 statement fingerprints instead of SQL text, avoiding incomplete SQL literal scrubbing. Each request tracks at most 128 distinct fingerprints; each middleware instance retains at most 1,024 warning keys. Total query counts remain complete.
+
+### Fixed
+- Forked workers rebind queue statistics to their fresh queue and reset package locks. Statistics no longer touch an inherited queue mutex or reuse parent counters.
+- Queue flushes, including output flush hooks, run on the listener thread. `flush_logging()` reports completion with a boolean and respects its timeout. Listener stop waits at most five seconds, retaining live outputs on timeout so shutdown can be retried safely.
+
+### Added
+- Observed disconnects before response completion produce `request.client_disconnected` and `after_disconnect_ms`, without consuming extra ASGI messages. Cancellation remains distinct; a disconnect received after response completion is ignored for abandonment diagnostics.
+- Shared PR/release validation builds distributions once and tests the wheel across Python/dependency variants. Production gates cover disconnects, concurrent SIGTERM draining/cancellation, blocked sinks, unavailable Collectors, bounded warm-worker memory, worker recycling, actual sync/async SQL tracing and the Compose backend chain with tracing on/off.
+- The CPU regression gate pairs baseline/candidate runs on the same runner for default and application-owned logging, retaining samples, variance and environment metadata.
+- Publication verifies the requested tag's commit, downloads the validated artifact by ID and checks its hashes. Retries reject files whose bytes differ from existing PyPI distributions.
+
+### Compatibility
+- The SQL tracing extras constrain SQLAlchemy to `>=2.0,<2.1`, the supported range of the instrumentor. Core query counting still works with 2.1.
+
+### Breaking Changes
+- Consumers of `db.n_plus_one.event.statement` must use `statement_fingerprint`. Raw SQL is no longer present in that warning. Fingerprints represent the full statement; parameterized statements group consistently, while literal changes produce different fingerprints. Old warning keys may be evicted.
+
+### Maintenance
+- Real-server tests wait for newline-terminated log records instead of parsing a partially written final line. Malformed complete records still fail. This test-only fix was merged after the v2.2.0 tag.
+
 ## [2.2.0] - 2026-11-04
 
 ### Added

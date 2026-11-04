@@ -56,7 +56,7 @@ Breaking changes must be listed under a `Breaking Changes` section in `CHANGELOG
 
 Releases are published from CI with PyPI Trusted Publishing; no token is stored anywhere.
 
-1. Open a `release/vX.Y.Z` pull request that sets the version in `src/fastapiobserver/_version.py` and dates its `CHANGELOG.md` section.
+1. Set the version in `src/fastapiobserver/_version.py` and date its `CHANGELOG.md` section in a `release/vX.Y.Z` pull request, or in the feature PR being released. Update `SECURITY.md` when the supported minor version changes.
 2. After it merges, tag the merge commit and push the tag:
 
     ```bash
@@ -64,19 +64,32 @@ Releases are published from CI with PyPI Trusted Publishing; no token is stored 
     git push origin vX.Y.Z
     ```
 
-On a tag push, `.github/workflows/release.yml` runs the tests, rejects a tag that doesn't match `_version.py`, builds and checks the distributions, publishes them to PyPI with attestations, and creates the GitHub Release from the matching `CHANGELOG.md` section.
+On a tag push, `.github/workflows/release.yml` verifies that the tag and
+checked-out commit agree, then calls the same validation workflow as pull
+requests. It builds the distributions once, tests that wheel, runs the dependency
+matrix, quality/audit, runtime budgets, paired CPU benchmark and Compose backend
+checks, then publishes the stored artifact with attestations. The publisher
+checks its commit and file hashes instead of rebuilding it.
 
-If publishing fails partway, don't re-run the tag's run: it rebuilds files that differ from the ones PyPI already has. Run the workflow by hand instead, which skips files PyPI has:
+Keep published tags immutable. After a partial publication, use **Re-run failed
+jobs** on the original workflow run so the original distribution artifact is
+reused. Existing PyPI filenames must have identical SHA-256 hashes;
+only files absent from PyPI are staged for upload. The publisher does not use
+`skip-existing`, so a concurrent conflicting upload fails visibly. Publication
+jobs for the same tag are serialized. If the original artifact is unavailable,
+prepare a new patch version.
+
+For a full manual run, select the original tag:
 
 ```bash
-gh workflow run release.yml --ref main -f tag=vX.Y.Z
+gh workflow run release.yml --ref vX.Y.Z -f tag=vX.Y.Z
 ```
 
-For high-risk changes, run the stress harness before tagging:
-
-```bash
-uv run python scripts/runtime_stress.py --profile standard
-```
+Selecting a branch whose commit differs from the requested tag now fails before
+validation/publication. Code changes require a new version and tag. Before
+announcing completion, verify the GitHub Release, both PyPI distributions and a
+fresh installation from PyPI. Standard stress is a required shared validation
+gate; use `uv run python scripts/runtime_stress.py --profile standard` locally too.
 
 ---
 

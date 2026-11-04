@@ -85,8 +85,10 @@ Recommended SLOs:
 Starter alert queries:
 
 ```promql
-# 5xx rate per service (5 minutes)
+# 5xx fraction per service (5 minutes); add a minimum-traffic guard for alerts.
 sum(rate(http_requests_total{status_code=~"5.."}[5m])) by (service)
+/
+sum(rate(http_requests_total[5m])) by (service)
 
 # p95 latency per service
 histogram_quantile(
@@ -114,6 +116,36 @@ sum(rate(http_requests_total[5m])) by (service)
 ### Kubernetes
 
 The bundled manifests in `examples/k8s` deploy this whole stack with one command. See the [Kubernetes guide](kubernetes.md).
+
+## Release validation budgets
+
+PRs and releases call the same validation workflow. A release must identify one
+immutable tagged commit and publish the stored, hash-checked distributions that
+passed its gates. The backend jobs install that wheel into the Compose apps and
+run the existing verifier with tracing enabled and disabled.
+
+The automated workload budgets are deliberately explicit:
+
+| Scenario | Gate |
+|---|---|
+| SIGTERM with eight concurrent requests | Ordinary responses, streams and background work finish within four seconds with one terminal JSON record per request and no local request-log loss; Uvicorn's request grace is one second |
+| Request exceeding that grace | Cancellation is recorded, without inventing a client-disconnect cause |
+| Collector unavailable | Ten requests finish within two seconds; process shutdown within four seconds with a 0.2-second OTLP transport timeout; all ten local terminal records survive in `both` mode |
+| Blocked sink | A 50 ms drain/stop wait returns within 500 ms; 100 loopback requests retain p95 below 100 ms while queue drops are counted; active outputs remain open for retry |
+| Warm worker | After 300 warm-up and 1,000 further distinct-query requests, retained Python heap grows less than 8 MiB, Linux RSS less than 32 MiB, and thread count by at most two |
+| Worker replacement | Twelve sequential workers retain one bounded route series and accurate cumulative request/histogram counts |
+| CPU overhead | Nine paired measurements per logging mode; median regression within a 10% baseline budget plus three robust standard errors of paired noise; robust relative spread of both sides must be at most 10% |
+
+The stress report and paired benchmark samples are retained as workflow
+artifacts. These are reproducible release checks, not a promise of arbitrary
+production capacity. Measure the same limits against your service's traffic,
+payload sizes and failure budget. OTLP data may be lost throughout a Collector
+outage; durable retry queues belong in the collection layer. Queue overflow is
+also intentionally lossy and must be monitored.
+
+Security presets apply to library-owned log output. Trace attributes and events
+retain the application's/OpenTelemetry provider's privacy policy; validate URL,
+query-string and exception handling before enabling export in a sensitive app.
 
 ---
 

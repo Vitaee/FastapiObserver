@@ -2,6 +2,11 @@
 
 `fastapi-observer` runs inside your app, so it works the same under any ASGI server: one JSON line per request and your own `logging` calls as JSON. What differs is the server's own log lines (startup, workers, signals). This page shows how to get those as JSON too, so every line from the process has the same shape and service fields.
 
+The examples below use library-owned logging. With `configure_logging=False`,
+existing server handlers, levels and access-log routing are preserved; keep the
+application's approved formatter and sanitizer instead. See
+[application-owned logging](logging.md#application-owned-logging).
+
 The server configs below build `fastapiobserver.StructuredJsonFormatter` by name. Without arguments it reads the same environment variables as `install_observability()` (`OBS_APP_NAME`, `OBS_SERVICE_NAME`, `OBS_ENVIRONMENT`, `OBS_APP_VERSION`, redaction settings), so server lines carry the same fields as request lines. `OBS_PROFILE` defaults aren't applied here, so set the variables themselves (for example `OBS_REDACTION_PRESET`) if server lines must be redacted the same way.
 
 ## uvicorn
@@ -72,6 +77,26 @@ granian --interface asgi --workers 4 --log-config granian-log.json main:app
 ```
 
 Keep Granian's access log off (`--no-access-log`, the default); `request.completed` already covers it.
+
+## Client disconnects and shutdown
+
+`request.client_disconnected` means the application received `http.disconnect`
+before the response finished. `event.after_disconnect_ms` measures how long it
+continued afterward. The middleware only observes the application's own reads;
+it adds no body reader. If the application never reads after the client leaves,
+the disconnect may remain unobserved. A disconnect received after completion is
+not an abandoned request.
+
+Exceptions and cancellation keep their existing event names, with independent
+`event.cancelled` and `event.client_disconnected` fields. Cancellation alone does
+not identify a disconnect, timeout or shutdown. A successful response send keeps
+its status even when a disconnect was observed concurrently.
+
+The server owns signals and graceful request draining. Configure its graceful
+timeout and give the process supervisor enough additional time for logging and
+configured exporter timeouts. CI exercises Uvicorn SIGTERM during ordinary,
+streaming and background work; its test budgets are in the
+[deployment guide](deployment.md#release-validation-budgets).
 
 ## Checking the result
 

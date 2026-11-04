@@ -1,12 +1,22 @@
 from __future__ import annotations
 
 import logging
+import sys
 import threading
 import time
 from dataclasses import dataclass
 from typing import Callable, Literal
 
 CircuitBreakerState = Literal["closed", "open", "half_open"]
+
+
+def _report_logging_failure(destination: str) -> None:
+    """Report a pipeline failure without source records or exception contents."""
+    if logging.raiseExceptions:
+        try:
+            sys.stderr.write(f"fastapiobserver.log_sink.failed sink={destination!r}\n")
+        except Exception:
+            pass
 
 
 @dataclass(frozen=True)
@@ -72,11 +82,9 @@ class SinkCircuitBreakerHandler(logging.Handler):
         # Stdlib handlers catch their own write errors and only report them
         # through handleError(), so count those reports as failures too.
         self._delegate_failed = False
-        report_error = delegate.handleError
-
         def _count_and_report(record: logging.LogRecord) -> None:
             self._delegate_failed = True
-            report_error(record)
+            self.handleError(record)
 
         delegate.handleError = _count_and_report  # type: ignore[method-assign]
 
@@ -97,12 +105,22 @@ class SinkCircuitBreakerHandler(logging.Handler):
         else:
             self._record_success()
 
+    def handleError(self, record: logging.LogRecord) -> None:  # noqa: N802
+        # Stdlib's fallback dumps the original message/arguments, bypassing the
+        # formatter's sanitizer. Never send source records down an error path.
+        _report_logging_failure(self.sink_name)
+
     def setFormatter(self, fmt: logging.Formatter | None) -> None:  # noqa: N802
         super().setFormatter(fmt)
         self._delegate.setFormatter(fmt)
 
     def flush(self) -> None:
-        self._delegate.flush()
+        try:
+            self._delegate.flush()
+        except Exception:
+            self._record_failure()
+            _report_logging_failure(self.sink_name)
+            raise
 
     def close(self) -> None:
         try:
