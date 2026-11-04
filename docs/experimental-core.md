@@ -151,6 +151,8 @@ an enabled native adapter or sampled fallback. See the
   operation's result or original exception, but failed output can lose records.
   The operation does not promise remote delivery or exactly-once emission.
 
-See the [2.2.1 baseline](baseline.md) and
-[extraction decision](decisions/0016-experimental-python-operations.md), with
-[validation evidence](validation/2026-11-04-experimental-core.md).
+See the [2.2.1 baseline](baseline.md),
+[extraction decision](decisions/0016-experimental-python-operations.md) and
+[call ownership decision](decisions/0017-record-calls-against-their-start-owner.md),
+with [initial operation evidence](validation/2026-11-04-experimental-core.md) and
+[call recording evidence](validation/2026-11-04-call-recording.md).

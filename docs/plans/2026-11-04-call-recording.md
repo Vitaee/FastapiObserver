@@ -52,9 +52,9 @@ No new framework/datastore adapter or stable portable-contract claim is added.
   it. Check count/error fields and existing deduplication in both wrapper orders.
 - [x] Record the draft contract, capability limits and architecture decision;
   update the roadmap delivery status without marking all M1/M2 complete.
-- [ ] Run focused regressions, full tests/coverage, typing/lint/docs, wheel
+- [x] Run focused regressions, full tests/coverage, typing/lint/docs, wheel
   separation, real SQL/HTTP/backend checks and paired CPU/production gates.
-- [ ] Push one neutral branch and create one follow-up PR. Keep warnings and
+- [x] Push one neutral branch and create one follow-up PR. Keep warnings and
   inconclusive performance evidence visible; retain release artifact identity.
 
 ## Execution decisions
@@ -70,3 +70,7 @@ tracking slots without scanning a full registry or retaining request payloads.
 
 Ruling: retain the existing aggregation state and fork-reset lock ownership.
 This proves the recorder seam before a broader state/package extraction.
+
+Execution evidence is recorded in
+[the validation report](../validation/2026-11-04-call-recording.md) and
+[PR #59](https://github.com/Vitaee/FastapiObserver/pull/59).
