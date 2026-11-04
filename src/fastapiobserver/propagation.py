@@ -1,4 +1,4 @@
-"""Outbound trace context propagation helpers (WS5).
+"""Outbound HTTP instrumentation and context propagation.
 
 Provides convenience functions for injecting trace context into outbound
 HTTP requests, plus optional auto-instrumentation of ``httpx`` and
@@ -29,6 +29,7 @@ import logging
 from collections.abc import Mapping
 from typing import Any
 
+from .http_calls import count_client_calls, count_global_calls, uncount_global_calls
 from .request_context import get_request_id
 from .utils import lazy_import
 
@@ -53,6 +54,19 @@ def _request_id_to_forward(carrier: Any) -> str | None:
     ):
         return None
     return request_id
+
+
+def _forward_request_id(headers: Any) -> None:
+    request_id = _request_id_to_forward(headers)
+    if request_id is not None:
+        headers[_request_id_header] = request_id
+
+
+def _optional_instrumentor(module: str, name: str) -> Any:
+    try:
+        return getattr(importlib.import_module(module), name, None)
+    except ImportError:
+        return None
 
 
 def install_request_id_propagation(header: str) -> None:
@@ -157,50 +171,49 @@ def inject_trace_headers(headers: dict[str, str] | None = None) -> dict[str, str
 
 
 def instrument_httpx_client(client: Any | None = None) -> None:
-    """Instrument ``httpx`` for automatic outbound trace propagation.
+    """Count ``httpx``/``httpx2`` calls and forward request IDs, with optional tracing.
 
-    When *client* is provided, only that specific client instance is
-    instrumented.  When ``None``, **all** ``httpx`` clients are
-    instrumented globally.
-
-    Requires ``pip install fastapi-observer[otel-httpx]`` and the ``httpx``
-    package. Other clients, ``httpx2`` included, need a request hook instead;
-    see the OpenTelemetry guide.
+    Pass a client to instrument only that instance, or omit it for all installed
+    HTTPX clients. Counts, durations and failures need no OpenTelemetry extra.
+    Installing ``[otel-httpx]`` also enables the client's OpenTelemetry tracing.
     """
-    # OpenTelemetry's instrumentor only logs an error and does nothing without httpx.
-    if importlib.util.find_spec("httpx") is None:
-        raise RuntimeError(
-            "instrument_httpx_client() needs the `httpx` package, which is not installed. "
-            "For other clients, such as httpx2, call "
-            "`opentelemetry.propagate.inject(request.headers)` from a request hook."
+    matched = False
+    for name, instrumentor_name in (
+        ("httpx", "HTTPXClientInstrumentor"), ("httpx2", "HTTPX2ClientInstrumentor"),
+    ):
+        if importlib.util.find_spec(name) is None:
+            continue
+        library = importlib.import_module(name)
+        if client is not None and not isinstance(client, (library.Client, library.AsyncClient)):
+            continue
+        matched = True
+        instrumentor = _optional_instrumentor(
+            "opentelemetry.instrumentation.httpx", instrumentor_name
         )
-    try:
-        instrumentor_module = lazy_import(
-            "opentelemetry.instrumentation.httpx",
-            package_hint="fastapi-observer[otel-httpx]",
-        )
-        instrumentor_cls = getattr(instrumentor_module, "HTTPXClientInstrumentor")
-
-        if client is not None:
-            instrumentor_cls.instrument_client(client)
+        if client is None:
+            if instrumentor is not None and not instrumentor().is_instrumented_by_opentelemetry:
+                instrumentor().instrument()
+            for cls in (library.Client, library.AsyncClient):
+                count_global_calls(cls, library, _forward_request_id)
         else:
-            instrumentor_cls().instrument()
-    except RuntimeError as exc:
+            if instrumentor is not None and not getattr(
+                client, "_is_instrumented_by_opentelemetry", False
+            ):
+                instrumentor.instrument_client(client)
+            count_client_calls(client, library, _forward_request_id)
+    if not matched:
         raise RuntimeError(
-            "httpx instrumentation requires "
-            "`pip install fastapi-observer[otel-httpx]`"
-        ) from exc
+            "instrument_httpx_client() needs an installed `httpx` or `httpx2` client."
+        )
 
 
 def uninstrument_httpx_client() -> None:
     """Reverse global ``httpx`` instrumentation."""
-    try:
-        instrumentor_module = lazy_import("opentelemetry.instrumentation.httpx")
-        instrumentor_cls = getattr(instrumentor_module, "HTTPXClientInstrumentor")
-
-        instrumentor_cls().uninstrument()
-    except ModuleNotFoundError:
-        pass
+    uncount_global_calls("httpx", "httpx2")
+    for name in ("HTTPXClientInstrumentor", "HTTPX2ClientInstrumentor"):
+        instrumentor = _optional_instrumentor("opentelemetry.instrumentation.httpx", name)
+        if instrumentor is not None and instrumentor().is_instrumented_by_opentelemetry:
+            instrumentor().uninstrument()
 
 
 # ---------------------------------------------------------------------------
@@ -213,11 +226,11 @@ def instrument_requests_session(session: Any | None = None) -> None:
 
     .. note::
 
-       The OTel ``RequestsInstrumentor`` instruments globally at the
-       ``urllib3`` transport layer.  Per-session instrumentation is not
-       supported; passing *session* will raise ``TypeError``.
+       Requests instrumentation is global. Per-session instrumentation is not
+       supported; passing *session* raises ``TypeError``.
 
-    Requires ``pip install fastapi-observer[otel-requests]``.
+    Counts and request IDs need only ``requests``. The ``[otel-requests]`` extra
+    adds OpenTelemetry tracing.
     """
     if session is not None:
         raise TypeError(
@@ -225,30 +238,23 @@ def instrument_requests_session(session: Any | None = None) -> None:
             "RequestsInstrumentor. Call without arguments to "
             "instrument all requests globally."
         )
-    try:
-        instrumentor_module = lazy_import(
-            "opentelemetry.instrumentation.requests",
-            package_hint="fastapi-observer[otel-requests]",
-        )
-        instrumentor_cls = getattr(instrumentor_module, "RequestsInstrumentor")
-
-        instrumentor_cls().instrument()
-    except RuntimeError as exc:
-        raise RuntimeError(
-            "requests instrumentation requires "
-            "`pip install fastapi-observer[otel-requests]`"
-        ) from exc
+    library = lazy_import("requests", package_hint="requests")
+    instrumentor = _optional_instrumentor(
+        "opentelemetry.instrumentation.requests", "RequestsInstrumentor"
+    )
+    if instrumentor is not None and not instrumentor().is_instrumented_by_opentelemetry:
+        instrumentor().instrument()
+    count_global_calls(library.Session, library, _forward_request_id)
 
 
 def uninstrument_requests_session() -> None:
     """Reverse global ``requests`` instrumentation."""
-    try:
-        instrumentor_module = lazy_import("opentelemetry.instrumentation.requests")
-        instrumentor_cls = getattr(instrumentor_module, "RequestsInstrumentor")
-
-        instrumentor_cls().uninstrument()
-    except ModuleNotFoundError:
-        pass
+    uncount_global_calls("requests")
+    instrumentor = _optional_instrumentor(
+        "opentelemetry.instrumentation.requests", "RequestsInstrumentor"
+    )
+    if instrumentor is not None and instrumentor().is_instrumented_by_opentelemetry:
+        instrumentor().uninstrument()
 
 
 __all__ = [

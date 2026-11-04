@@ -19,18 +19,54 @@ The hand-wired version also has to get these details right, which the library ha
 
 ## CPU per request, in process
 
-[`examples/benchmarks/request_cpu.py`](https://github.com/Vitaee/FastapiObserver/blob/main/examples/benchmarks/request_cpu.py) calls the app directly, with no server or network, and reports the CPU the library adds to each request: on the request's own thread, and in the whole process once the background thread has written the log line. Apple M1, Python 3.14, medians of nine runs:
+[`examples/benchmarks/request_cpu.py`](https://github.com/Vitaee/FastapiObserver/blob/main/examples/benchmarks/request_cpu.py) calls the app directly, with no server or network, and reports the CPU the library adds to each request: on the request's own thread, and in the whole process once the background thread has written the log line. Apple M1, macOS 15.8.1, Python 3.14.7, FastAPI 0.162.0, Starlette 1.10.0; medians of nine runs of 5,000 requests after warm-up, measured 4 November 2026:
 
 | Mode | CPU added per request | On the request's thread |
 |---|---|---|
-| `default` | 45 µs | 32 µs |
-| `sampled` (`OBS_LOG_SAMPLE_RATE=0.1`) | 37 µs | 33 µs |
+| `default` | 49.2 µs | 35.2 µs |
+| `sampled` (`OBS_LOG_SAMPLE_RATE=0.1`) | 38.3 µs | 34.7 µs |
 
 ```bash
 python examples/benchmarks/request_cpu.py default > /dev/null
 ```
 
 Its other modes are listed in the script.
+
+### Request timing and HTTP diagnostics
+
+On the same interpreter, the default overhead before these changes (`059399a`)
+was 46.3 µs of process CPU and 33.0 µs on the request thread. Separating response
+timing from application lifetime and adding the diagnostic state costs 2.9 µs
+of process CPU and 2.2 µs on the request thread per request in this measurement.
+
+The `http` mode makes one HTTPX2 call through `MockTransport` per request, without
+network I/O. These are **absolute CPU costs for the whole application**, including
+the client call and log formatting, rather than overhead against plain FastAPI:
+
+| Client configuration | Without helper | With helper | Added CPU per request |
+|---|---:|---:|---:|
+| Core package + HTTPX2, without OTel client instrumentation | 151.3 µs | 163.3 µs | 12.0 µs |
+| OTel HTTPX instrumentation 0.66b2 installed, tracing disabled | 144.6 µs | 212.0 µs | 67.4 µs |
+
+The second row includes installing OpenTelemetry's client wrapper through the
+helper, so its difference is not the cost of the native counter alone. Within
+each row, both runs use the same dependencies. The two environments are separate
+measurements; compare the columns within a row.
+
+Reproduce the first row in an environment without the optional instrumentation:
+
+```bash
+uv venv /tmp/http-counts
+uv pip install --python /tmp/http-counts/bin/python -e . httpx2
+COUNT_HTTP_CALLS=0 /tmp/http-counts/bin/python examples/benchmarks/request_cpu.py http absolute > /dev/null
+/tmp/http-counts/bin/python examples/benchmarks/request_cpu.py http absolute > /dev/null
+```
+
+`HTTP_CALLS=5` measures five calls per request; `traced-http` enables server and
+client tracing with spans discarded in memory. These CPU measurements exclude
+network latency, backend storage, and container overhead. Real-server regression
+tests and the [Docker verification](https://github.com/Vitaee/FastapiObserver/tree/main/examples/full_stack#run)
+exercise real connections, streaming, timeouts and the exported telemetry.
 
 ## Per-request overhead
 

@@ -35,6 +35,8 @@ Every request now writes one JSON line, with the same `trace_id` as its trace wh
     "path": "/orders/42",
     "status_code": 200,
     "duration_ms": 1.314,
+    "app_duration_ms": 1.35,
+    "response_completed": true,
     "client_ip": "203.0.113.7",
     "error_type": "ok"
   }
@@ -70,13 +72,13 @@ Explicit variables and Python arguments always win over profile defaults. Every 
 
 ## What you get
 
-- **One JSON line per request** with method, path, status, duration and client IP, and your service's name, environment and version on every line, including your own `logging` calls.
+- **One JSON line per request** with method, path, sent status, response duration, total application lifetime and client IP, and your service's name, environment and version on every line, including your own `logging` calls. HTTP latency excludes background work; later failures still appear on the correlated request line.
 - **Request IDs** taken from `X-Request-ID` when the caller is a trusted proxy, generated otherwise, returned in the response and passed on to the services you call, so one ID finds a request's logs in every service.
 - **Redaction on by default.** Passwords, tokens, API keys, `Authorization` and cookies are masked before anything is written. Presets cover stricter needs (`strict`, `pci`, `gdpr`).
 - **Prometheus metrics** labelled by route template (`/orders/{order_id}`). Requests no route matches, such as scanners, CORS preflights and requests an auth middleware rejects, share one `<unmatched>` label, and made-up methods share `_OTHER`, so neither IDs nor anonymous clients explode cardinality.
 - **OpenTelemetry traces**, from FastAPI's own support on 0.142 and later, with `trace_id` and `span_id` in every log line, and optional log export over OTLP, redacted like everything else.
 - **Non-blocking log writes.** Lines are written from a background thread, so a slow stdout never stalls the event loop.
-- **Help finding what slows a request down.** A warning with the stack of any sync call that blocks the event loop, on in the `production` profile. A warning when the thread pool or a database connection pool is full, the usual cause when latency climbs while CPU stays low. For the SQLAlchemy engines you pass in, each request line counts its queries, and a query run once per item (N+1) gets a warning, with or without tracing; with tracing on, outbound HTTP calls are counted too. Opt-in: `DEBUG` lines written only for requests that fail. With metrics on, `/metrics` shows how many bytes of logs each route writes (in a single process), and `OBS_LOG_SAMPLE_RATE` keeps a share of successful requests, chosen by trace ID, while failed and slow requests are always written in full.
+- **Help finding what slows a request down.** A warning with the stack of any sync call that blocks the event loop, on in the `production` profile. A warning when the thread pool or a database connection pool is full, the usual cause when latency climbs while CPU stays low. For the SQLAlchemy engines you pass in, each request line counts its queries, and a query run once per item (N+1) gets a warning. HTTPX/HTTPX2 clients passed to `instrument_httpx_client()`, and Requests instrumented with `instrument_requests_session()`, report outbound counts, duration and failure categories too. These diagnostics work without tracing. Opt-in: `DEBUG` lines written only for requests that fail. With metrics on, `/metrics` shows how many bytes of logs each route writes (in a single process), and `OBS_LOG_SAMPLE_RATE` keeps a share of successful requests, chosen by trace ID, while failed and slow requests are always written in full.
 
 Optional extras: runtime log-level control, SQLAlchemy, `httpx` and `requests` tracing, Strawberry GraphQL and a Loguru bridge. See the [documentation](https://vitaee.github.io/FastapiObserver/).
 
@@ -103,7 +105,7 @@ Since 0.142, FastAPI traces requests on its own once an OpenTelemetry provider i
 - You already send everything to Logfire, Datadog or Sentry: their own FastAPI integrations fit better.
 - Your app isn't built on FastAPI or Starlette.
 
-What it costs: with default settings, about 45 µs of CPU per request on an Apple M1, 32 µs of it on the request's own thread and the rest writing the line on a background thread. See the [benchmarks](https://vitaee.github.io/FastapiObserver/benchmarks/), including a comparison with wiring the same stack by hand.
+What it costs: with default settings, about 49 µs of CPU per request on an Apple M1, 35 µs of it on the request's own thread and the rest writing the line on a background thread. See the [benchmarks](https://vitaee.github.io/FastapiObserver/benchmarks/), including outbound HTTP diagnostics and a comparison with wiring the same stack by hand.
 
 ## Works with
 

@@ -30,7 +30,7 @@ jobs:
       - name: Install package and dev dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -e ".[dev,prometheus,otel]"
+          python -m pip install -e ".[dev,prometheus,otel,otel-httpx,otel-requests]"
 
       - name: Pytest
         run: python -m pytest -q

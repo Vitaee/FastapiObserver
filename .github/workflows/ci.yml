@@ -33,7 +33,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip uv
           uv pip install --system --resolution "${{ matrix.resolution || 'highest' }}" \
-            -e ".[dev,prometheus,otel${{ matrix.extras }}]"
+            -e ".[dev,prometheus,otel,otel-httpx,otel-requests${{ matrix.extras }}]"
 
       - name: Pytest
         run: python -m pytest -q --cov

@@ -61,13 +61,20 @@ class RequestState:
     sampled: bool | None = None  # decided at its first record that needs it
     held_logs: deque[logging.LogRecord] | None = None
     calls: dict[str, list[float]] = field(default_factory=dict)  # kind -> [count, seconds]
+    call_errors: dict[str, dict[str, int]] = field(default_factory=dict)
+    http_span_ids: set[int | None] = field(default_factory=set)
     statements: dict[str, int] = field(default_factory=dict)
 
-    def add_call(self, kind: str, seconds: float, statement: str | None = None) -> None:
+    def add_call(
+        self, kind: str, seconds: float, statement: str | None = None, *, error: str | None = None
+    ) -> None:
         with _CALLS_LOCK:
             totals = self.calls.setdefault(kind, [0, 0.0])
             totals[0] += 1
             totals[1] += seconds
+            if error is not None:
+                errors = self.call_errors.setdefault(kind, {})
+                errors[error] = errors.get(error, 0) + 1
             if statement:
                 self.statements[statement] = self.statements.get(statement, 0) + 1
 

@@ -6,7 +6,7 @@ WORKDIR /app
 COPY pyproject.toml README.md LICENSE /pkg/
 COPY src /pkg/src
 # Current SQL tracing supports SQLAlchemy 2.0. Query counting also works on 2.1.
-RUN pip install --no-cache-dir "/pkg[prometheus,otel,otel-sqlalchemy]" \
+RUN pip install --no-cache-dir "/pkg[prometheus,otel,otel-httpx,otel-sqlalchemy]" \
     uvicorn httpx2 "sqlalchemy>=2.0,<2.1"
 
 COPY examples/full_stack/app.py .

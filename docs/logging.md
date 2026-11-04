@@ -33,10 +33,36 @@ Standard request event fields include:
 - `path`
 - `status_code`
 - `duration_ms`
+- `app_duration_ms`
+- `response_completed`
 - `client_ip`
 - `error_type`
 - OTel semantic aliases (`http.request.method`, `url.path`, `http.response.status_code`)
-- `db` and `http`: the count and total time of the request's database queries and outbound HTTP calls. Queries on the SQLAlchemy engines passed as `db_engine` are always counted; other database and HTTP clients are counted from their spans, with tracing on and the clients instrumented. See [database tracing](db-tracing.md#query-count-and-time-on-the-request-line)
+- `db` and `http`: the count and total time of completed database queries and outbound HTTP calls. SQLAlchemy engines passed as `db_engine`, HTTPX/HTTPX2 clients passed to `instrument_httpx_client()`, and Requests instrumented with `instrument_requests_session()` are counted without tracing. Other instrumented clients are counted from sampled spans. See [database tracing](db-tracing.md#query-count-and-time-on-the-request-line) and [HTTP diagnostics](opentelemetry.md#outbound-http-diagnostics).
+
+### What the durations mean
+
+`duration_ms` and the HTTP duration histogram start at middleware entry and stop
+after the final response body has been passed successfully to ASGI `send`, or
+after final trailers when the response declares them. They include handler work,
+response serialization and streaming, and exclude work performed after the response.
+This measures the application's response send, not the time a remote client receives it.
+
+`app_duration_ms` stops when the ASGI application returns or raises. It includes
+background tasks and dependency cleanup. The request line is written then, so
+later failures retain their request ID and exception information. HTTP metrics
+are recorded once when the response finishes, even while background work continues.
+
+`response_completed=false` means no successful final send was observed. In that
+case `duration_ms` measures time until interruption. An exception before headers
+uses status 500; once headers are sent, the logged and measured status is kept.
+For example, background work can produce `request.failed`, status 202 and
+`response_completed=true` without changing the completed response's metrics.
+
+Database and HTTP totals cover work completed before the application ends,
+including background work. Their summed durations can exceed `duration_ms` when
+calls overlap or run after the response. The slow-request log retention threshold
+uses `app_duration_ms`, so slow background work can retain diagnostic logs too.
 
 ## Debug logs for failed requests
 

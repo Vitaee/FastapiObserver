@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [2.1.0] - 2026-11-04
+
+### Fixed
+- HTTP request metrics and `event.duration_ms` stop after the final successful response body or trailers send, excluding background tasks and later cleanup. Interrupted responses measure time until interruption. Metrics are recorded once, before later work finishes.
+- Exceptions and cancellations after response headers keep the actual sent status instead of rewriting it to 500. The final correlated request line still reports the failure, with `app_duration_ms` for total application lifetime and `response_completed` to distinguish completed responses from interrupted streams.
+
+### Added
+- `instrument_httpx_client()` counts HTTPX and HTTPX2 calls, and `instrument_requests_session()` counts Requests calls, without requiring tracing or OpenTelemetry extras. Counts include failed sends and streamed transfers, with bounded timeout, network, status and cancellation categories in `http.errors`. Client spans do not count the same operation twice.
+- The full-stack lab demonstrates slow and concurrent downstream calls, read timeouts, interrupted streams, and failures in background work after a successful response. Real-server regression tests cover these cases. The request CPU benchmark includes HTTP workloads with and without call instrumentation.
+
 ## [2.0.3] - 2026-11-03
 
 ### Added
