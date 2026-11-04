@@ -1,0 +1,610 @@
+{
+  "exports": [
+    "__version__",
+    "install_observability",
+    "observability_lifespan",
+    "ObservabilitySettings",
+    "OTelLogsSettings",
+    "OTelMetricsSettings",
+    "OTelSettings",
+    "RuntimeControlSettings",
+    "SecurityPolicy",
+    "TrustedProxyPolicy",
+    "get_request_id",
+    "get_span_id",
+    "get_trace_id",
+    "set_user_context",
+    "inject_trace_headers",
+    "instrument_httpx_client",
+    "instrument_requests_session",
+    "StructuredJsonFormatter",
+    "setup_logging",
+    "shutdown_logging",
+    "LogSink",
+    "register_log_enricher",
+    "register_log_filter",
+    "register_metric_hook",
+    "register_sink",
+    "install_loguru_bridge",
+    "mark_prometheus_process_dead"
+  ],
+  "fastapi_records": [
+    {
+      "app_name": "app",
+      "environment": "development",
+      "event": {
+        "cancelled": false,
+        "client_disconnected": false,
+        "client_ip": "testclient",
+        "error_type": "ok",
+        "http.request.method": "GET",
+        "http.response.status_code": 200,
+        "method": "GET",
+        "path": "/items/42",
+        "response_completed": true,
+        "status_code": 200,
+        "url.path": "/items/42"
+      },
+      "level": "INFO",
+      "library": "fastapiobserver",
+      "log_schema_version": "1.0.0",
+      "logger": "fastapiobserver.middleware",
+      "message": "request.completed",
+      "service": "api",
+      "user_context": {
+        "password": "***",
+        "tenant": "example"
+      },
+      "version": "0.0.0"
+    },
+    {
+      "app_name": "app",
+      "environment": "development",
+      "event": {
+        "cancelled": false,
+        "client_disconnected": false,
+        "client_ip": "testclient",
+        "error_type": "client_error",
+        "http.request.method": "GET",
+        "http.response.status_code": 404,
+        "method": "GET",
+        "path": "/missing",
+        "response_completed": true,
+        "status_code": 404,
+        "url.path": "/missing"
+      },
+      "level": "WARNING",
+      "library": "fastapiobserver",
+      "log_schema_version": "1.0.0",
+      "logger": "fastapiobserver.middleware",
+      "message": "request.client_error",
+      "service": "api",
+      "version": "0.0.0"
+    },
+    {
+      "app_name": "app",
+      "environment": "development",
+      "error": {
+        "message": "upstream rejected request",
+        "type": "ValueError"
+      },
+      "event": {
+        "cancelled": false,
+        "client_disconnected": false,
+        "client_ip": "testclient",
+        "error_type": "unhandled_exception",
+        "exception_class": "ValueError",
+        "exception_message": "upstream rejected request",
+        "http.request.method": "GET",
+        "http.response.status_code": 500,
+        "method": "GET",
+        "path": "/failure",
+        "response_completed": false,
+        "status_code": 500,
+        "url.path": "/failure"
+      },
+      "level": "ERROR",
+      "library": "fastapiobserver",
+      "log_schema_version": "1.0.0",
+      "logger": "fastapiobserver.middleware",
+      "message": "request.failed",
+      "service": "api",
+      "version": "0.0.0"
+    }
+  ],
+  "log_schema_version": "1.0.0",
+  "settings": {
+    "OTelLogsSettings": {
+      "enabled": {
+        "aliases": "None",
+        "default": false
+      },
+      "logs_mode": {
+        "aliases": "None",
+        "default": "local_json"
+      },
+      "otlp_endpoint": {
+        "aliases": "None",
+        "default": null
+      },
+      "protocol": {
+        "aliases": "None",
+        "default": "grpc"
+      }
+    },
+    "OTelMetricsSettings": {
+      "enabled": {
+        "aliases": "None",
+        "default": false
+      },
+      "export_interval_millis": {
+        "aliases": "None",
+        "default": 60000
+      },
+      "otlp_endpoint": {
+        "aliases": "None",
+        "default": null
+      },
+      "protocol": {
+        "aliases": "None",
+        "default": "grpc"
+      }
+    },
+    "OTelSettings": {
+      "enabled": {
+        "aliases": "None",
+        "default": false
+      },
+      "environment": {
+        "aliases": "None",
+        "default": null
+      },
+      "extra_resource_attributes": {
+        "aliases": "None",
+        "default": {}
+      },
+      "otlp_endpoint": {
+        "aliases": "None",
+        "default": null
+      },
+      "protocol": {
+        "aliases": "None",
+        "default": "grpc"
+      },
+      "service_name": {
+        "aliases": "None",
+        "default": null
+      },
+      "service_version": {
+        "aliases": "None",
+        "default": null
+      },
+      "trace_sampling_ratio": {
+        "aliases": "None",
+        "default": 1.0
+      }
+    },
+    "ObservabilitySettings": {
+      "app_name": {
+        "aliases": "OBS_APP_NAME",
+        "default": "app"
+      },
+      "environment": {
+        "aliases": "OBS_ENVIRONMENT",
+        "default": "development"
+      },
+      "exemplars_enabled": {
+        "aliases": "OBS_METRICS_EXEMPLARS_ENABLED",
+        "default": false
+      },
+      "log_dir": {
+        "aliases": "OBS_LOG_DIR",
+        "default": null
+      },
+      "log_level": {
+        "aliases": "OBS_LOG_LEVEL",
+        "default": "INFO"
+      },
+      "log_level_on_error": {
+        "aliases": "OBS_LOG_LEVEL_ON_ERROR",
+        "default": null
+      },
+      "log_queue_block_timeout_seconds": {
+        "aliases": "OBS_LOG_QUEUE_BLOCK_TIMEOUT_SECONDS",
+        "default": 1.0
+      },
+      "log_queue_max_size": {
+        "aliases": "OBS_LOG_QUEUE_MAX_SIZE",
+        "default": 10000
+      },
+      "log_queue_overflow_policy": {
+        "aliases": "OBS_LOG_QUEUE_OVERFLOW_POLICY",
+        "default": "drop_oldest"
+      },
+      "log_sample_rate": {
+        "aliases": "OBS_LOG_SAMPLE_RATE",
+        "default": 1.0
+      },
+      "log_slow_request_ms": {
+        "aliases": "OBS_LOG_SLOW_REQUEST_MS",
+        "default": 1000.0
+      },
+      "loop_block_threshold_ms": {
+        "aliases": "OBS_LOOP_BLOCK_THRESHOLD_MS",
+        "default": null
+      },
+      "metrics_backend": {
+        "aliases": "OBS_METRICS_BACKEND",
+        "default": "prometheus"
+      },
+      "metrics_enabled": {
+        "aliases": "OBS_METRICS_ENABLED",
+        "default": false
+      },
+      "metrics_exclude_paths": {
+        "aliases": "OBS_METRICS_EXCLUDE_PATHS",
+        "default": [
+          "/metrics",
+          "/health",
+          "/healthz",
+          "/docs",
+          "/openapi.json"
+        ]
+      },
+      "metrics_format": {
+        "aliases": "OBS_METRICS_FORMAT",
+        "default": "negotiate"
+      },
+      "metrics_path": {
+        "aliases": "OBS_METRICS_PATH",
+        "default": "/metrics"
+      },
+      "otel_excluded_urls": {
+        "aliases": "OBS_OTEL_EXCLUDED_URLS",
+        "default": null
+      },
+      "request_id_header": {
+        "aliases": "OBS_REQUEST_ID_HEADER",
+        "default": "x-request-id"
+      },
+      "response_request_id_header": {
+        "aliases": "OBS_RESPONSE_REQUEST_ID_HEADER",
+        "default": "x-request-id"
+      },
+      "service": {
+        "aliases": "AliasChoices(choices=['OBS_SERVICE_NAME', 'OTEL_SERVICE_NAME'])",
+        "default": "api"
+      },
+      "sink_circuit_breaker_enabled": {
+        "aliases": "OBS_LOG_SINK_CIRCUIT_BREAKER_ENABLED",
+        "default": true
+      },
+      "sink_circuit_breaker_failure_threshold": {
+        "aliases": "OBS_LOG_SINK_CIRCUIT_BREAKER_FAILURE_THRESHOLD",
+        "default": 5
+      },
+      "sink_circuit_breaker_recovery_timeout_seconds": {
+        "aliases": "OBS_LOG_SINK_CIRCUIT_BREAKER_RECOVERY_TIMEOUT_SECONDS",
+        "default": 30.0
+      },
+      "version": {
+        "aliases": "OBS_APP_VERSION",
+        "default": "0.0.0"
+      }
+    },
+    "RuntimeControlSettings": {
+      "auth_mode": {
+        "aliases": "None",
+        "default": "token"
+      },
+      "enabled": {
+        "aliases": "None",
+        "default": false
+      },
+      "path": {
+        "aliases": "None",
+        "default": "/_observability/control"
+      },
+      "token_env_var": {
+        "aliases": "None",
+        "default": "OBSERVABILITY_CONTROL_TOKEN"
+      }
+    },
+    "SecurityPolicy": {
+      "body_capture_media_types": {
+        "aliases": "None",
+        "default": null
+      },
+      "event_key_allowlist": {
+        "aliases": "None",
+        "default": null
+      },
+      "hash_key": {
+        "aliases": "None",
+        "default": null
+      },
+      "header_allowlist": {
+        "aliases": "None",
+        "default": null
+      },
+      "log_request_body": {
+        "aliases": "None",
+        "default": false
+      },
+      "log_response_body": {
+        "aliases": "None",
+        "default": false
+      },
+      "mask_text": {
+        "aliases": "None",
+        "default": "***"
+      },
+      "max_body_length": {
+        "aliases": "None",
+        "default": 256
+      },
+      "redacted_fields": {
+        "aliases": "None",
+        "default": [
+          "password",
+          "passwd",
+          "token",
+          "secret",
+          "authorization",
+          "cookie",
+          "set-cookie",
+          "api-key",
+          "apikey",
+          "access_token",
+          "refresh_token",
+          "client_secret"
+        ]
+      },
+      "redacted_headers": {
+        "aliases": "None",
+        "default": [
+          "authorization",
+          "cookie",
+          "set-cookie",
+          "x-api-key"
+        ]
+      },
+      "redaction_mode": {
+        "aliases": "None",
+        "default": "mask"
+      }
+    },
+    "TrustedProxyPolicy": {
+      "enabled": {
+        "aliases": "None",
+        "default": true
+      },
+      "honor_forwarded_headers": {
+        "aliases": "None",
+        "default": false
+      },
+      "trusted_cidrs": {
+        "aliases": "None",
+        "default": [
+          "10.0.0.0/8",
+          "172.16.0.0/12",
+          "192.168.0.0/16",
+          "127.0.0.1/32",
+          "::1/128"
+        ]
+      }
+    }
+  },
+  "signatures": {
+    "get_request_id": [],
+    "get_span_id": [],
+    "get_trace_id": [],
+    "inject_trace_headers": [
+      {
+        "default": "None",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "headers"
+      }
+    ],
+    "install_loguru_bridge": [
+      {
+        "default": "None",
+        "kind": "KEYWORD_ONLY",
+        "name": "stdlib_logger_name"
+      },
+      {
+        "default": "0",
+        "kind": "KEYWORD_ONLY",
+        "name": "level"
+      },
+      {
+        "default": "True",
+        "kind": "KEYWORD_ONLY",
+        "name": "include_extra"
+      },
+      {
+        "default": "False",
+        "kind": "KEYWORD_ONLY",
+        "name": "enqueue"
+      },
+      {
+        "default": "True",
+        "kind": "KEYWORD_ONLY",
+        "name": "catch"
+      }
+    ],
+    "install_observability": [
+      {
+        "default": "<required>",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "app"
+      },
+      {
+        "default": "None",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "settings"
+      },
+      {
+        "default": "True",
+        "kind": "KEYWORD_ONLY",
+        "name": "configure_logging"
+      },
+      {
+        "default": "None",
+        "kind": "KEYWORD_ONLY",
+        "name": "security_policy"
+      },
+      {
+        "default": "None",
+        "kind": "KEYWORD_ONLY",
+        "name": "trusted_proxy_policy"
+      },
+      {
+        "default": "None",
+        "kind": "KEYWORD_ONLY",
+        "name": "metrics_enabled"
+      },
+      {
+        "default": "None",
+        "kind": "KEYWORD_ONLY",
+        "name": "otel_settings"
+      },
+      {
+        "default": "None",
+        "kind": "KEYWORD_ONLY",
+        "name": "otel_logs_settings"
+      },
+      {
+        "default": "None",
+        "kind": "KEYWORD_ONLY",
+        "name": "otel_metrics_settings"
+      },
+      {
+        "default": "None",
+        "kind": "KEYWORD_ONLY",
+        "name": "runtime_control_settings"
+      },
+      {
+        "default": "None",
+        "kind": "KEYWORD_ONLY",
+        "name": "db_engine"
+      },
+      {
+        "default": "True",
+        "kind": "KEYWORD_ONLY",
+        "name": "db_commenter_enabled"
+      },
+      {
+        "default": "None",
+        "kind": "KEYWORD_ONLY",
+        "name": "db_commenter_options"
+      }
+    ],
+    "instrument_httpx_client": [
+      {
+        "default": "None",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "client"
+      }
+    ],
+    "instrument_requests_session": [
+      {
+        "default": "None",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "session"
+      }
+    ],
+    "mark_prometheus_process_dead": [
+      {
+        "default": "<required>",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "pid"
+      }
+    ],
+    "observability_lifespan": [
+      {
+        "default": "<required>",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "app"
+      }
+    ],
+    "register_log_enricher": [
+      {
+        "default": "<required>",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "name"
+      },
+      {
+        "default": "<required>",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "fn"
+      }
+    ],
+    "register_log_filter": [
+      {
+        "default": "<required>",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "name"
+      },
+      {
+        "default": "<required>",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "fn"
+      }
+    ],
+    "register_metric_hook": [
+      {
+        "default": "<required>",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "name"
+      },
+      {
+        "default": "<required>",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "fn"
+      }
+    ],
+    "register_sink": [
+      {
+        "default": "<required>",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "sink"
+      }
+    ],
+    "set_user_context": [
+      {
+        "default": "<required>",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "value"
+      }
+    ],
+    "setup_logging": [
+      {
+        "default": "<required>",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "settings"
+      },
+      {
+        "default": "True",
+        "kind": "KEYWORD_ONLY",
+        "name": "force"
+      },
+      {
+        "default": "None",
+        "kind": "KEYWORD_ONLY",
+        "name": "security_policy"
+      },
+      {
+        "default": "'local_json'",
+        "kind": "KEYWORD_ONLY",
+        "name": "logs_mode"
+      },
+      {
+        "default": "None",
+        "kind": "KEYWORD_ONLY",
+        "name": "extra_handlers"
+      }
+    ],
+    "shutdown_logging": []
+  }
+}

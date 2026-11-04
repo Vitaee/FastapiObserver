@@ -76,7 +76,7 @@ def _mark_current_span(state: RequestState) -> None:
     if trace is not None:
         span = trace.get_current_span()
         if span.is_recording() and getattr(span, "kind", None) == trace.SpanKind.CLIENT:
-            state.http_span_ids.add(span.get_span_context().span_id)
+            state.mark_http_span(span.get_span_context().span_id)
 
 
 @cache

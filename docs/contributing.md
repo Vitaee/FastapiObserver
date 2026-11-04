@@ -71,6 +71,11 @@ matrix, quality/audit, runtime budgets, paired CPU benchmark and Compose backend
 checks, then publishes the stored artifact with attestations. The publisher
 checks its commit and file hashes instead of rebuilding it.
 
+Experimental versions such as `2.3.0a1` use the same gates and tag convention.
+Their GitHub releases are marked as prereleases and do not replace the latest
+stable release. Keep the package's Beta classification until stability evidence
+supports a separate promotion decision.
+
 Keep published tags immutable. After a partial publication, use **Re-run failed
 jobs** on the original workflow run so the original distribution artifact is
 reused. Existing PyPI filenames must have identical SHA-256 hashes;

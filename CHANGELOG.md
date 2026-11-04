@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [2.3.0a1] - 2026-11-04
+
+### Added
+- Experimental `fastapiobserver.experimental.observe_operation()` supports sync/async Python operations, nested context restoration and existing SQLAlchemy/HTTP diagnostics. It borrows logging and providers; the stable FastAPI interface and request output remain unchanged.
+- A tagged 2.2.1 compatibility fixture, ownership/claim inventory and Python-only SQLite/HTTP example establish the extraction baseline. Framework-free imports are tested; normal installation retains existing framework dependencies.
+
+### Maintenance
+- Alpha, beta, release-candidate and development versions are marked as GitHub prereleases without replacing the latest stable release. Existing immutable-artifact validation and publication gates remain required.
+
 ## [2.2.1] - 2026-11-04
 
 ### Security

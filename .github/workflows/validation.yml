@@ -36,12 +36,36 @@ jobs:
           python -m twine check dist/packages/*
           git rev-parse HEAD > dist/COMMIT
           cd dist && sha256sum packages/* > SHA256SUMS
-      - name: Check a core-only wheel installation
+      - name: Check the FastAPI wheel with required dependencies
         run: |
           python -m venv /tmp/core-wheel
           /tmp/core-wheel/bin/pip install dist/packages/*.whl
           cd /tmp
           /tmp/core-wheel/bin/python -c 'from fastapi import FastAPI; from fastapiobserver import install_observability; install_observability(FastAPI(), metrics_enabled=False)'
+      - name: Check experimental separation without frameworks or exporters
+        run: |
+          python -m venv /tmp/operation-wheel
+          /tmp/operation-wheel/bin/pip install --no-deps dist/packages/*.whl
+          /tmp/operation-wheel/bin/pip install 'pydantic-settings>=2.10.1'
+          cd /tmp
+          /tmp/operation-wheel/bin/python - <<'PY'
+          import importlib.util, io, json, logging, threading
+          for name in ('fastapi', 'starlette', 'sqlalchemy', 'opentelemetry'):
+              assert importlib.util.find_spec(name) is None
+          threads = set(threading.enumerate())
+          from fastapiobserver import ObservabilitySettings, StructuredJsonFormatter
+          from fastapiobserver.experimental import observe_operation
+          output = io.StringIO()
+          handler = logging.StreamHandler(output)
+          handler.setFormatter(StructuredJsonFormatter(ObservabilitySettings()))
+          logger = logging.getLogger('separation-check')
+          logger.setLevel(logging.INFO)
+          logger.addHandler(handler)
+          with observe_operation('plain.python', logger=logger):
+              pass
+          assert json.loads(output.getvalue())['event']['outcome'] == 'success'
+          assert threads == set(threading.enumerate())
+          PY
       - uses: actions/upload-artifact@v7
         id: upload
         with:
@@ -136,8 +160,11 @@ jobs:
         run: |
           mkdir -p /tmp/installed-check
           cp -R tests /tmp/installed-check/tests
+          mkdir -p /tmp/installed-check/scripts /tmp/installed-check/examples
+          cp scripts/compatibility_probe.py /tmp/installed-check/scripts/
+          cp examples/python_operation.py /tmp/installed-check/examples/
           cd /tmp/installed-check
-          python -m pytest -q tests/test_sqlalchemy_integration.py tests/test_otel_integration.py tests/test_metrics_contracts.py tests/test_application_logging.py
+          python -m pytest -q tests/test_sqlalchemy_integration.py tests/test_otel_integration.py tests/test_metrics_contracts.py tests/test_application_logging.py tests/test_release_compatibility.py tests/test_experimental_operations.py tests/test_core_imports.py
       - name: Standard runtime stress gate
         run: python scripts/runtime_stress.py --profile standard --json > runtime-stress.log
       - name: Paired CPU overhead gate

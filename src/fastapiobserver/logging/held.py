@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import hashlib
 import logging
-from collections import deque
 
 from ..request_context import RequestState, get_request_state
 from . import state
@@ -55,9 +54,7 @@ class HeldLogFilter(logging.Filter):
         ):
             return True
         if request_state is not None:
-            if request_state.held_logs is None:
-                request_state.held_logs = deque(maxlen=_MAX_HELD_RECORDS)
-            request_state.held_logs.append(record)
+            request_state.hold_log(record, _MAX_HELD_RECORDS)
         return False
 
     def _sampled(self, request_state: RequestState, record: logging.LogRecord) -> bool:
