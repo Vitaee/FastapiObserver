@@ -5,7 +5,7 @@
 [![Python](https://img.shields.io/pypi/pyversions/fastapi-observer)](https://pypi.org/project/fastapi-observer/)
 [![License](https://img.shields.io/pypi/l/fastapi-observer)](https://github.com/Vitaee/FastapiObserver/blob/main/LICENSE)
 
-**One-call observability for FastAPI.** JSON logs with request IDs, Prometheus metrics and OpenTelemetry traces, with sensitive data redacted by default. No vendor backend: send it to whatever you already run.
+**One-call observability for FastAPI.** JSON logs with request IDs, Prometheus metrics and OpenTelemetry traces, with sensitive fields masked by default. No vendor backend: send it to whatever you already run.
 
 ```python
 from fastapi import FastAPI
@@ -45,6 +45,17 @@ Every request now writes one JSON line, with the same `trace_id` as its trace wh
 
 **Documentation:** [vitaee.github.io/FastapiObserver](https://vitaee.github.io/FastapiObserver/)
 
+Already have a JSON logger and approved redaction? Keep them:
+
+```python
+install_observability(app, configure_logging=False)
+```
+
+Request diagnostics use your existing handlers, filters, formatters and levels.
+Your application owns log redaction and export; no logging handler or log
+exporter is added. See the [integration guide](https://vitaee.github.io/FastapiObserver/logging/#application-owned-logging)
+and [runnable example](https://github.com/Vitaee/FastapiObserver/blob/main/examples/existing_logging_app.py).
+
 ## Install
 
 ```bash
@@ -74,13 +85,17 @@ Explicit variables and Python arguments always win over profile defaults. Every 
 
 - **One JSON line per request** with method, path, sent status, response duration, total application lifetime and client IP, and your service's name, environment and version on every line, including your own `logging` calls. HTTP latency excludes background work; later failures still appear on the correlated request line.
 - **Request IDs** taken from `X-Request-ID` when the caller is a trusted proxy, generated otherwise, returned in the response and passed on to the services you call, so one ID finds a request's logs in every service.
-- **Redaction on by default.** Passwords, tokens, API keys, `Authorization` and cookies are masked before anything is written. Presets cover stricter needs (`strict`, `pci`, `gdpr`).
+- **Field-name redaction on by default.** The library's outputs mask values under configured sensitive field and header names, including passwords, tokens, API keys, `Authorization` and cookies. URL credentials are masked in exception messages and stack traces. Arbitrary free text is not scanned for secrets or personal data; retain your approved sanitizer for that. Presets (`strict`, `pci`, `gdpr`) select fields and masking rules, not compliance guarantees. See the [redaction limits](https://vitaee.github.io/FastapiObserver/security/#what-redaction-covers).
 - **Prometheus metrics** labelled by route template (`/orders/{order_id}`). Requests no route matches, such as scanners, CORS preflights and requests an auth middleware rejects, share one `<unmatched>` label, and made-up methods share `_OTHER`, so neither IDs nor anonymous clients explode cardinality.
 - **OpenTelemetry traces**, from FastAPI's own support on 0.142 and later, with `trace_id` and `span_id` in every log line, and optional log export over OTLP, redacted like everything else.
 - **Non-blocking log writes.** Lines are written from a background thread, so a slow stdout never stalls the event loop.
 - **Help finding what slows a request down.** A warning with the stack of any sync call that blocks the event loop, on in the `production` profile. A warning when the thread pool or a database connection pool is full, the usual cause when latency climbs while CPU stays low. For the SQLAlchemy engines you pass in, each request line counts its queries, and a query run once per item (N+1) gets a warning. HTTPX/HTTPX2 clients passed to `instrument_httpx_client()`, and Requests instrumented with `instrument_requests_session()`, report outbound counts, duration and failure categories too. These diagnostics work without tracing. Opt-in: `DEBUG` lines written only for requests that fail. With metrics on, `/metrics` shows how many bytes of logs each route writes (in a single process), and `OBS_LOG_SAMPLE_RATE` keeps a share of successful requests, chosen by trace ID, while failed and slow requests are always written in full.
 
 Optional extras: runtime log-level control, SQLAlchemy, `httpx` and `requests` tracing, Strawberry GraphQL and a Loguru bridge. See the [documentation](https://vitaee.github.io/FastapiObserver/).
+
+The logging features above describe the default library-owned pipeline. With
+`configure_logging=False`, formatting, levels, sampling, queuing, redaction and
+log export follow the application's configuration.
 
 ![Grafana dashboard built from fastapi-observer metrics, traces and logs](https://raw.githubusercontent.com/Vitaee/FastapiObserver/main/examples/full_stack/screenshot/dashboard_top.png)
 
@@ -92,7 +107,7 @@ Optional extras: runtime log-level control, SQLAlchemy, `httpx` and `requests` t
 |---|---|---|---|---|---|
 | JSON log line per request | Built in | No, only errors as OTLP log records | You write the middleware | No | A span per request |
 | Request ID on every log line | Built in | No | You wire it up | No | Trace IDs |
-| Redaction by default | Yes, with presets | Signed-URL query parameters only | You write a processor | No | Yes |
+| Redaction by default | Field/header names and exception URL credentials; presets | Signed-URL query parameters only | You write a processor | No | Yes |
 | Prometheus `/metrics` | Built in | Through an exporter | No | Through an exporter | No |
 | Traces | FastAPI's own on 0.142+, OpenTelemetry's instrumentation before | Yes, with spans for dependencies, the endpoint and serialization | No | Yes | Yes |
 | Where data goes | stdout, Prometheus and any OTLP backend | Any OTLP backend | stdout or files | Any OTLP backend | Logfire's platform |

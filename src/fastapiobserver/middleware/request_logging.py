@@ -8,6 +8,7 @@ from anyio import get_cancelled_exc_class
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from ..config import ObservabilitySettings
+from ..logging.filters import RequestIdFilter, TraceContextFilter
 from ..logging.held import keep_request_logs
 from ..metrics import MetricsBackend, NoopMetricsBackend
 from ..pools import check_pools
@@ -37,6 +38,7 @@ _SQL_LITERALS = re.compile(r"'(?:[^']|'')*'|\b\d+(?:\.\d+)?\b")
 _HTTP_METHODS = frozenset(
     {"GET", "HEAD", "POST", "PUT", "DELETE", "CONNECT", "OPTIONS", "TRACE", "PATCH"}
 )
+_CONTEXT_FILTERS = (RequestIdFilter(), TraceContextFilter())
 
 
 class RequestLoggingMiddleware:
@@ -54,6 +56,11 @@ class RequestLoggingMiddleware:
         self.trusted_proxy_policy = trusted_proxy_policy or TrustedProxyPolicy()
         self.metrics_backend = metrics_backend or NoopMetricsBackend()
         self.logger = logging.getLogger("fastapiobserver.middleware")
+        # Capture context before application filters and queues see diagnostics.
+        # Filters also work with factories that already define these fields.
+        for context_filter in reversed(_CONTEXT_FILTERS):
+            if context_filter not in self.logger.filters:
+                self.logger.filters.insert(0, context_filter)
         self.ip_resolver = _IpResolver(self.trusted_proxy_policy)
         self.context_manager = _RequestContextManager(self.settings)
         self.event_builder = _RequestEventBuilder(self.security_policy)

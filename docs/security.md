@@ -10,6 +10,60 @@
 | Query string in logged path | Excluded | Prevent accidental token leakage |
 | Request ID trust boundary | Trusted CIDRs only | Prevent spoofed correlation IDs |
 
+### What redaction covers
+
+The default formatter and OTLP log handler sanitize structured mappings and
+sequences by **field and header name**. Matching ignores case and treats
+underscores as hyphens. For example, `{"token": "example-secret"}` is masked;
+`{"message": "token=example-secret"}` keeps its text. Sensitive header rules
+apply inside a mapping named `headers`. Values under other names remain visible.
+
+URL user/password pairs such as `postgresql://user:password@db/app` are replaced
+with `postgresql://***:***@db/app` in request exception summaries, JSON
+`error.message` / `error.stacktrace`, and the library's OTLP exception attributes.
+This is a specific credential pattern, not a general URL or secret scanner.
+It does not remove query tokens, arbitrary API keys, email addresses, phone
+numbers or card numbers from free text. Regular log messages, arbitrary string
+values and exception text outside that URL pattern can still contain them.
+
+The `pci` and `gdpr` presets extend the configured field names and masking rules.
+They do not detect every occurrence of personal or payment data and do not
+establish regulatory compliance. Keep body capture off unless you need it.
+
+These protections cover the library's own output paths. Independently configured
+handlers and exporters require their own sanitizer.
+
+### Retain an approved organisation sanitizer
+
+If your application already has a redaction filter, JSON formatter or shared
+Python/TypeScript sanitization contract, retain it with
+[`configure_logging=False`](logging.md#application-owned-logging). Request
+diagnostics pass through those existing handlers and their filters, including
+structured context and exception records. Keep the same test vectors in your
+application's integration tests, checking messages, `event`, `user_context`,
+rendered tracebacks and every intended output/export destination.
+
+If you want the library's JSON schema in an application-owned handler,
+`StructuredJsonFormatter` already accepts a `sanitize_payload` callback:
+
+```python
+from fastapiobserver import StructuredJsonFormatter
+from fastapiobserver.security import sanitize_record
+from my_app.redaction import redact_payload  # Your existing, tested implementation.
+
+def sanitize_payload(payload, policy):
+    return redact_payload(sanitize_record(payload, policy))
+
+handler.setFormatter(StructuredJsonFormatter(sanitize_payload=sanitize_payload))
+```
+
+This callback replaces the formatter's sanitization step; composing it with
+`sanitize_record` retains the built-in field rules too. It covers that formatter's
+output, not other handlers or direct OTel exports. The
+[runnable application example](https://github.com/Vitaee/FastapiObserver/blob/main/examples/existing_logging_app.py)
+demonstrates a custom filter instead, including traceback sanitization. Its
+illustrative patterns are not a replacement for an approved sanitizer.
+
 ### Presets for regulated environments
 
 ```python

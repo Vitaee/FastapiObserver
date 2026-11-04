@@ -119,6 +119,12 @@ def mount_control_plane(
         payload: ControlPlanePayload, request: Request
     ) -> dict[str, object]:
         level = _parse_log_level(payload.log_level) if payload.log_level else None
+        runtime = getattr(request.app.state, "_observability_state", None)
+        if level is not None and runtime is not None and not runtime.configure_logging:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Log levels are controlled by the application's logging configuration.",
+            )
         if payload.trace_sampling_ratio is not None and not runtime_sampler_installed():
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
