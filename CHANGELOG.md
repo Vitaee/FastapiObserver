@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [2.3.0a2] - 2026-11-04
+
+### Fixed
+- SQL and sampled client-span completions retain their originating request/operation across nested contexts and unrelated threads. Late completions cannot move to another operation. Native HTTP/span deduplication uses start ownership rather than the completion context.
+- Request cleanup invalidates outstanding recording handles. Weak ownership tracking releases closed payloads and span slots immediately; tracking is bounded and inherited handles cannot deadlock on a parent-process lock.
+
+### Added
+- Experimental operations expose `record_call()` and exactly-once `start_call().finish()` for custom clients and callbacks, sharing the native aggregation path. Invalid durations/categories and aggregate overflow cannot corrupt totals; error details are bounded.
+- A standard-library callback example, draft operation-event schema and fixtures document the implemented capabilities and remaining portability work. The stable root API and FastAPI output remain unchanged.
+
 ## [2.3.0a1] - 2026-11-04
 
 ### Added

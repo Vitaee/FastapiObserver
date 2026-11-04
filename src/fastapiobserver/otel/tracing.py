@@ -9,8 +9,9 @@ from typing import Any
 from fastapi import FastAPI
 
 from ..config import ObservabilitySettings
+from ..core.recording import SpanOwners, record_completed_call
 from ..db_queries import SQLALCHEMY_INSTRUMENTATION
-from ..http_calls import is_counted_http_span
+from ..http_calls import is_counted_http_span, mark_native_http_span
 from ..request_context import get_request_state
 from ..utils import endpoint_for_log
 from .lifecycle import flush_on_app_shutdown
@@ -133,10 +134,26 @@ def _request_call_totals(trace_api: Any, trace_sdk: Any) -> Any:
     client_kind = trace_api.SpanKind.CLIENT
 
     class RequestCallTotals(trace_sdk.SpanProcessor):  # type: ignore
+        def __init__(self) -> None:
+            self._owners = SpanOwners()
+
+        def on_start(self, span: Any, parent_context: Any = None) -> None:
+            owner = get_request_state()
+            scope = span.instrumentation_scope
+            if (owner is not None and span.kind == client_kind
+                    and (scope is None or scope.name != SQLALCHEMY_INSTRUMENTATION)):
+                context = span.get_span_context()
+                if self._owners.capture((context.trace_id, context.span_id), owner):
+                    mark_native_http_span(owner, context.span_id)
+
         def on_end(self, span: Any) -> None:
-            request_state = get_request_state()
-            if request_state is None or span.kind != client_kind or span.end_time is None:
+            if span.kind != client_kind or span.end_time is None:
                 return
+            context = span.context
+            request_state = self._owners.pop((context.trace_id, context.span_id))
+            if request_state is None:
+                return
+            counted_http = is_counted_http_span(request_state, context.span_id)
             scope = span.instrumentation_scope
             if scope is not None and scope.name == SQLALCHEMY_INSTRUMENTATION:
                 return
@@ -145,11 +162,11 @@ def _request_call_totals(trace_api: Any, trace_sdk: Any) -> Any:
             # Old and new semantic-convention names; instrumentations emit either.
             if "db.system" in attributes or "db.system.name" in attributes:
                 statement = attributes.get("db.query.text") or attributes.get("db.statement")
-                request_state.add_call(
-                    "db", seconds, statement if isinstance(statement, str) else None
+                record_completed_call(
+                    request_state, "db", seconds, statement if isinstance(statement, str) else None
                 )
             elif "http.request.method" in attributes or "http.method" in attributes:
-                if not is_counted_http_span(request_state, getattr(span.context, "span_id", None)):
-                    request_state.add_call("http", seconds)
+                if not counted_http:
+                    record_completed_call(request_state, "http", seconds)
 
     return RequestCallTotals()

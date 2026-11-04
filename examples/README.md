@@ -33,6 +33,9 @@ For a Python operation without a web application, run
 performs real SQLite queries and loopback HTTP, forwards correlation, and emits
 an experimental operation summary through the existing JSON logging pipeline.
 See [experimental operations](../docs/experimental-core.md).
+`python examples/callback_operation.py` demonstrates an explicit custom-client
+completion handle across an executor callback, using only standard-library
+SQLite and the existing logging pipeline.
 
 ## Reproduce and diagnose failures
 

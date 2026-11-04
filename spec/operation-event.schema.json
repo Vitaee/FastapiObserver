@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Experimental operation event 0.1.0",
+  "type": "object",
+  "required": ["schema_version", "name", "operation_id", "outcome", "duration_ms"],
+  "properties": {
+    "schema_version": {"const": "0.1.0"},
+    "name": {"type": "string", "minLength": 1, "maxLength": 128},
+    "operation_id": {"$ref": "#/$defs/id"},
+    "parent_operation_id": {"$ref": "#/$defs/id"},
+    "outcome": {"enum": ["success", "failure", "cancelled"]},
+    "duration_ms": {"type": "number", "minimum": 0},
+    "db": {"$ref": "#/$defs/calls"},
+    "http": {"$ref": "#/$defs/calls"}
+  },
+  "additionalProperties": true,
+  "$defs": {
+    "id": {"type": "string", "minLength": 32, "maxLength": 32, "pattern": "^[0-9a-f]{32}$"},
+    "calls": {
+      "type": "object",
+      "required": ["count", "ms"],
+      "properties": {
+        "count": {"type": "integer", "minimum": 0},
+        "ms": {"type": "number", "minimum": 0},
+        "errors": {
+          "type": "object",
+          "maxProperties": 33,
+          "propertyNames": {
+            "minLength": 1, "maxLength": 64,
+            "pattern": "^[a-z]",
+            "not": {"pattern": "[^a-z0-9_]"}
+          },
+          "additionalProperties": {"type": "integer", "minimum": 1}
+        }
+      },
+      "additionalProperties": true
+    }
+  }
+}

@@ -59,3 +59,28 @@ runpy.run_path(sys.argv[1], run_name='__main__')
     assert terminal["event"]["http"]["count"] == 1
     [application] = [r for r in records if r["message"] == "catalog.imported"]
     assert application["request_id"] == terminal["request_id"]
+
+
+def test_custom_client_callback_example_without_optional_integrations():
+    root = Path(__file__).resolve().parents[1]
+    script = """
+import importlib.abc, runpy, sys
+class Forbidden(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname.split('.')[0] in {'fastapi','starlette','sqlalchemy','opentelemetry'}:
+            raise AssertionError('Unexpected import: ' + fullname)
+sys.meta_path.insert(0, Forbidden())
+runpy.run_path(sys.argv[1], run_name='__main__')
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", script, str(root / "examples/callback_operation.py")],
+        capture_output=True, text=True, timeout=15,
+        env={**os.environ, "PYTHONPATH": str(Path(fastapiobserver.__file__).resolve().parents[1])},
+    )
+    assert result.returncode == 0, result.stderr
+    records = [json.loads(line) for line in result.stdout.splitlines()]
+    [terminal] = [r for r in records if r["message"] == "operation.completed"]
+    assert terminal["event"]["db"]["count"] == 1
+    assert terminal["event"]["db"]["ms"] >= 0
+    [application] = [r for r in records if r["message"] == "catalog.read"]
+    assert application["event"]["value"] == 42

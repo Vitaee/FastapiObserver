@@ -14,6 +14,7 @@ from ..request_context import (
     clear_span_id,
     clear_trace_id,
     clear_user_context,
+    get_request_state,
     set_request_id,
     set_request_state,
     set_span_id,
@@ -75,6 +76,9 @@ class _RequestContextManager:
         return request_id
 
     def cleanup(self) -> None:
+        state = get_request_state()
+        if state is not None:
+            state.close()
         set_request_state(None)
         clear_request_id()
         clear_trace_id()

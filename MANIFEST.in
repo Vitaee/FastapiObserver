@@ -1,0 +1,3 @@
+recursive-include spec *.md *.json
+recursive-include tests/fixtures *.json
+include scripts/compatibility_probe.py
