@@ -58,7 +58,7 @@ def test_request_id_reaches_the_next_service() -> None:
     assert response.json()["request_id"] == response.headers["x-request-id"]
 
 
-def test_instrument_httpx_client_fails_loudly_without_httpx(
+def test_instrument_httpx_client_fails_loudly_without_supported_clients(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     import importlib.util
@@ -67,8 +67,8 @@ def test_instrument_httpx_client_fails_loudly_without_httpx(
     monkeypatch.setattr(
         importlib.util,
         "find_spec",
-        lambda name, *args: None if name == "httpx" else find_spec(name, *args),
+        lambda name, *args: None if name in {"httpx", "httpx2"} else find_spec(name, *args),
     )
 
-    with pytest.raises(RuntimeError, match="request hook"):
+    with pytest.raises(RuntimeError, match="installed `httpx` or `httpx2`"):
         instrument_httpx_client()

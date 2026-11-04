@@ -20,7 +20,7 @@ x-app-base: &app-base
     OBS_LOG_LEVEL: "INFO"
     OBS_METRICS_ENABLED: "true"
     OBS_LOOP_BLOCK_THRESHOLD_MS: "100"
-    OBS_OTEL_ENABLED: "true"
+    OBS_OTEL_ENABLED: "${OBS_OTEL_ENABLED:-true}"
     OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector:4317"
     OTEL_EXPORTER_OTLP_PROTOCOL: "grpc"
     OTEL_TRACES_SAMPLER_ARG: "1.0"

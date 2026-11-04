@@ -14,7 +14,7 @@ Planned work, in order. Shipped changes are listed in [CHANGELOG.md](CHANGELOG.m
 
 ## Diagnosis
 
-- [ ] Count outbound HTTP calls from `httpx` events, so the `http` totals work with tracing off too.
+- [x] Count outbound HTTP calls independently of tracing, including failures and timeout categories for HTTPX, HTTPX2 and Requests.
 - [ ] Abandoned requests: notice when the client disconnects (`http.disconnect`) even if nothing cancels the handler, and log how long the request kept running.
 - [ ] Shutdown: on SIGTERM, log the requests in flight, how long draining took and which requests were cut off.
 - [ ] One named warning per failure mode, with the numbers behind it and a `docs_url` pointing at the fix. Named today: `event_loop.blocked`, `threadpool.saturated`, `db.pool_exhausted`, `db.n_plus_one`, `request.cancelled`. Still missing: client disconnect, load-balancer timeout, requests cut off at shutdown.
@@ -26,6 +26,10 @@ Done when every common failure mode has a named warning.
 The [full-stack example](examples/full_stack/README.md) reproduces a blocked event loop,
 database-pool exhaustion and N+1 queries, with real-server tests asserting their warnings.
 The other failure modes below remain open.
+
+The lab also covers slow downstreams, streaming failures and background work.
+HTTP response duration is measured separately from total application lifetime;
+later failures keep their correlation and the actual sent response status.
 
 - [ ] A test per failure mode that triggers it and asserts its warning, run in CI: blocked event loop, thread-pool and database-pool exhaustion, a thread-pool and database deadlock, client disconnect, load-balancer timeout, SIGTERM under load, N+1 queries.
 - [ ] A Docker Compose stack that triggers each one on demand and shows the log line and dashboard panel that catch it.

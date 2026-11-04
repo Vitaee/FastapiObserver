@@ -11,7 +11,10 @@ event-loop watchdog at the production profile's 250 ms.
 
     python examples/benchmarks/request_cpu.py MODE [absolute] > /dev/null
 
-MODE is default, metrics, held, sampled, traced, traced-instrumentation or watchdog.
+MODE is default, metrics, held, sampled, traced, traced-instrumentation, watchdog,
+http or traced-http. The HTTP modes make one HTTPX2 call per request through a
+MockTransport (no network). HTTP_CALLS changes the call count; COUNT_HTTP_CALLS=0
+disables client instrumentation for a comparison against the same HTTP workload.
 With ``absolute``, it prints the observed app's own CPU per request instead: the
 held mode lowers the root logger's level for every app in the process, so the
 plain app pays for the ``DEBUG`` records too and the difference hides their cost.
@@ -32,7 +35,12 @@ from typing import Any
 
 from fastapi import FastAPI
 
-from fastapiobserver import ObservabilitySettings, OTelSettings, install_observability
+from fastapiobserver import (
+    ObservabilitySettings,
+    OTelSettings,
+    install_observability,
+    instrument_httpx_client,
+)
 from fastapiobserver.logging import get_log_queue_stats, shutdown_logging
 from fastapiobserver.loop_watchdog import EventLoopWatchdog
 
@@ -58,21 +66,39 @@ MODES: dict[str, dict[str, Any]] = {
     "traced": {},
     "traced-instrumentation": {},
     "watchdog": {},
+    "http": {},
+    "traced-http": {},
 }
 # FastAPI(telemetry=...) per mode; the rest keep FastAPI's own telemetry off,
 # so the global tracer provider a traced mode sets doesn't trace them.
-TELEMETRY: dict[str, dict[str, Any]] = {"traced": {}, "traced-instrumentation": {"tracing": False}}
+TELEMETRY: dict[str, dict[str, Any]] = {
+    "traced": {},
+    "traced-instrumentation": {"tracing": False},
+    "traced-http": {},
+}
 UNTRACED = {"tracing": False, "metrics": False, "logs": False}
 DEBUG_LINES = int(os.environ.get("DEBUG_LINES", "1"))
 
 
-def build(mode: str | None) -> FastAPI:
+def build(mode: str | None, *, http_calls: bool = False) -> FastAPI:
     app = FastAPI(telemetry=TELEMETRY.get(mode or "", UNTRACED))  # type: ignore[arg-type]
+    call_count = int(os.environ.get("HTTP_CALLS", "1"))
+    client = None
+    if http_calls:
+        import httpx2
+
+        client = httpx2.AsyncClient(
+            transport=httpx2.MockTransport(lambda _: httpx2.Response(200, content=b"ok"))
+        )
+        app.state.benchmark_http_client = client
 
     @app.get("/items/{item_id}")
     async def get_item(item_id: str) -> dict[str, str]:
         for _ in range(DEBUG_LINES):
             logging.getLogger("bench").debug("item read")
+        if client is not None:
+            for _ in range(call_count):
+                await client.get("https://downstream.test/")
         return {}
 
     if mode is not None:
@@ -82,7 +108,16 @@ def build(mode: str | None) -> FastAPI:
             metrics_enabled=mode == "metrics",
             otel_settings=OTelSettings(enabled=mode in TELEMETRY),
         )
+        if client is not None and os.environ.get("COUNT_HTTP_CALLS", "1") != "0":
+            instrument_httpx_client(client)
     return app
+
+
+async def close_clients(*apps: FastAPI) -> None:
+    for app in apps:
+        client = getattr(app.state, "benchmark_http_client", None)
+        if client is not None:
+            await client.aclose()
 
 
 async def receive() -> dict[str, Any]:
@@ -127,18 +162,20 @@ def discard_spans() -> None:
 
 
 async def main(mode: str, absolute: bool) -> None:
+    http_calls = mode in {"http", "traced-http"}
     if mode in TELEMETRY:
         discard_spans()
     if mode == "watchdog":  # the lifespan starts it, and this harness runs none
         EventLoopWatchdog(0.25).start()
     if absolute:
-        observed = build(mode)
+        observed = build(mode, http_calls=http_calls)
         await cpu_us_per_request(observed, 2_000)  # warm up
         runs = [await cpu_us_per_request(observed, 5_000) for _ in range(9)]
         shutdown_logging()
+        await close_clients(observed)
         report(mode, runs)
         return
-    plain, observed = build(None), build(mode)
+    plain, observed = build(None, http_calls=http_calls), build(mode, http_calls=http_calls)
     await cpu_us_per_request(observed, 2_000)  # warm up
     await cpu_us_per_request(plain, 2_000)
     overheads = []
@@ -147,6 +184,7 @@ async def main(mode: str, absolute: bool) -> None:
         plain_run = await cpu_us_per_request(plain, 5_000)
         overheads.append((observed_run[0] - plain_run[0], observed_run[1] - plain_run[1]))
     shutdown_logging()
+    await close_clients(plain, observed)
     report(mode, overheads)
 
 

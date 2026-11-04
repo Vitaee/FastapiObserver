@@ -5,10 +5,12 @@ import logging
 import os
 import time
 from contextlib import asynccontextmanager
+from collections.abc import AsyncIterator
 from typing import Annotated, Literal
 
 import httpx2
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Query
+from starlette.responses import StreamingResponse
 from sqlalchemy import create_engine, text
 from sqlalchemy.pool import QueuePool
 
@@ -19,6 +21,7 @@ from fastapiobserver import (
     get_trace_id,
     inject_trace_headers,
     install_observability,
+    instrument_httpx_client,
 )
 
 settings = ObservabilitySettings.from_env()
@@ -26,6 +29,7 @@ logger = logging.getLogger(settings.service)
 TARGET_B = os.getenv("TARGET_B", "http://localhost:8001")
 TARGET_C = os.getenv("TARGET_C", "http://localhost:8002")
 Delay = Annotated[float, Query(gt=0, le=3)]
+Timeout = Annotated[float, Query(gt=0, le=5)]
 
 # A single local connection makes pool pressure reproducible without another service.
 engine = create_engine(
@@ -45,10 +49,13 @@ async def lifespan(app: FastAPI):
             text("INSERT INTO lab_items (id, name) VALUES (:id, :name)"),
             [{"id": i, "name": f"Item {i}"} for i in range(1, 11)],
         )
-    try:
-        yield
-    finally:
-        engine.dispose()
+    async with httpx2.AsyncClient(timeout=5) as client:
+        instrument_httpx_client(client)
+        app.state.http_client = client
+        try:
+            yield
+        finally:
+            engine.dispose()
 
 
 app = FastAPI(title=f"{settings.service} — Observability Demo", lifespan=lifespan)
@@ -101,17 +108,77 @@ async def _fetch_json(client: httpx2.AsyncClient, url: str) -> object:
 @app.get("/chain")
 async def chain() -> dict:
     """Forward request IDs and the current trace context to both downstreams."""
-    async with httpx2.AsyncClient(timeout=5) as client:
-        results = await asyncio.gather(
-            _fetch_json(client, f"{TARGET_B}/items/1"),
-            _fetch_json(client, f"{TARGET_C}/users/1"),
-        )
+    client = app.state.http_client
+    results = await asyncio.gather(
+        _fetch_json(client, f"{TARGET_B}/items/1"),
+        _fetch_json(client, f"{TARGET_C}/users/1"),
+    )
     return {
         "source": settings.service,
         "request_id": get_request_id(),
         "trace_id": get_trace_id(),
         "results": dict(zip(("app_b", "app_c"), results)),
     }
+
+
+async def _background_work(seconds: float, fail: bool) -> None:
+    await asyncio.sleep(seconds)
+    if fail:
+        raise RuntimeError("Intentional background failure after the response")
+    logger.info("lab.background.finished")
+
+
+@app.get("/lab/background", status_code=202)
+async def background_work(tasks: BackgroundTasks, seconds: Delay = 0.3, fail: bool = False) -> dict:
+    """The response is quick; later work stays correlated and can fail independently."""
+    tasks.add_task(_background_work, seconds, fail)
+    return {"scheduled": True}
+
+
+@app.get("/lab/downstream")
+async def slow_downstream(
+    seconds: Delay = 0.3, timeout: Timeout = 1,
+    calls: Annotated[int, Query(ge=1, le=5)] = 1, failure: bool = False,
+) -> dict:
+    """Show outbound counts, concurrent elapsed time, status failures and read timeouts."""
+    path = "/error?status=503" if failure else "/slow"
+    try:
+        responses = await asyncio.gather(*[
+            app.state.http_client.get(
+                f"{TARGET_B}{path}", params={"seconds": seconds}, timeout=timeout
+            )
+            for _ in range(calls)
+        ])
+        for response in responses:
+            response.raise_for_status()
+    except httpx2.TimeoutException as exc:
+        raise HTTPException(status_code=504, detail=type(exc).__name__) from exc
+    except httpx2.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=type(exc).__name__) from exc
+    return {"calls": calls}
+
+
+@app.get("/lab/stream")
+async def stream(seconds: Delay = 0.3) -> StreamingResponse:
+    async def chunks() -> AsyncIterator[bytes]:
+        yield b"first\n"
+        await asyncio.sleep(seconds)
+        yield b"last\n"
+
+    return StreamingResponse(chunks(), media_type="text/plain")
+
+
+@app.get("/lab/downstream-stream")
+async def downstream_stream(seconds: Delay = 0.3, timeout: Timeout = 1) -> StreamingResponse:
+    async def chunks() -> AsyncIterator[bytes]:
+        async with app.state.http_client.stream(
+            "GET", f"{TARGET_B}/lab/stream", params={"seconds": seconds}, timeout=timeout
+        ) as response:
+            response.raise_for_status()
+            async for chunk in response.aiter_bytes():
+                yield chunk
+
+    return StreamingResponse(chunks(), media_type="text/plain")
 
 
 @app.get("/lab/block")

@@ -68,23 +68,59 @@ The next service accepts the forwarded ID only from addresses in `OBS_TRUSTED_CI
 
 ### Other HTTP clients
 
-`instrument_httpx_client()` and `instrument_requests_session()` wrap OpenTelemetry's instrumentations for `httpx` and `requests`. For another client, install OpenTelemetry's instrumentation for it, such as `opentelemetry-instrumentation-aiohttp-client` or `opentelemetry-instrumentation-urllib3`. Every OpenTelemetry instrumentation reads the same global propagator, so it sends `traceparent` and the request ID too.
+`instrument_httpx_client()` supports HTTPX and HTTPX2, and
+`instrument_requests_session()` supports Requests. Both count calls and forward
+request IDs without OpenTelemetry. Their optional `[otel-httpx]` and
+`[otel-requests]` extras add client spans through OpenTelemetry's instrumentations.
+For another client, install its OpenTelemetry instrumentation, such as
+`opentelemetry-instrumentation-aiohttp-client` or
+`opentelemetry-instrumentation-urllib3`. These read the same global propagator.
 
-A client without one, such as `httpx2`, needs a request hook:
+For an HTTPX2 client, use the same helper:
 
 ```python
 import httpx2
-from opentelemetry import propagate
+from fastapiobserver import instrument_httpx_client
 
-
-async def forward_context(request: httpx2.Request) -> None:
-    propagate.inject(request.headers)
-
-
-client = httpx2.AsyncClient(event_hooks={"request": [forward_context]})
+client = httpx2.AsyncClient()
+instrument_httpx_client(client)
 ```
 
-A synchronous `httpx2.Client` takes the same hook as a plain function. Without the `[otel]` extra, pass `headers=inject_trace_headers({})` on each call instead.
+A synchronous client works the same way. Calling the helper without a client
+instruments all installed HTTPX and HTTPX2 clients. Requests instrumentation is
+global; passing a session remains unsupported. Install clients before serving traffic.
+
+### Outbound HTTP diagnostics
+
+The request line's `http` object contains `count`, `ms`, and an optional `errors`
+object. The helpers above record these with tracing off, with sampling at zero,
+and with tracing on, counting each call once even when it also creates a span.
+
+- One call is one logical `Client.send()` / `Session.send()` operation. Redirects,
+  authentication exchanges and transport retries are included in that operation.
+- Timing starts just before the send and ends after a non-streaming response is
+  consumed. For streaming responses it ends when the stream is consumed or closed,
+  or raises. This includes time the consumer spends between reads. No response body
+  is eagerly read for diagnostics. An early close counts once.
+- Totals include calls completed or closed before the ASGI application ends.
+  Detached work or a stream left open past that point is not part of that line.
+- Exceptions propagate unchanged. Counts include failed sends, 4xx/5xx responses,
+  streaming failures and cancellation. `errors` uses bounded categories:
+  `connect_timeout`, `read_timeout`, `write_timeout`, `pool_timeout`, `timeout`,
+  `network_error`, `request_error`, `http_4xx`, `http_5xx`, and `cancelled`.
+  A transfer exception takes precedence over its response status. Only categories
+  the client exposes can be distinguished; Requests does not expose a separate
+  pool-timeout exception. Requests streaming is observed through `iter_content()`
+  (also used by `content` and `iter_lines()`) and `close()`, not direct `raw` reads.
+- Counters retain no URLs, headers, bodies or exception messages. No new metric
+  labels are added. HTTP totals sum concurrent calls and may exceed response time.
+
+For example, an application that catches a downstream read timeout can still
+return 200 while logging `http: {"count": 1, "ms": 50.2,
+"errors": {"read_timeout": 1}}`.
+
+Without these helpers, other instrumented clients continue to contribute sampled
+client spans to the totals when tracing is enabled.
 
 ### Baggage propagation
 

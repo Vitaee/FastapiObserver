@@ -48,10 +48,22 @@ def repeated_queries(get: Request) -> None:
     print("db.n_plus_one: compare db.count on /lab/n-plus-one (11) and /lab/batched (1).")
 
 
+def downstream_calls(get: Request) -> None:
+    get("/lab/downstream?seconds=0.15&calls=2")
+    print("http.count=2: http.ms sums both concurrent calls, even with tracing disabled.")
+
+
+def background_failure(get: Request) -> None:
+    get("/lab/background?seconds=0.3&fail=true")
+    print("request.failed: the response was 202; app_duration_ms includes the later failure.")
+
+
 SCENARIOS = {
     "event-loop": blocked_loop,
     "db-pool": exhausted_pool,
     "n-plus-one": repeated_queries,
+    "downstream": downstream_calls,
+    "background": background_failure,
 }
 
 
@@ -73,7 +85,7 @@ def main() -> int:
     except (OSError, ValueError, RuntimeError) as exc:
         print(f"Failure lab: {exc}", file=sys.stderr)
         return 1
-    print("Read the named warnings in app-a's logs or Grafana Explore → Loki.")
+    print("Read the diagnostics in app-a's logs or Grafana Explore → Loki.")
     return 0
 
 

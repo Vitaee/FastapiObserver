@@ -10,6 +10,7 @@ from fastapi import FastAPI
 
 from ..config import ObservabilitySettings
 from ..db_queries import SQLALCHEMY_INSTRUMENTATION
+from ..http_calls import is_counted_http_span
 from ..request_context import get_request_state
 from .lifecycle import flush_on_app_shutdown
 from .exclusions import build_excluded_urls_csv
@@ -147,6 +148,7 @@ def _request_call_totals(trace_api: Any, trace_sdk: Any) -> Any:
                     "db", seconds, statement if isinstance(statement, str) else None
                 )
             elif "http.request.method" in attributes or "http.method" in attributes:
-                request_state.add_call("http", seconds)
+                if not is_counted_http_span(request_state, getattr(span.context, "span_id", None)):
+                    request_state.add_call("http", seconds)
 
     return RequestCallTotals()

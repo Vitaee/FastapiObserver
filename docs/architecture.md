@@ -92,8 +92,10 @@ sequenceDiagram
   M->>A: Call the app
   A-)L: Your log records, with request_id and trace_id added
   Note over A,L: Records below OBS_LOG_LEVEL, or from a request that isn't sampled, are held on the request
-  A-->>M: Response, exception or cancellation
+  A-->>M: Final response body or trailers
   M-->>C: Response with an X-Request-ID header
+  M->>P: Count and response duration, labelled by route template
+  A-->>M: Application returns, raises or is cancelled (including background work)
   alt status below 400
     M->>L: request.completed at INFO
   else 4xx
@@ -105,13 +107,13 @@ sequenceDiagram
   else cancelled
     M->>L: request.cancelled at WARNING, status 499 if no response started
   end
-  M->>P: Count and duration, labelled by route template
   M->>M: N+1 check, then clear the context
 ```
 
 - The request ID comes from `X-Request-ID` only when the peer is a trusted proxy. Otherwise it's a new UUID. Outbound calls from clients OpenTelemetry instruments, such as `httpx` and `requests`, forward it along with `traceparent`.
 - A request that takes `OBS_LOG_SLOW_REQUEST_MS` or longer has its sampled-out records written too, and so does every request that fails.
-- The request line is redacted before it's written. It also counts the request's database queries and outbound HTTP calls (`db` and `http`, each with `count` and `ms`): SQLAlchemy queries from SQLAlchemy's own events, everything else from client spans when tracing is on.
+- The request line is redacted before it's written. It also counts completed database queries and outbound HTTP calls (`db` and `http`, each with `count` and `ms`): SQLAlchemy queries from its events, HTTPX/HTTPX2 and Requests from explicitly installed client helpers, and other clients from sampled spans. HTTP failures add bounded categories in `http.errors`; a call and its span count once.
+- HTTP metrics and `duration_ms` stop at the final successful response send (or interruption). `app_duration_ms` includes background work and cleanup. The request log is emitted at application completion, retaining later failures without changing an already-sent status. See [timing semantics](logging.md#what-the-durations-mean).
 - Requests no route matches, such as scanners, CORS preflights and requests an auth middleware rejects, share one `<unmatched>` metrics label, and made-up methods share `_OTHER`. No client can add a time series per URL or per method.
 
 ## The log pipeline
@@ -196,7 +198,7 @@ flowchart TD
   class loopfix,threadsfix,poolfix,deadlockfix,nplusfix,upstreamfix fix
 ```
 
-- `event_loop.blocked` needs `OBS_LOOP_BLOCK_THRESHOLD_MS`. The pool warnings are always on. The `db` and `http` counts need tracing.
+- `event_loop.blocked` needs `OBS_LOOP_BLOCK_THRESHOLD_MS`. The pool warnings are always on. SQLAlchemy query totals and explicitly installed HTTP client diagnostics do not need tracing.
 - When clients or the load balancer give up before you answer, the same slowdown also shows as a rise in `request.cancelled` lines.
 
 ### Route Exclusion Auto-Discovery

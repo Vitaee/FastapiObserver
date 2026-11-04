@@ -9,8 +9,10 @@ import subprocess
 import sys
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from urllib.parse import parse_qs, urlsplit
 
 import httpx2
 import pytest
@@ -22,17 +24,40 @@ ROOT = Path(__file__).resolve().parents[1]
 def demo_server(tmp_path_factory: pytest.TempPathFactory):
     class Downstream(BaseHTTPRequestHandler):
         def do_GET(self):
+            parts = urlsplit(self.path)
+            seconds = float(parse_qs(parts.query).get("seconds", ["0"])[0])
+            if parts.path == "/lab/stream":
+                self.send_response(200)
+                self.send_header("Content-Length", "11")
+                self.end_headers()
+                self.wfile.write(b"first\n")
+                self.wfile.flush()
+                time.sleep(seconds)
+                try:
+                    self.wfile.write(b"last\n")
+                except (BrokenPipeError, ConnectionResetError):
+                    pass
+                return
+            time.sleep(seconds)
             body = json.dumps({"request_id": self.headers.get("x-request-id")}).encode()
-            self.send_response(200)
+            self.send_response(503 if parts.path == "/error" else 200)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
-            self.wfile.write(body)
+            try:
+                self.wfile.write(body)
+            except (BrokenPipeError, ConnectionResetError):
+                pass
 
         def log_message(self, *_args):
             pass
 
-    downstream = ThreadingHTTPServer(("127.0.0.1", 0), Downstream)
+    class DownstreamServer(ThreadingHTTPServer):
+        # The concurrency test opens twelve connections together; avoid testing
+        # the stdlib server's five-connection accept backlog instead of the app.
+        request_queue_size = 64
+
+    downstream = DownstreamServer(("127.0.0.1", 0), Downstream)
     thread = threading.Thread(target=downstream.serve_forever, daemon=True)
     thread.start()
     with socket.socket() as listener:
@@ -103,6 +128,16 @@ def _records(path: Path) -> list[dict]:
     return [json.loads(line) for line in path.read_text().splitlines() if line.startswith("{")]
 
 
+def _request_record(path: Path, request_id: str) -> dict:
+    deadline = time.monotonic() + 3
+    while time.monotonic() < deadline:
+        for record in _records(path):
+            if record.get("request_id") == request_id and record["message"].startswith("request."):
+                return record
+        time.sleep(0.01)
+    pytest.fail(f"No request record for {request_id}:\n{path.read_text()}")
+
+
 def test_demo_forwards_request_ids_to_both_downstream_services(demo_server) -> None:
     base_url, _ = demo_server
 
@@ -113,6 +148,93 @@ def test_demo_forwards_request_ids_to_both_downstream_services(demo_server) -> N
         "app_b": {"request_id": "example-chain"},
         "app_c": {"request_id": "example-chain"},
     }
+
+
+@pytest.mark.parametrize("fail", [False, True])
+def test_background_work_keeps_response_timing_and_later_failure(demo_server, fail) -> None:
+    base_url, log_path = demo_server
+    response = httpx2.get(f"{base_url}/lab/background", params={"seconds": 0.3, "fail": fail})
+    assert response.status_code == 202
+    record = _request_record(log_path, response.headers["x-request-id"])
+    event = record["event"]
+    assert event["status_code"] == 202
+    assert event["response_completed"] is True
+    assert event["app_duration_ms"] - event["duration_ms"] >= 250
+    assert record["message"] == ("request.failed" if fail else "request.completed")
+    if fail:
+        assert record["error"]["type"] == "RuntimeError"
+    metrics = httpx2.get(f"{base_url}/metrics").text
+    assert 'path="/lab/background",service="example-test",status_code="202"} 1.0' in metrics
+
+
+@pytest.mark.parametrize(
+    "failure, timeout, expected_status, errors",
+    [
+        (False, 1.0, 200, {}),
+        (True, 1.0, 502, {"http_5xx": 1}),
+        (False, 0.02, 504, {"read_timeout": 1}),
+    ],
+)
+def test_downstream_calls_without_tracing(demo_server, failure, timeout, expected_status, errors):
+    base_url, log_path = demo_server
+    response = httpx2.get(
+        f"{base_url}/lab/downstream",
+        params={
+            "seconds": 0.1,
+            "timeout": timeout,
+            "failure": failure,
+        },
+    )
+    assert response.status_code == expected_status
+    record = _request_record(log_path, response.headers["x-request-id"])
+    assert record["event"]["http"]["count"] == 1
+    assert record["event"]["http"]["ms"] >= (10 if timeout < 0.1 else 80)
+    assert record["event"]["http"].get("errors", {}) == errors
+
+
+def test_concurrent_requests_keep_their_own_call_totals(demo_server):
+    base_url, log_path = demo_server
+
+    def request(count):
+        response = httpx2.get(
+            f"{base_url}/lab/downstream", params={"calls": count, "seconds": 0.05}
+        )
+        assert response.status_code == 200
+        return response.headers["x-request-id"], count
+
+    with ThreadPoolExecutor(max_workers=6) as workers:
+        results = list(workers.map(request, [1, 2, 3, 1, 2, 3]))
+    assert len({request_id for request_id, _ in results}) == 6
+    for request_id, count in results:
+        event = _request_record(log_path, request_id)["event"]
+        assert event["http"]["count"] == count
+        assert event["http"]["ms"] >= 40 * count
+
+
+@pytest.mark.parametrize("timeout", [1.0, 0.02])
+def test_streamed_downstream_completion_and_failure(demo_server, timeout):
+    base_url, log_path = demo_server
+    with httpx2.stream(
+        "GET", f"{base_url}/lab/downstream-stream", params={"seconds": 0.1, "timeout": timeout}
+    ) as response:
+        assert response.status_code == 200
+        request_id = response.headers["x-request-id"]
+        if timeout < 0.1:
+            with pytest.raises(httpx2.HTTPError):
+                b"".join(response.iter_bytes())
+        else:
+            assert b"".join(response.iter_bytes()) == b"first\nlast\n"
+    record = _request_record(log_path, request_id)
+    assert record["event"]["status_code"] == 200
+    assert record["event"]["http"]["count"] == 1
+    if timeout < 0.1:
+        assert record["message"] == "request.failed"
+        assert record["event"]["response_completed"] is False
+        assert record["event"]["http"]["errors"] == {"read_timeout": 1}
+    else:
+        assert record["event"]["response_completed"] is True
+        assert record["event"]["duration_ms"] >= 80
+        assert record["event"]["http"]["ms"] >= 80
 
 
 def test_failure_lab_produces_the_named_warnings(demo_server) -> None:
