@@ -56,7 +56,7 @@ Breaking changes must be listed under a `Breaking Changes` section in `CHANGELOG
 
 Releases are published from CI with PyPI Trusted Publishing; no token is stored anywhere.
 
-1. Open a `release/vX.Y.Z` pull request that sets the version in `src/fastapiobserver/_version.py` and dates its `CHANGELOG.md` section.
+1. Set the version in `src/fastapiobserver/_version.py` and date its `CHANGELOG.md` section in a `release/vX.Y.Z` pull request, or in the feature PR being released. Update `SECURITY.md` when the supported minor version changes.
 2. After it merges, tag the merge commit and push the tag:
 
     ```bash
@@ -66,11 +66,18 @@ Releases are published from CI with PyPI Trusted Publishing; no token is stored 
 
 On a tag push, `.github/workflows/release.yml` runs the tests, rejects a tag that doesn't match `_version.py`, builds and checks the distributions, publishes them to PyPI with attestations, and creates the GitHub Release from the matching `CHANGELOG.md` section.
 
-If publishing fails partway, don't re-run the tag's run: it rebuilds files that differ from the ones PyPI already has. Run the workflow by hand instead, which skips files PyPI has:
+Keep published tags immutable. Diagnose a failed job before retrying it. If
+tests failed before publication, rerun the failed workflow at the same tag.
+For a partial publication, the publisher's `skip-existing: true` leaves existing
+PyPI files untouched. A manual retry must also check out the original tag:
 
 ```bash
-gh workflow run release.yml --ref main -f tag=vX.Y.Z
+gh workflow run release.yml --ref vX.Y.Z -f tag=vX.Y.Z
 ```
+
+Using `main` could publish code that differs from the tag. Code changes require
+a new version and tag. Before announcing completion, verify the GitHub Release,
+both PyPI distributions and a fresh installation from PyPI.
 
 For high-risk changes, run the stress harness before tagging:
 

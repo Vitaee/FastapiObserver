@@ -2,6 +2,12 @@
 
 This folder holds the same small FastAPI service twice.
 
+This example replaces a hand-written logging pipeline. If your application
+already has an approved logger and sanitizer, keep them with
+`install_observability(app, configure_logging=False)` instead. The
+[existing-logger example](../existing_logging_app.py) demonstrates that smaller
+integration, including correlation and traceback redaction.
+
 ## Before: `main.py` (26 lines) and four modules (239 lines)
 
 | File | Lines | What it does |

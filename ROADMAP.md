@@ -4,6 +4,33 @@ fastapi-observer should tell you why a FastAPI app is slow, hangs or drops reque
 
 Planned work, in order. Shipped changes are listed in [CHANGELOG.md](CHANGELOG.md). Suggestions are welcome as GitHub issues.
 
+## Current state and next steps
+
+As of 4 November 2026, the latest release is **2.2.0**. Response/application
+timing, tracing-independent HTTP diagnostics and application-owned logging have
+shipped. The package remains **Beta** while the production evidence below is
+incomplete.
+
+The next focused work is:
+
+1. **Request lifecycle diagnostics:** observed client disconnects and shutdown
+   under load. Report requests that continue after a disconnect and requests
+   interrupted during deployment. Use real-server tests for ordinary responses,
+   streaming and background work. Keep cancellation, an observed disconnect and
+   shutdown distinct; do not infer a cause from cancellation alone or take over
+   the server's signal handlers or request-body consumption.
+2. **A CI overhead regression check:** compare against a baseline on the same
+   runner, including the default and application-owned logging paths. Set a
+   threshold from repeated measurements rather than the published M1 timings.
+3. **A README claim audit:** link each claim to evidence or qualify it. Cover
+   supported dependency versions, existing logging/OTel configurations, privacy
+   limits and request lifecycle behavior before changing the stability status.
+
+In parallel, validate 2.2.0 in one established application with its existing
+sanitizer and telemetry providers. Confirm correlation, one event per intended
+destination and acceptable overhead in that workload. Worker diagnostics stay
+behind the validation gate below.
+
 ## Application integration
 
 - [x] Install request diagnostics with `configure_logging=False`, retaining the application's handlers, filters, formatters, levels, sanitizer and log export. Cover application-owned queues and existing OpenTelemetry providers with regression tests and a runnable JSON logger example.
@@ -36,7 +63,9 @@ The lab also covers slow downstreams, streaming failures and background work.
 HTTP response duration is measured separately from total application lifetime;
 later failures keep their correlation and the actual sent response status.
 
-- [ ] A test per failure mode that triggers it and asserts its warning, run in CI: blocked event loop, thread-pool and database-pool exhaustion, a thread-pool and database deadlock, client disconnect, load-balancer timeout, SIGTERM under load, N+1 queries.
+- [x] Real-server tests for blocked event loops, database-pool exhaustion and N+1 queries.
+- [x] Real-server regressions for response/application timing, background failures, slow and failed downstreams, streaming and concurrent requests.
+- [ ] Remaining real-server failure modes: thread-pool exhaustion, a thread-pool and database deadlock, client disconnect, load-balancer timeout and SIGTERM under load.
 - [ ] A Docker Compose stack that triggers each one on demand and shows the log line and dashboard panel that catch it.
 - [ ] Docs organised by symptom ("latency climbs while CPU stays low", "5xx bursts during deploys"), starting from the [slow-request diagnosis diagram](docs/architecture.md#diagnosing-slow-but-cpu-is-low).
 - [ ] Overhead benchmark in CI with a regression threshold.
@@ -78,4 +107,4 @@ Left out so the library goes deeper rather than wider:
 
 - New sinks, vendor integrations, or tracing and metrics features that FastAPI or OpenTelemetry already provide.
 - A health or readiness endpoint helper.
-- Control-plane audit trails, pluggable control-plane authentication and runtime sampling toggles.
+- Control-plane audit trails, pluggable control-plane authentication or runtime enable/disable of telemetry pipelines. Existing log-level and trace-sampling-ratio controls remain supported.

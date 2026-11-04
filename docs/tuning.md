@@ -6,7 +6,7 @@ For high-throughput services (e.g. `10k+ RPS`), apply these exact variables to m
 
 ### 1. Head-Based Sampling
 
-Tracing 100% of requests is too expensive at scale. Sampling is always parent-based by trace ID: a request keeps its caller's decision, and new traces are sampled at `OTEL_TRACES_SAMPLER_ARG`. `OTEL_TRACES_SAMPLER` isn't read.
+With a tracer provider created by the library, sampling is parent-based by trace ID: a request keeps its caller's decision, and new traces are sampled at `OTEL_TRACES_SAMPLER_ARG`. The library does not read `OTEL_TRACES_SAMPLER`. If the application configured the provider, its own sampler and configuration decide; the library does not replace them.
 
 ```bash
 # Keep the parent's sample decision if it exists, otherwise sample 5%

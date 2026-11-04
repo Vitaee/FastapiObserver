@@ -4,6 +4,9 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Maintenance
+- Real-server tests wait for newline-terminated log records instead of parsing a partially written final line. Malformed complete records still fail. This test-only fix was merged after the v2.2.0 tag.
+
 ## [2.2.0] - 2026-11-04
 
 ### Added

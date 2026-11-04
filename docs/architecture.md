@@ -63,16 +63,21 @@ flowchart TB
 
 Purple is fastapi-observer, green is where data leaves the process, and orange is what you run already. The optional runtime control endpoint is left out.
 
+These diagrams show the default library-owned logging pipeline. With
+`configure_logging=False`, diagnostics use the application's existing handlers,
+sanitizer, formatting, export and shutdown. The library adds no logging queue or
+log exporter in that mode. See [application-owned logging](logging.md#application-owned-logging).
+
 ## What `install_observability()` Wires Up
 
 1. Profile-aware config bootstrap (`OBS_PROFILE`) and env-driven defaults for settings/policies.
-2. Structured logging pipeline (JSON formatter + bounded async queue handler).
+2. Structured logging pipeline (JSON formatter + bounded async queue handler), unless `configure_logging=False`.
 3. Metrics backend and `/metrics` endpoint when metrics are enabled.
 4. OTel tracing setup when OTel is enabled.
-5. Optional OTel logs/metrics setup when OTLP settings are enabled.
-6. Request logging middleware with sanitization and context cleanup.
+5. Optional OTel metrics setup, and OTel logs when enabled with library-owned logging.
+6. Request logging middleware with correlation, body-capture controls and context cleanup.
 7. Runtime control endpoint when runtime control is enabled.
-8. A lifespan hook that writes out queued logs and flushes OpenTelemetry providers when the app stops.
+8. A lifespan hook that runs diagnostic watchers and flushes library-managed logging and the OTel providers it uses when the app stops.
 
 ## One request
 
@@ -96,21 +101,21 @@ sequenceDiagram
   M-->>C: Response with an X-Request-ID header
   M->>P: Count and response duration, labelled by route template
   A-->>M: Application returns, raises or is cancelled (including background work)
-  alt status below 400
-    M->>L: request.completed at INFO
-  else 4xx
-    M->>L: request.client_error at WARNING
-  else 5xx
-    M->>L: Held records, then request.server_error at ERROR
-  else exception
+  alt unhandled exception
     M->>L: Held records, then request.failed at ERROR with error.fingerprint
   else cancelled
     M->>L: request.cancelled at WARNING, status 499 if no response started
+  else 5xx
+    M->>L: Held records, then request.server_error at ERROR
+  else 4xx
+    M->>L: request.client_error at WARNING
+  else status below 400
+    M->>L: request.completed at INFO
   end
   M->>M: N+1 check, then clear the context
 ```
 
-- The request ID comes from `X-Request-ID` only when the peer is a trusted proxy. Otherwise it's a new UUID. Outbound calls from clients OpenTelemetry instruments, such as `httpx` and `requests`, forward it along with `traceparent`.
+- The request ID comes from `X-Request-ID` only when the peer is a trusted proxy. Otherwise it's a new UUID. The HTTPX/HTTPX2 and Requests client helpers forward it without tracing; with OpenTelemetry, instrumented clients can send it alongside `traceparent`.
 - A request that takes `OBS_LOG_SLOW_REQUEST_MS` or longer has its sampled-out records written too, and so does every request that fails.
 - The request line is redacted before it's written. It also counts completed database queries and outbound HTTP calls (`db` and `http`, each with `count` and `ms`): SQLAlchemy queries from its events, HTTPX/HTTPX2 and Requests from explicitly installed client helpers, and other clients from sampled spans. HTTP failures add bounded categories in `http.errors`; a call and its span count once.
 - HTTP metrics and `duration_ms` stop at the final successful response send (or interruption). `app_duration_ms` includes background work and cleanup. The request log is emitted at application completion, retaining later failures without changing an already-sent status. See [timing semantics](logging.md#what-the-durations-mean).
@@ -158,8 +163,8 @@ flowchart TB
   class rec,dropped muted
 ```
 
-- **Holding is off by default.** It's on only with `OBS_LOG_LEVEL_ON_ERROR` set, or `OBS_LOG_SAMPLE_RATE` below 1. `WARNING` and higher are never held.
-- **Your code never waits on I/O.** The calling thread only adds context and puts the record on the queue. Formatting, redaction and writing happen on the listener thread, so a slow stdout or a down log service can't stall the event loop.
+- **Holding is off by default.** It's on only with `OBS_LOG_LEVEL_ON_ERROR` set, or `OBS_LOG_SAMPLE_RATE` below 1. Sampling does not hold `WARNING` and higher records; error-verbosity retention can hold them if they are below `OBS_LOG_LEVEL`.
+- **Default writes do not wait for sink I/O.** Formatting, redaction and writing happen on the listener thread. The default overflow policy drops records when the queue is full; choosing `block` can stall the calling thread up to its configured timeout. Application-owned logging follows its own handler behavior.
 - **Overload is counted, not hidden.** `/metrics` shows the queue's size, enqueued, dropped and blocked records, each sink's circuit-breaker state, and log bytes per route (in Prometheus multiprocess mode these per-worker metrics aren't exported).
 - **After a fork**, as in gunicorn with `--preload`, the child process gets a new queue, new locks and a new listener thread. It doesn't touch anything the parent's threads could have been holding.
 - **When the app stops**, its lifespan waits for the queue to be written and flushes the outputs, but leaves logging running: other apps in the process share it, and a reused TestClient starts the app again. `atexit` stops the listener when the process exits.
@@ -199,7 +204,7 @@ flowchart TD
 ```
 
 - `event_loop.blocked` needs `OBS_LOOP_BLOCK_THRESHOLD_MS`. The pool warnings are always on. SQLAlchemy query totals and explicitly installed HTTP client diagnostics do not need tracing.
-- When clients or the load balancer give up before you answer, the same slowdown also shows as a rise in `request.cancelled` lines.
+- `request.cancelled` means the application received cancellation. It does not identify whether the cause was a client disconnect, a timeout or shutdown. A disconnected client can leave a handler running without cancellation; explicit disconnect and shutdown diagnostics remain on the [roadmap](https://github.com/Vitaee/FastapiObserver/blob/main/ROADMAP.md#diagnosis).
 
 ### Route Exclusion Auto-Discovery
 
