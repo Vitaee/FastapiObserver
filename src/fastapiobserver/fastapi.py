@@ -157,6 +157,7 @@ def install_observability(
         security_policy,
         trusted_proxy_policy,
         metrics_backend,
+        configure_logging=configure_logging,
     )
     install_request_id_propagation(settings.request_id_header)
 
@@ -354,6 +355,7 @@ def _setup_request_middleware(
     security_policy: SecurityPolicy,
     trusted_proxy_policy: TrustedProxyPolicy,
     metrics_backend: MetricsBackend,
+    *, configure_logging: bool = True,
 ) -> None:
     if (
         security_policy.log_request_body or security_policy.log_response_body
@@ -386,6 +388,7 @@ def _setup_request_middleware(
         security_policy=security_policy,
         trusted_proxy_policy=trusted_proxy_policy,
         metrics_backend=metrics_backend,
+        configure_logging=configure_logging,
     )
 
 def _get_runtime_state(app: FastAPI) -> ObservabilityRuntimeState | None:

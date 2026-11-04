@@ -1,6 +1,6 @@
 # Roadmap: Python observability and a portable ecosystem
 
-**Reviewed:** 4 November 2026 · **Released baseline:** 2.2.1 · **Status:** proposed implementation roadmap
+**Reviewed:** 5 November 2026 · **Released baseline:** 2.2.1 · **Status:** proposed implementation roadmap
 
 ## Current delivery slice
 
@@ -11,13 +11,20 @@ the bundled application-owned logging regression, a plain-Python SQLite/HTTP
 proof and the experimental operation boundary. See the
 [implementation plan](https://github.com/Vitaee/FastapiObserver/blob/main/docs/plans/2026-11-04-experimental-core.md).
 
-The next slice, prepared as `2.3.0a2`, shares completed-call recording across
+The second slice, released as `2.3.0a2`, shares completed-call recording across
 native integrations and experimental custom callbacks. It captures ownership
 at start, rejects late completion, bounds sampled-span tracking and records a
 narrow [draft operation contract](https://github.com/Vitaee/FastapiObserver/blob/main/spec/README.md).
 See its [implementation plan](https://github.com/Vitaee/FastapiObserver/blob/main/docs/plans/2026-11-04-call-recording.md).
 This advances the M1/M2 interfaces; it does not complete either milestone or
 claim new datastore integrations or portable-contract 1.0.
+
+The current slice, prepared as `2.3.0a3`, adds matched routes, separate native
+SQL execution/failure detail, observation and sampling metadata, generated
+redaction checks and an engine-scoped query-budget helper. See
+[request diagnostics](https://github.com/Vitaee/FastapiObserver/blob/main/docs/request-diagnostics.md).
+It preserves legacy count/metric meanings and keeps broad integrations and
+language implementations outside this delivery.
 
 Prior real FastAPI adoption is reported by the maintainer. The maintainer chose
 the bundled application for this change's reproducible validation; independent

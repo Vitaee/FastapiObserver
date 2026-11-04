@@ -12,7 +12,10 @@ the log schema version, and representative success, 404 and exception records.
 `scripts/compatibility_probe.py` generated it against source extracted from the
 immutable `v2.2.1` tag. The candidate runs the same probe against that fixture.
 Timestamps, generated request IDs, elapsed durations, library version and
-exception stack locations are normalized; field names and outcomes are not.
+exception stack locations are normalized; existing field names and outcomes are
+not. The upcoming alpha 3 adds `http.route`, `observation` and `log_sampling`;
+the probe projects out exactly these three fields for the frozen comparison.
+Their new contracts are asserted separately, without rewriting the tagged fixture.
 
 To reproduce the baseline without importing the candidate:
 

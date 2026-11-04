@@ -56,6 +56,10 @@ def snapshot() -> dict[str, Any]:
                 event = payload.get("event", {})
                 for key in ("duration_ms", "app_duration_ms"):
                     event.pop(key, None)
+                # Additive diagnostics have their own contract tests. Retain
+                # exact comparison for every field frozen from the 2.2.1 tag.
+                for key in ("http.route", "observation", "log_sampling"):
+                    event.pop(key, None)
                 if "error" in payload:
                     payload["error"] = {"type": payload["error"]["type"],
                                         "message": payload["error"]["message"]}

@@ -42,6 +42,7 @@ class HeldLogFilter(logging.Filter):
         self.handler = handler
         self.level = level
         self.lowest_level = lowest_level
+        self.sample_rate = sample_rate
         # The bound OpenTelemetry's TraceIdRatioBased sampler uses for the same ratio.
         self.sample_bound = round(sample_rate * (_LOW_64_BITS + 1))
 
@@ -63,6 +64,8 @@ class HeldLogFilter(logging.Filter):
         if request_state.sampled is None:
             bits = _sampling_bits(record)
             request_state.sampled = bits is None or bits < self.sample_bound
+            request_state.sample_probability = 1.0 if bits is None else self.sample_rate
+            request_state.sample_reason = "no_identity" if bits is None else "sampled"
         return request_state.sampled
 
 
@@ -98,11 +101,41 @@ def keep_request_logs(*, failed: bool) -> None:
     if held_filter is None or request_state is None:
         return
     request_state.sampled = True
+    request_state.retention_reason = "failure" if failed else "slow"
     held, request_state.held_logs = request_state.held_logs, None
     for record in held or ():
         if failed or record.levelno >= held_filter.level:
             # emit(), not handle(): the filters already ran when the record was held.
             held_filter.handler.emit(record)
+
+
+class LogSamplingFilter(logging.Filter):
+    """Capture terminal-record sampling policy before application queues run."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        event = getattr(record, "event", None)
+        if (not isinstance(record.msg, str) or not record.msg.startswith(("request.", "operation."))
+                or not isinstance(event, dict)):
+            return True
+        owner = get_request_state()
+        metadata: dict[str, object] = {
+            "owner": "application", "inclusion_probability": None, "reason": "unknown",
+        }
+        if owner is not None and owner.observer_logging and state._QUEUE_LISTENER is not None:
+            held = state._HELD_LOG_FILTER
+            reason, probability = "all", 1.0
+            if owner.retention_reason is not None:
+                reason = owner.retention_reason
+            elif record.levelno >= logging.WARNING:
+                reason = "warning"
+            elif held is not None and held.sample_rate < 1:
+                held._sampled(owner, record)
+                reason = owner.sample_reason or "sampled"
+                probability = (owner.sample_probability if owner.sample_probability is not None
+                               else held.sample_rate)
+            metadata = {"owner": "observer", "inclusion_probability": probability, "reason": reason}
+        event["log_sampling"] = metadata
+        return True
 
 
 __all__ = ["HeldLogFilter", "keep_request_logs"]

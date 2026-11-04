@@ -2,38 +2,272 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Experimental operation event 0.1.0",
   "type": "object",
-  "required": ["schema_version", "name", "operation_id", "outcome", "duration_ms"],
+  "required": [
+    "schema_version",
+    "name",
+    "operation_id",
+    "outcome",
+    "duration_ms"
+  ],
   "properties": {
-    "schema_version": {"const": "0.1.0"},
-    "name": {"type": "string", "minLength": 1, "maxLength": 128},
-    "operation_id": {"$ref": "#/$defs/id"},
-    "parent_operation_id": {"$ref": "#/$defs/id"},
-    "outcome": {"enum": ["success", "failure", "cancelled"]},
-    "duration_ms": {"type": "number", "minimum": 0},
-    "db": {"$ref": "#/$defs/calls"},
-    "http": {"$ref": "#/$defs/calls"}
+    "schema_version": {
+      "const": "0.1.0"
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "operation_id": {
+      "$ref": "#/$defs/id"
+    },
+    "parent_operation_id": {
+      "$ref": "#/$defs/id"
+    },
+    "outcome": {
+      "enum": [
+        "success",
+        "failure",
+        "cancelled"
+      ]
+    },
+    "duration_ms": {
+      "type": "number",
+      "minimum": 0
+    },
+    "db": {
+      "$ref": "#/$defs/calls"
+    },
+    "http": {
+      "$ref": "#/$defs/calls"
+    },
+    "observation": {
+      "$ref": "#/$defs/observation"
+    },
+    "log_sampling": {
+      "$ref": "#/$defs/log_sampling"
+    }
   },
   "additionalProperties": true,
   "$defs": {
-    "id": {"type": "string", "minLength": 32, "maxLength": 32, "pattern": "^[0-9a-f]{32}$"},
+    "id": {
+      "type": "string",
+      "minLength": 32,
+      "maxLength": 32,
+      "pattern": "^[0-9a-f]{32}$"
+    },
     "calls": {
       "type": "object",
-      "required": ["count", "ms"],
+      "required": [
+        "count",
+        "ms"
+      ],
       "properties": {
-        "count": {"type": "integer", "minimum": 0},
-        "ms": {"type": "number", "minimum": 0},
+        "count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "ms": {
+          "type": "number",
+          "minimum": 0
+        },
         "errors": {
           "type": "object",
           "maxProperties": 33,
           "propertyNames": {
-            "minLength": 1, "maxLength": 64,
+            "minLength": 1,
+            "maxLength": 64,
             "pattern": "^[a-z]",
-            "not": {"pattern": "[^a-z0-9_]"}
+            "not": {
+              "pattern": "[^a-z0-9_]"
+            }
           },
-          "additionalProperties": {"type": "integer", "minimum": 1}
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "sqlalchemy": {
+          "$ref": "#/$defs/sqlalchemy"
         }
       },
       "additionalProperties": true
+    },
+    "sqlalchemy": {
+      "type": "object",
+      "required": [
+        "attempted",
+        "succeeded",
+        "failed",
+        "in_flight",
+        "failed_ms",
+        "errors"
+      ],
+      "properties": {
+        "attempted": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "succeeded": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "failed": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "in_flight": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "failed_ms": {
+          "type": "number",
+          "minimum": 0
+        },
+        "errors": {
+          "type": "object",
+          "maxProperties": 33,
+          "propertyNames": {
+            "minLength": 1,
+            "maxLength": 64,
+            "pattern": "^[a-z]",
+            "not": {
+              "pattern": "[^a-z0-9_]"
+            }
+          },
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 1
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "observation": {
+      "type": "object",
+      "required": [
+        "coverage"
+      ],
+      "properties": {
+        "coverage": {
+          "enum": [
+            "unknown",
+            "instrumented_clients",
+            "caller_reported",
+            "partial"
+          ]
+        },
+        "sources": {
+          "type": "object",
+          "maxProperties": 2,
+          "properties": {
+            "db": {
+              "type": "array",
+              "maxItems": 6,
+              "uniqueItems": true,
+              "items": {
+                "enum": [
+                  "sqlalchemy",
+                  "httpx",
+                  "httpx2",
+                  "requests",
+                  "manual",
+                  "sampled_span"
+                ]
+              }
+            },
+            "http": {
+              "type": "array",
+              "maxItems": 6,
+              "uniqueItems": true,
+              "items": {
+                "enum": [
+                  "sqlalchemy",
+                  "httpx",
+                  "httpx2",
+                  "requests",
+                  "manual",
+                  "sampled_span"
+                ]
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        "in_flight": {
+          "type": "object",
+          "maxProperties": 2,
+          "properties": {
+            "db": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "http": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "additionalProperties": false
+        },
+        "dropped_spans": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": true
+    },
+    "log_sampling": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "owner",
+            "inclusion_probability",
+            "reason"
+          ],
+          "properties": {
+            "owner": {
+              "const": "application"
+            },
+            "inclusion_probability": {
+              "type": "null"
+            },
+            "reason": {
+              "const": "unknown"
+            }
+          },
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "required": [
+            "owner",
+            "inclusion_probability",
+            "reason"
+          ],
+          "properties": {
+            "owner": {
+              "const": "observer"
+            },
+            "inclusion_probability": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "reason": {
+              "enum": [
+                "all",
+                "sampled",
+                "warning",
+                "failure",
+                "slow",
+                "no_identity"
+              ]
+            }
+          },
+          "additionalProperties": true
+        }
+      ]
     }
   }
 }

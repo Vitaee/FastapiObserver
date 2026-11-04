@@ -19,6 +19,60 @@ class _FakeRoute:
         self.path = path
 
 
+def test_request_line_contains_the_full_route_template(caplog):
+    import logging
+    app = FastAPI()
+    router = APIRouter(prefix="/items")
+
+    @router.get("/{item_id}")
+    async def item(item_id: str):
+        return {"id": item_id}
+
+    app.include_router(router, prefix="/v1")
+    install_observability(app, metrics_enabled=False, configure_logging=False)
+    with caplog.at_level(logging.INFO), TestClient(app) as client:
+        assert client.get("/v1/items/42").status_code == 200
+        assert client.get("/scanner-private-path").status_code == 404
+    records = [r.event for r in caplog.records if r.msg.startswith("request.")]
+    assert records[0]["http.route"] == "/v1/items/{item_id}"
+    assert records[0]["path"] == "/v1/items/42"
+    assert "http.route" not in records[1]
+
+
+def test_plain_route_resolution_is_reused_after_response_completion():
+    from starlette.responses import PlainTextResponse
+    from starlette.routing import Route
+    calls = []
+
+    class ObservedRoute(Route):
+        def matches(self, scope):
+            calls.append(scope["path"])
+            return super().matches(scope)
+
+    async def endpoint(request):
+        calls.clear()  # Exclude the router's own lookup.
+        return PlainTextResponse("ok")
+
+    app = FastAPI()
+    app.router.routes.append(ObservedRoute("/plain/{name}", endpoint))
+    install_observability(app, metrics_enabled=False, configure_logging=False)
+    with TestClient(app) as client:
+        assert client.get("/plain/example").status_code == 200
+    assert calls == ["/plain/example"]
+
+
+def test_rejected_scope_does_not_scan_routes():
+    from types import SimpleNamespace
+
+    class UnreachedRoute:
+        path = "/secret/{name}"
+        def matches(self, scope):
+            raise AssertionError("Routing was never reached")
+
+    scope = {"app": SimpleNamespace(routes=[UnreachedRoute()]), "path": "/secret/alice"}
+    assert _extract_route_template(scope) == UNMATCHED_ROUTE
+
+
 def test_route_template_preferred_over_raw_path() -> None:
     """When scope has a matched route, use its template."""
     scope = {"route": _FakeRoute("/users/{user_id}")}

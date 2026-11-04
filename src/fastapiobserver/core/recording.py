@@ -17,6 +17,7 @@ if TYPE_CHECKING:
 CallKind = Literal["db", "http"]
 SpanKey = tuple[int, int]
 _ERROR_CODE = re.compile(r"[a-z][a-z0-9_]{0,63}\Z")
+_SOURCES = frozenset({"manual", "sqlalchemy", "httpx", "httpx2", "requests", "sampled_span"})
 
 
 def validate_call(kind: str, seconds: float, error: str | None = None) -> None:
@@ -33,9 +34,10 @@ def validate_call(kind: str, seconds: float, error: str | None = None) -> None:
 def record_completed_call(
     owner: RequestState | None, kind: CallKind, seconds: float,
     statement: str | None = None, *, error: str | None = None,
+    source: str = "manual", started: bool = False,
 ) -> bool:
     """Reject malformed adapter input without changing application outcomes."""
-    if owner is None:
+    if owner is None or not isinstance(source, str) or source not in _SOURCES:
         return False
     if statement is not None and not isinstance(statement, str):
         return False
@@ -43,7 +45,7 @@ def record_completed_call(
         validate_call(kind, seconds, error)
     except (TypeError, ValueError, OverflowError):
         return False
-    return owner._record_call(kind, seconds, statement, error=error)
+    return owner._record_call(kind, seconds, statement, error=error, source=source, started=started)
 
 
 class CallOwner:
@@ -65,11 +67,14 @@ class CallOwner:
 class CallHandle:
     """One completion, attached to its start owner without retaining its payloads."""
 
-    def __init__(self, owner: RequestState, kind: CallKind) -> None:
+    def __init__(self, owner: RequestState, kind: CallKind, *, source: str = "manual") -> None:
         validate_call(kind, 0.0)
-        token = owner._call_owner()
+        if source not in _SOURCES:
+            raise ValueError("Unsupported observation source")
+        token = owner._call_owner(source, kind)
         self._owner = ref(token) if token is not None else None
         self._kind = kind
+        self._source = source
         self._started = time.perf_counter()
         self._lock = threading.Lock()
         self._finished = False
@@ -87,7 +92,7 @@ class CallHandle:
             self._finished = True
         return record_completed_call(
             owner, self._kind, max(0.0, time.perf_counter() - self._started),
-            statement, error=error,
+            statement, error=error, source=self._source, started=True,
         )
 
 

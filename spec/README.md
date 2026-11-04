@@ -74,6 +74,26 @@ sanitizer and policy requirements.
 | Custom manual adapter | Layer selected by adapter author | Each `record_call` is a new observation; one handle finishes once |
 | Sampled client spans | Completed recording CLIENT span | Partial by sampling, hook availability and ownership-tracking capacity |
 
+The optional `db.sqlalchemy` group separately reports native `attempted`,
+`succeeded`, `failed`, `in_flight`, `failed_ms` and bounded `errors`. Its layer is
+entry to `before_cursor_execute`, completed by the success/error hook for that
+context. Failed execution does not increment legacy `db.count/ms` or fingerprints.
+Acquisition, compilation, fetch and transaction failures are outside this layer.
+
+Optional `observation` metadata identifies fixed sources and coverage:
+`unknown`, `instrumented_clients`, `caller_reported`, or `partial`. Missing groups
+remain unknown. Instrumented-client coverage is limited to attached clients and
+their documented layers. Sampled sources, unfinished handles, mixed reporting
+and tracking overflow remain partial; `in_flight` and `dropped_spans` disclose
+these conditions. No provider's presence proves completeness.
+
+Optional `log_sampling` records `owner`, `inclusion_probability` and `reason`.
+Borrowed/application logging has a null probability and unknown reason. Observer
+records its actual cached selection probability, or 1.0 for retained warnings,
+failure/slow promotions and missing identities. This is selection conditional on
+log-level admission, not a delivery guarantee. Queue/sink/export losses and
+application-owned policies require separate accounting.
+
 Do not manually record a call already owned by a native adapter or sampled-span
 fallback. Automatic deduplication of arbitrary custom-client spans is not
 implemented. A new adapter must declare its observing layer and ownership before

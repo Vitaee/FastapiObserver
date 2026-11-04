@@ -4,6 +4,18 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [2.3.0a3] - 2026-11-05
+
+### Added
+- Request summaries include `http.route` for matched routes. Route resolution is reused by response metrics, request logging and N+1 diagnostics; requests that never reached routing avoid a fallback scan.
+- Native SQLAlchemy detail distinguishes attempted, successful, failed and unfinished cursor executions, with bounded error categories and failed duration. Existing `db.count` and `db.ms` retain successful SQL execution contributions; connection acquisition, compilation and result fetching are separate layers.
+- Terminal request/operation records describe observation sources, partial or unknown coverage, unfinished calls and dropped span tracking. Sampling metadata reports the policy's inclusion probability and retention reason before queues; application-owned logging has an unknown probability.
+- `fastapiobserver.testing.assert_query_budget(engine, max_queries)` checks native cursor-entry attempts independently of logs/tracing, including failures and nested scopes. It requires attached native counting and preserves application exceptions.
+
+### Testing
+- Hypothesis generates nested, encoded, malformed and truncated body cases across all redaction modes for JSON output, real in-memory OTLP records and safe stderr failure paths. Hypothesis is a development-only dependency.
+- The 2.2.1 compatibility probe compares every frozen field while projecting out the three explicitly additive diagnostics; their new contracts are tested separately.
+
 ## [2.3.0a2] - 2026-11-04
 
 ### Fixed

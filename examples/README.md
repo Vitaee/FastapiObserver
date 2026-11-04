@@ -64,6 +64,10 @@ python3 examples/full_stack/failure_lab.py
 
 Other deployment examples:
 
+`python examples/query_budget.py` demonstrates an engine-scoped native SQL
+budget, including failed executions and an over-budget assertion. It requires
+SQLAlchemy and no pytest plugin, framework or exporter.
+
 - [Kubernetes](k8s/README.md): Kustomize manifests for the app and telemetry backends.
 - [Time saved](time_saved/README.md): the same app configured by hand and with this library.
 - [Migration](migration_example/migration_made.md): replacing an existing logging setup.

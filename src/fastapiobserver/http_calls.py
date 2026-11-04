@@ -187,7 +187,7 @@ def _wrap_send(
         if state is None or _ACTIVE_CLIENT.get() is owner:
             return owner, None
         _mark_current_span(state)
-        return owner, _Call(CallHandle(state, "http"), library)
+        return owner, _Call(CallHandle(state, "http", source=library.__name__), library)
 
     @wraps(original)
     def send(*args: Any, **kwargs: Any) -> Any:
