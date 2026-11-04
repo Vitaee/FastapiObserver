@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [2.2.0] - 2026-11-04
+
 ### Added
 - `install_observability(..., configure_logging=False)` installs request diagnostics through application-owned logging without changing its handlers, filters, formatters, levels or log export. Correlation is captured before application queues and redaction filters, including when a custom record factory defines the same fields. Runtime log-level changes are refused in this mode.
 - A runnable example retains an existing JSON logger and custom redaction filter. Regression tests cover preserved configuration, one event per destination, queued correlation, existing OpenTelemetry providers, failures and concurrent real-server requests.
