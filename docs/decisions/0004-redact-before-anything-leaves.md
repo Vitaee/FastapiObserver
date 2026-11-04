@@ -2,6 +2,9 @@
 
 **Status:** accepted · **Reviewed:** 2026-10-31
 
+Ownership narrowed by [0015](0015-application-owned-logging.md): applications can
+retain their own sanitized logging pipeline explicitly.
+
 ## Context
 
 Log records carry request data. Passwords, tokens, cookies and API keys end up in `extra` fields and headers. Once a value has been written to a file or exported to a backend, it can't be taken back.

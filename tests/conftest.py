@@ -7,6 +7,7 @@ import typing
 import pytest
 
 from fastapiobserver.plugins import clear_plugins
+from fastapiobserver.logging import shutdown_logging
 from fastapiobserver.request_context import (
     clear_request_id,
     clear_span_id,
@@ -31,6 +32,9 @@ def reset_global_state() -> typing.Generator[None, None, None]:
     _reset_otel_global_provider()
     textmap = _global_textmap()
     yield
+    # Managed queues hold captured streams and SDK handlers from this test.
+    # Stop them before another test can reuse those outputs or reset providers.
+    shutdown_logging()
     if textmap is not None:
         importlib.import_module("opentelemetry.propagate").set_global_textmap(textmap)
     clear_plugins()

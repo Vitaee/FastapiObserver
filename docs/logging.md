@@ -1,7 +1,74 @@
 # Structured Logging Guide
 
-`fastapi-observer` installs a single structured JSON logging pipeline for FastAPI
-and emits request events that are correlation-ready by default.
+fastapi-observer emits structured request diagnostics and provides an optional
+JSON logging pipeline. By default it configures logging; established applications
+can keep their own pipeline with `configure_logging=False`.
+
+## Application-owned logging
+
+Configure your application logger first, then install diagnostics:
+
+```python
+from fastapiobserver import install_observability
+
+# Your existing logging configuration, including approved redaction, is in place.
+install_observability(app, configure_logging=False)
+```
+
+This option preserves root, application and Uvicorn handlers, filters, formatters,
+levels and propagation settings. It adds no output handler, queue, log processor
+or log exporter. Each diagnostic follows the application's existing routing and
+level rules. If that routing already delivers a record twice, it still will.
+Uvicorn access logs stay enabled when your application has enabled them.
+
+The `fastapiobserver.middleware` logger captures `request_id`, `user_context` and
+available `trace_id` / `span_id` before existing logger filters and handlers run.
+This also works with application-owned queues: formatting on another thread
+does not lose the request context. Existing filters on this library logger are
+retained, with context capture placed before them. Request fields remain on
+`LogRecord.event`; your formatter must serialize `event` and the correlation
+attributes to include them in output. Application log levels still decide
+whether a diagnostic is emitted.
+
+The application owns output sanitization, including free text, captured context
+and exceptions. Body-capture controls and captured-body masking still apply,
+but `SecurityPolicy` does not sanitize the application's output handlers.
+Keep the approved sanitizer on every output path, including log export. A filter
+on the root *logger* alone does not filter records propagated by child loggers;
+attach it to the handlers that write or export them.
+
+`OBS_LOG_*` pipeline controls (levels, sampling, held logs, files, queues and
+sinks), registered log filters/enrichers and `otel_logs_settings` do not configure
+the application pipeline. Runtime-control requests to change log levels return
+`409`. Request metrics, database/HTTP diagnostics, the event-loop watchdog and
+optional tracing and metric export remain available. The application drains and
+shuts down its own logging resources; the library does not flush or close them.
+
+Existing OpenTelemetry providers stay in place. This mode creates no additional
+OTel logging handler or exporting log processor, even when `OBS_OTEL_LOGS_ENABLED`
+is set. Tracing and metric options remain independent; see
+[OpenTelemetry ownership](opentelemetry.md#application-owned-logging-and-opentelemetry).
+
+For correlation on your application's own records, keep your existing context
+integration. You can also explicitly add `RequestIdFilter` and `TraceContextFilter`
+from `fastapiobserver.logging` to your application's producer-side handlers.
+The installer does not add them to application handlers.
+
+Run the [existing-logger example](https://github.com/Vitaee/FastapiObserver/blob/main/examples/existing_logging_app.py):
+
+```bash
+uv run uvicorn examples.existing_logging_app:app
+# In another terminal:
+curl http://localhost:8000/orders/42
+curl http://localhost:8000/failure
+```
+
+It uses a stdlib JSON formatter and an application redaction filter, with
+synthetic email addresses and tokens in messages, structured fields and errors.
+Its small sanitizer illustrates the integration; substitute your organisation's
+approved sanitizer and retain its existing test vectors. The real-server test
+checks concurrent correlation, failure redaction and one application event per
+request. The rest of this page describes the default library-owned pipeline.
 
 ## Why Use This Logging Model
 
@@ -12,7 +79,7 @@ fragile under load. This pipeline is built for production observability:
 |---|---|
 | Queryable logs | Stable JSON schema for dashboards, alerts, and SIEM queries |
 | Correlation by default | `request_id`, `trace_id`, and `span_id` attached when available |
-| Safe-by-default payloads | Security policy sanitization before sink output |
+| Field-based sanitization | Security policy masking before library sink output; [free-text limits](security.md#what-redaction-covers) apply |
 | Backpressure controls | Bounded queue with explicit overflow policy |
 | Sink isolation | Circuit breaker protects request path from failing log sinks |
 

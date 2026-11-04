@@ -56,6 +56,29 @@ Design details:
 - Supports optional OTLP metrics export for unified OTel backends.
 - Flushes its providers when the app's lifespan ends, after the log queue has drained, and leaves them running for other apps in the process; the SDK's own `atexit` hook shuts them down at process exit.
 
+### Application-owned logging and OpenTelemetry
+
+With `install_observability(app, configure_logging=False)`, the application's
+logging handlers, logger provider, log processors and exporters remain in place.
+The library does not call `install_otel_logs()` or attach another logging handler
+or exporting log processor, regardless of `otel_logs_settings` or the log-export
+environment variables. Keep your approved sanitizer on the application-owned
+OTel logging path as well as local outputs.
+
+Tracing and metrics keep their own enable flags. When enabled, they reuse
+existing providers without adding exporting span processors or metric readers.
+Tracing can add the request-call accounting processor, which does not export
+spans. An external tracer provider keeps its own sampler. Providers used for
+tracing or metrics are flushed at lifespan exit and remain usable afterward;
+the application owns its logging provider's lifecycle.
+
+FastAPI's native telemetry configuration is also left intact in this mode.
+On FastAPI 0.142+, its direct OTel error logs bypass stdlib handler filters. If
+your application routes errors through its own sanitized logging pipeline, use
+`FastAPI(telemetry={"logs": False})` as the existing-logger example does, or retain
+an approved sanitizer on that separate native export path. This is an application
+choice; the library does not silently change it.
+
 ### Request ID forwarding
 
 Outbound calls carry the current request ID, so a request keeps one ID across every service it passes through, and searching your logs for that ID finds all of them. This works without tracing turned on.

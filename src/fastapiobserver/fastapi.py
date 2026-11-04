@@ -47,6 +47,7 @@ _ROUTE_PARAM_PATTERN = re.compile(r"\{[^{}]+\}")
 @dataclass
 class ObservabilityRuntimeState:
     settings: ObservabilitySettings
+    configure_logging: bool = True
     excluded_urls: frozenset[str] = frozenset()
     lifespan_running: bool = False
 
@@ -55,6 +56,7 @@ def install_observability(
     app: FastAPI,
     settings: ObservabilitySettings | None = None,
     *,
+    configure_logging: bool = True,
     security_policy: SecurityPolicy | None = None,
     trusted_proxy_policy: TrustedProxyPolicy | None = None,
     metrics_enabled: bool | None = None,
@@ -66,11 +68,13 @@ def install_observability(
     db_commenter_enabled: bool = True,
     db_commenter_options: dict[str, bool] | None = None,
 ) -> None:
-    """One-call entry point that wires up all observability subsystems.
+    """Install request diagnostics, metrics and optional OpenTelemetry signals.
 
-    Follows the **Facade** pattern: hides the complexity of log setup,
-    metrics backend selection, OTel installation, and middleware ordering
-    behind a single function.
+    With ``configure_logging=False``, the application keeps its handlers,
+    filters, formatters, levels and log exporters, including Uvicorn's logging.
+    Request diagnostics propagate through that pipeline with correlation fields
+    attached. The application owns output redaction and logging shutdown;
+    ``otel_logs_settings`` and the library's logging controls are not applied.
     """
     if _get_runtime_state(app) is not None:
         # A second run would replace logging and metrics but keep the first
@@ -103,16 +107,22 @@ def install_observability(
         runtime_control_settings = runtime_control_settings or RuntimeControlSettings.from_env()
 
     # Settings for the lifespan to read.
-    app.state._observability_state = ObservabilityRuntimeState(settings=settings)
+    app.state._observability_state = ObservabilityRuntimeState(
+        settings=settings, configure_logging=configure_logging
+    )
 
     # --- 1 & 2. Structured logging + OTLP Logs ---
-    _setup_structured_logging(
-        app=app,
-        settings=settings,
-        otel_settings=otel_settings,
-        otel_logs_settings=otel_logs_settings,
-        security_policy=security_policy,
-    )
+    # Keep diagnostics' lifespan in both modes. Register before OTel's hooks,
+    # so a library-owned queue drains before its log provider is flushed.
+    _register_observability_lifespan(app)
+    if configure_logging:
+        _setup_structured_logging(
+            app=app,
+            settings=settings,
+            otel_settings=otel_settings,
+            otel_logs_settings=otel_logs_settings,
+            security_policy=security_policy,
+        )
 
     # --- 3. Metrics backend ---
     metrics_backend = _setup_metrics_backend(app, settings, metrics_enabled)
@@ -153,9 +163,10 @@ def install_observability(
     # --- 7. Uvicorn access log ---
     # The middleware's `request.completed` line carries the same fields, so drop
     # uvicorn's duplicate line the same way `uvicorn --no-access-log` does.
-    uvicorn_access_logger = logging.getLogger("uvicorn.access")
-    uvicorn_access_logger.handlers = []
-    uvicorn_access_logger.propagate = False
+    if configure_logging:
+        uvicorn_access_logger = logging.getLogger("uvicorn.access")
+        uvicorn_access_logger.handlers = []
+        uvicorn_access_logger.propagate = False
 
     # --- 8. Runtime control plane ---
     if runtime_control_settings and runtime_control_settings.enabled:
@@ -196,10 +207,11 @@ def install_observability(
         extra={
             "event": {
                 "profile": os.getenv("OBS_PROFILE", "").strip().lower() or None,
-                "log_level": settings.log_level,
-                "log_level_on_error": settings.log_level_on_error,
-                "log_sample_rate": settings.log_sample_rate,
-                "log_slow_request_ms": settings.log_slow_request_ms,
+                "configure_logging": configure_logging,
+                "log_level": settings.log_level if configure_logging else None,
+                "log_level_on_error": settings.log_level_on_error if configure_logging else None,
+                "log_sample_rate": settings.log_sample_rate if configure_logging else None,
+                "log_slow_request_ms": settings.log_slow_request_ms if configure_logging else None,
                 "loop_block_threshold_ms": settings.loop_block_threshold_ms,
                 "metrics_path": (
                     settings.metrics_path
@@ -216,7 +228,9 @@ def install_observability(
                 "otlp_protocol": otel_settings.protocol,
                 "trace_sampling_ratio": otel_settings.trace_sampling_ratio,
                 "otel_logs_mode": (
-                    otel_logs_settings.logs_mode if otel_logs_settings.enabled else None
+                    otel_logs_settings.logs_mode
+                    if configure_logging and otel_logs_settings.enabled
+                    else None
                 ),
                 "otel_metrics": otel_metrics_settings.enabled,
                 "redaction_mode": security_policy.redaction_mode,
@@ -254,9 +268,6 @@ def _setup_structured_logging(
     otel_logs_settings: OTelLogsSettings | None,
     security_policy: SecurityPolicy,
 ) -> None:
-    # Hook the lifespan before install_otel_logs does, so on shutdown the log
-    # queue drains into the OTLP handler before its provider is shut down.
-    _register_logging_shutdown_hook(app)
     otel_log_handler = None
     logs_mode: Literal["local_json", "otlp", "both"] = "local_json"
     if otel_logs_settings and otel_logs_settings.enabled:
@@ -442,7 +453,7 @@ def _build_exclude_path_variants(path: str) -> set[str]:
 
 @asynccontextmanager
 async def observability_lifespan(app: FastAPI) -> typing.AsyncGenerator[typing.Any, None]:
-    """A FastAPI lifespan context manager that writes out queued logs when the app stops.
+    """Manage diagnostics' lifespan and flush library-owned logging on exit.
 
     ``install_observability()`` already runs it around the app's own lifespan, and
     entered again inside that one, it does nothing. Enter it yourself only for an
@@ -477,7 +488,7 @@ async def observability_lifespan(app: FastAPI) -> typing.AsyncGenerator[typing.A
         _teardown_observability(app)
 
 
-def _register_logging_shutdown_hook(app: FastAPI) -> None:
+def _register_observability_lifespan(app: FastAPI) -> None:
     if app in _REGISTERED_APPS:
         return
 
@@ -504,6 +515,8 @@ def _teardown_observability(app: FastAPI) -> None:
     # Logging and SQLAlchemy instrumentation are shared by every app in the
     # process, and this app may start again, as a reused TestClient does. So
     # write out what's queued and leave them running; atexit stops logging.
-    flush_logging()
+    state = _get_runtime_state(app)
+    if state is None or state.configure_logging:
+        flush_logging()
 
 __all__ = ["install_observability", "observability_lifespan"]

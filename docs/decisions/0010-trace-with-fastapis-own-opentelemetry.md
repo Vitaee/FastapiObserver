@@ -2,6 +2,9 @@
 
 **Status:** accepted · **Reviewed:** 2026-10-31
 
+Logging ownership narrowed by [0015](0015-application-owned-logging.md): native
+logging configuration is left to the application with `configure_logging=False`.
+
 ## Context
 
 FastAPI 0.142.0 ([fastapi/fastapi#16403](https://github.com/fastapi/fastapi/pull/16403)) added native OpenTelemetry. Once a global provider is set, `FastAPI` itself creates request spans and HTTP metrics, and exports log records for validation failures and unhandled exceptions. It steps aside when OpenTelemetry's FastAPI instrumentation is in the middleware stack.

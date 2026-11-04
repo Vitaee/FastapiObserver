@@ -4,6 +4,11 @@ fastapi-observer should tell you why a FastAPI app is slow, hangs or drops reque
 
 Planned work, in order. Shipped changes are listed in [CHANGELOG.md](CHANGELOG.md). Suggestions are welcome as GitHub issues.
 
+## Application integration
+
+- [x] Install request diagnostics with `configure_logging=False`, retaining the application's handlers, filters, formatters, levels, sanitizer and log export. Cover application-owned queues and existing OpenTelemetry providers with regression tests and a runnable JSON logger example.
+- [x] State the limits of field-name redaction and exception URL-credential masking, and show how to retain an approved free-text sanitizer and its test vectors.
+
 ## Left from 2.0
 
 2.0.0 shipped the smaller core: one name per setting, a 27-name API, and no audit log or Logtail sink. Still open:
@@ -41,8 +46,31 @@ Done when anyone can reproduce any failure in five minutes.
 
 ## Later
 
-- `observe_job()` for Celery, arq and cron jobs: the same line format, with the request ID read from message headers.
+- `observe_job()` only after a worker user demonstrates a diagnostic need that context-rich JSON logging alone does not meet. See the validation gate below.
 - A `diagnose` command or MCP tool that explains recent warnings, if a `docs_url` on each warning isn't enough for an assistant to work from.
+
+### Validate worker diagnostics before implementing them
+
+Standalone logging works outside FastAPI; database and HTTP diagnostic totals
+currently belong to request state. A worker-heavy service needing tenant, run
+and node fields in its logs may only need to extend its existing JSON formatter.
+That need alone does not justify a new dependency or job instrumentation.
+
+Before building `observe_job()`, obtain a concrete example from a prospective
+worker user:
+
+- An incident or operational question their existing logs cannot answer, and
+  which job duration, failure or database/HTTP totals would answer.
+- A representative job boundary and its existing correlation/redaction contract,
+  with a working destination for the diagnostic output.
+- A comparison against the smaller change of adding structured context to their
+  current logger, and agreement to try the proposed diagnostic in that workload.
+
+No worker extension is implemented or promised until that evidence exists. If
+validated, the first scope is a small context manager reporting duration,
+failures, correlation fields and database/HTTP totals independently of requests
+and tracing. Existing worker code keeps ownership of retries, acknowledgements
+and scheduling; framework-specific integrations need separate evidence.
 
 ## Not planned
 

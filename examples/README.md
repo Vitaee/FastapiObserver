@@ -8,12 +8,14 @@ uv run uvicorn examples.basic_app:app --reload
 curl http://localhost:8000/items/42
 ```
 
-`install_observability()` manages logging and its lifespan. Settings come from
+`install_observability()` manages logging and its lifespan by default. Pass
+`configure_logging=False` to retain application-owned logging. Settings come from
 `OBS_*` and the standard `OTEL_*` variables; see [configuration](../docs/configuration.md).
 
 | Example | Try | Demonstrates |
 |---|---|---|
 | [basic_app.py](basic_app.py) | `GET /items/42`, `GET /crash` | One-call setup, request IDs, structured errors |
+| [existing_logging_app.py](existing_logging_app.py) | `GET /orders/42`, `GET /failure` | Existing JSON formatter and application redaction, with correlated diagnostics and no additional log handler |
 | [security_presets_app.py](security_presets_app.py) | `POST /payments` with JSON | PCI field redaction and opt-in JSON body capture |
 | [allowlist_app.py](allowlist_app.py) | `GET /users/42` | Keeping selected event fields while retaining the log envelope |
 | [otel_app.py](otel_app.py) | `GET /orders/42` | Correlated logs and traces; enable `OBS_OTEL_ENABLED=true` with a collector |

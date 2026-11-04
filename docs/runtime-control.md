@@ -30,7 +30,9 @@ curl -X POST http://localhost:8000/_observability/control \
 ```
 
 What changes immediately:
-- Root logger level (and uvicorn loggers)
+- Root logger level (and uvicorn loggers), when the library configures logging.
+  With `configure_logging=False`, a `log_level` change is refused with `409`;
+  the application's configuration owns it.
 - Trace sampling ratio, when fastapi-observer set up tracing. With tracing off,
   or with a tracer provider your app configured itself, its sampler decides:
   a `trace_sampling_ratio` change is refused with `409`, and `GET` returns
