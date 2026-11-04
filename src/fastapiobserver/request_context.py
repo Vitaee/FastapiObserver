@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import math
 import threading
 from hashlib import sha256
 from collections import deque
@@ -10,6 +11,7 @@ from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import Any
 
+from .core.recording import CallOwner
 __all__ = [
     "UNMATCHED_ROUTE",
     "RequestState",
@@ -44,9 +46,10 @@ _CALLS_LOCK = threading.Lock()
 # Requests that matched no route share this label, so scanners can't add one per URL.
 UNMATCHED_ROUTE = "<unmatched>"
 _MAX_REQUEST_STATEMENTS = 128
+_MAX_ERROR_CATEGORIES = 32
 
 
-@dataclass(eq=False, slots=True)
+@dataclass(eq=False, slots=True, weakref_slot=True)
 class RequestState:
     """What code running for a request adds to it, read when the request ends.
 
@@ -69,24 +72,45 @@ class RequestState:
     statements: dict[str, int] = field(default_factory=dict)
     operation_id: str | None = None
     closed: bool = False
+    _call_owner_token: CallOwner | None = field(default=None, repr=False)
+
+    def _call_owner(self) -> CallOwner | None:
+        with _CALLS_LOCK:
+            if self.closed:
+                return None
+            if self._call_owner_token is None:
+                self._call_owner_token = CallOwner(self)
+            return self._call_owner_token
 
     def add_call(
         self, kind: str, seconds: float, statement: str | None = None, *, error: str | None = None
     ) -> None:
+        self._record_call(kind, seconds, statement, error=error)
+
+    def _record_call(
+        self, kind: str, seconds: float, statement: str | None = None, *, error: str | None = None
+    ) -> bool:
         with _CALLS_LOCK:
             if self.closed:
-                return
+                return False
+            previous = self.calls.get(kind)
+            total_seconds = (previous[1] if previous is not None else 0.0) + seconds
+            if not math.isfinite(total_seconds * 1000):
+                return False
             totals = self.calls.setdefault(kind, [0, 0.0])
             totals[0] += 1
-            totals[1] += seconds
+            totals[1] = total_seconds
             if error is not None:
                 errors = self.call_errors.setdefault(kind, {})
+                if error not in errors and len(errors) >= _MAX_ERROR_CATEGORIES:
+                    error = "other"
                 errors[error] = errors.get(error, 0) + 1
             if statement:
                 # SQL is never retained in request state or emitted by N+1 warnings.
                 fingerprint = sha256(statement.encode("utf-8", errors="replace")).hexdigest()
                 if fingerprint in self.statements or len(self.statements) < _MAX_REQUEST_STATEMENTS:
                     self.statements[fingerprint] = self.statements.get(fingerprint, 0) + 1
+            return True
 
     def close(self) -> tuple[dict[str, list[float]], dict[str, dict[str, int]]]:
         """Freeze experimental totals and release state retained by copied contexts."""
@@ -98,6 +122,7 @@ class RequestState:
             self.http_span_ids.clear()
             self.held_logs = None
             self.user_context = None
+            self._call_owner_token = None
             return calls, errors
 
     def hold_log(self, record: logging.LogRecord, limit: int) -> None:

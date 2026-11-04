@@ -61,9 +61,13 @@ jobs:
           logger = logging.getLogger('separation-check')
           logger.setLevel(logging.INFO)
           logger.addHandler(handler)
-          with observe_operation('plain.python', logger=logger):
-              pass
-          assert json.loads(output.getvalue())['event']['outcome'] == 'success'
+          with observe_operation('plain.python', logger=logger) as operation:
+              assert operation.record_call('db', 0.001)
+              call = operation.start_call('http')
+              assert call.finish() and not call.finish()
+          event = json.loads(output.getvalue())['event']
+          assert event['outcome'] == 'success'
+          assert event['db']['count'] == event['http']['count'] == 1
           assert threads == set(threading.enumerate())
           PY
       - uses: actions/upload-artifact@v7
@@ -172,11 +176,13 @@ jobs:
         run: |
           mkdir -p /tmp/installed-check
           cp -R tests /tmp/installed-check/tests
+          cp -R spec /tmp/installed-check/spec
           mkdir -p /tmp/installed-check/scripts /tmp/installed-check/examples
           cp scripts/compatibility_probe.py /tmp/installed-check/scripts/
           cp examples/python_operation.py /tmp/installed-check/examples/
+          cp examples/callback_operation.py /tmp/installed-check/examples/
           cd /tmp/installed-check
-          python -m pytest -q tests/test_sqlalchemy_integration.py tests/test_otel_integration.py tests/test_metrics_contracts.py tests/test_application_logging.py tests/test_release_compatibility.py tests/test_experimental_operations.py tests/test_core_imports.py
+          python -m pytest -q tests/test_sqlalchemy_integration.py tests/test_otel_integration.py tests/test_metrics_contracts.py tests/test_application_logging.py tests/test_release_compatibility.py tests/test_experimental_operations.py tests/test_core_imports.py tests/test_call_recording.py tests/test_call_ownership.py tests/test_operation_contract.py
       - name: Standard runtime stress gate
         run: python scripts/runtime_stress.py --profile standard --json > runtime-stress.log
       - name: Paired CPU overhead gate

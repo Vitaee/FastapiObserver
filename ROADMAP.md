@@ -4,12 +4,20 @@
 
 ## Current delivery slice
 
-The first delivery is an opt-in Python operation experiment in the existing
-distribution, prepared as `2.3.0a1`. Its scope is the
+The first delivery shipped as `2.3.0a1`: an opt-in Python operation experiment
+in the existing distribution. Its scope is the
 [2.2.1 compatibility baseline](https://github.com/Vitaee/FastapiObserver/blob/main/docs/baseline.md),
 the bundled application-owned logging regression, a plain-Python SQLite/HTTP
 proof and the experimental operation boundary. See the
 [implementation plan](https://github.com/Vitaee/FastapiObserver/blob/main/docs/plans/2026-11-04-experimental-core.md).
+
+The next slice, prepared as `2.3.0a2`, shares completed-call recording across
+native integrations and experimental custom callbacks. It captures ownership
+at start, rejects late completion, bounds sampled-span tracking and records a
+narrow [draft operation contract](https://github.com/Vitaee/FastapiObserver/blob/main/spec/README.md).
+See its [implementation plan](https://github.com/Vitaee/FastapiObserver/blob/main/docs/plans/2026-11-04-call-recording.md).
+This advances the M1/M2 interfaces; it does not complete either milestone or
+claim new datastore integrations or portable-contract 1.0.
 
 Prior real FastAPI adoption is reported by the maintainer. The maintainer chose
 the bundled application for this change's reproducible validation; independent

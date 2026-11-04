@@ -1,0 +1,116 @@
+{
+  "valid": [
+    {
+      "schema_version": "0.1.0",
+      "name": "catalog.import",
+      "operation_id": "11111111111111111111111111111111",
+      "outcome": "success",
+      "duration_ms": 1.25
+    },
+    {
+      "schema_version": "0.1.0",
+      "name": "catalog.import",
+      "operation_id": "11111111111111111111111111111111",
+      "outcome": "failure",
+      "duration_ms": 2,
+      "db": {
+        "count": 2,
+        "ms": 3
+      }
+    },
+    {
+      "schema_version": "0.1.0",
+      "name": "fetch.page",
+      "operation_id": "22222222222222222222222222222222",
+      "parent_operation_id": "11111111111111111111111111111111",
+      "outcome": "cancelled",
+      "duration_ms": 4,
+      "http": {
+        "count": 1,
+        "ms": 2,
+        "errors": {
+          "cancelled": 1
+        }
+      },
+      "future_field": {
+        "enabled": true
+      }
+    }
+  ],
+  "invalid": [
+    {
+      "schema_version": "0.1.0",
+      "name": "catalog.import",
+      "operation_id": "bad",
+      "outcome": "success",
+      "duration_ms": 1
+    },
+    {
+      "schema_version": "0.1.0",
+      "name": "",
+      "operation_id": "11111111111111111111111111111111",
+      "outcome": "success",
+      "duration_ms": 1
+    },
+    {
+      "schema_version": "0.1.0",
+      "name": "catalog.import",
+      "operation_id": "11111111111111111111111111111111",
+      "outcome": "timeout",
+      "duration_ms": 1
+    },
+    {
+      "schema_version": "0.1.0",
+      "name": "catalog.import",
+      "operation_id": "11111111111111111111111111111111",
+      "outcome": "success",
+      "duration_ms": -1
+    },
+    {
+      "schema_version": "0.1.0",
+      "name": "catalog.import",
+      "operation_id": "11111111111111111111111111111111",
+      "outcome": "success",
+      "duration_ms": 1,
+      "db": {
+        "count": 1.5,
+        "ms": 1
+      }
+    },
+    {
+      "schema_version": "0.1.0",
+      "name": "catalog.import",
+      "operation_id": "11111111111111111111111111111111",
+      "outcome": "success",
+      "duration_ms": 1,
+      "http": {
+        "count": 1,
+        "ms": 1,
+        "errors": {
+          "Free text": 1
+        }
+      }
+    },
+    {
+      "schema_version": "0.1.0",
+      "name": "catalog.import",
+      "operation_id": "11111111111111111111111111111111\n",
+      "outcome": "success",
+      "duration_ms": 1.25
+    },
+    {
+      "schema_version": "0.1.0",
+      "name": "catalog.import",
+      "operation_id": "11111111111111111111111111111111",
+      "outcome": "success",
+      "duration_ms": 1.25,
+      "http": {
+        "count": 1,
+        "ms": 1,
+        "errors": {
+          "timeout\n": 1
+        }
+      }
+    }
+  ]
+}

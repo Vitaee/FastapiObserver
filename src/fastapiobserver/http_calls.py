@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import inspect
 import sys
-import time
 from collections.abc import AsyncIterator, Callable, Iterator
 from contextvars import ContextVar
 from dataclasses import dataclass
@@ -12,6 +11,7 @@ from functools import cache, wraps
 from types import ModuleType
 from typing import Any
 
+from .core.recording import CallHandle
 from .request_context import RequestState, get_request_state
 
 _ACTIVE_CLIENT: ContextVar[object | None] = ContextVar("observed_http_client", default=None)
@@ -46,29 +46,30 @@ def _error_category(error: BaseException, library: ModuleType) -> str:
 
 @dataclass(slots=True)
 class _Call:
-    state: RequestState
+    recorder: CallHandle
     library: ModuleType
-    started: float
     status: int = 0
-    finished: bool = False
 
     def finish(self, error: BaseException | None = None) -> None:
-        if self.finished:
-            return
-        self.finished = True
         category = (
             _error_category(error, self.library)
             if error is not None
             else ("http_5xx" if self.status >= 500 else "http_4xx" if self.status >= 400 else None)
         )
-        self.state.add_call("http", max(0.0, time.perf_counter() - self.started), error=category)
+        self.recorder.finish(error=category)
 
 
 def is_counted_http_span(state: RequestState, span_id: int | None) -> bool:
     """Avoid counting both a client call and its OpenTelemetry span, in either wrap order."""
-    counted = _ACTIVE_CLIENT.get() is not None or span_id in state.http_span_ids
+    counted = span_id in state.http_span_ids
     state.http_span_ids.discard(span_id)
     return counted
+
+
+def mark_native_http_span(state: RequestState, span_id: int) -> None:
+    """Capture native ownership at span start, before its context can change."""
+    if _ACTIVE_CLIENT.get() is not None:
+        state.mark_http_span(span_id)
 
 
 def _mark_current_span(state: RequestState) -> None:
@@ -186,7 +187,7 @@ def _wrap_send(
         if state is None or _ACTIVE_CLIENT.get() is owner:
             return owner, None
         _mark_current_span(state)
-        return owner, _Call(state, library, time.perf_counter())
+        return owner, _Call(CallHandle(state, "http"), library)
 
     @wraps(original)
     def send(*args: Any, **kwargs: Any) -> Any:

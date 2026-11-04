@@ -84,6 +84,7 @@ all = [
     "sqlalchemy>=2.0,<2.1",
 ]
 dev = [
+    "jsonschema>=4.26.0",
     "httpx>=0.28.1",
     "httpx2>=2.16.0",
     "loguru>=0.7.3",

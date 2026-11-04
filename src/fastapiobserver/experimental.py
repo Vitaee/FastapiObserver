@@ -13,6 +13,7 @@ import time
 from types import TracebackType
 from uuid import uuid4
 
+from .core.recording import CallHandle, CallKind, record_completed_call, validate_call
 from .logging.filters import RequestIdFilter, TraceContextFilter
 from .logging.held import keep_request_logs
 from .logging import state as logging_state
@@ -66,6 +67,23 @@ class Operation:
 
     async def __aenter__(self) -> Operation:
         return self.__enter__()
+
+    def record_call(self, kind: CallKind, seconds: float, *, error: str | None = None) -> bool:
+        """Record one completed custom-client call against this operation.
+
+        Validate manual metadata before mutation. Returns false after closure;
+        it never selects a different operation from the caller's current context.
+        """
+        if self._state is None:
+            raise RuntimeError("Enter the operation before recording calls")
+        validate_call(kind, seconds, error)
+        return record_completed_call(self._state, kind, seconds, error=error)
+
+    def start_call(self, kind: CallKind) -> CallHandle:
+        """Capture a monotonic start and owner for a callback which finishes later."""
+        if self._state is None or self._state.closed:
+            raise RuntimeError("A new call needs an active operation")
+        return CallHandle(self._state, kind)
 
     async def __aexit__(
         self, exc_type: type[BaseException] | None, exc: BaseException | None,

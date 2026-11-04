@@ -55,7 +55,7 @@ framework middleware, handlers, providers, instrumentors, threads or signals.
 Run the [Python-only example](https://github.com/Vitaee/FastapiObserver/blob/main/examples/python_operation.py):
 
 ```bash
-python -m pip install --pre 'fastapi-observer==2.3.0a1' sqlalchemy httpx
+python -m pip install --pre 'fastapi-observer==2.3.0a2' sqlalchemy httpx
 python examples/python_operation.py
 ```
 
@@ -89,6 +89,45 @@ not inherit operation context automatically. Work outliving an operation should
 open a new operation. Late client completion cannot change closed totals, and
 closed copied contexts no longer expose the operation's request ID/user context.
 
+## Custom clients and callbacks
+
+For an integration without a maintained adapter, record completed work against
+the operation object explicitly:
+
+```python
+with observe_operation("catalog.import") as operation:
+    operation.record_call("db", 0.005)  # seconds; each invocation is one call
+    operation.record_call("http", 0.020, error="read_timeout")
+```
+
+For delayed work, capture a monotonic start handle and pass its completion to
+the client's callback. It does not rely on the callback's current ContextVar:
+
+```python
+with observe_operation("catalog.import") as operation:
+    call = operation.start_call("db")
+    # Start custom-client work; finish and join its callback before leaving.
+    call.finish()
+```
+
+`finish()` returns true only for its first admitted completion. Late/closed,
+collected or inherited parent-process owners return false. Manual durations
+must be finite, nonnegative seconds. Error categories are 1–64 lowercase ASCII
+letters/digits/underscores, starting with a letter. At most 32 categories plus
+`other` are retained per group; totals remain complete when categories overflow.
+Numeric overflow is rejected without modifying existing totals.
+
+The [callback example](https://github.com/Vitaee/FastapiObserver/blob/main/examples/callback_operation.py)
+executes real standard-library SQLite work on an executor, records completion
+through the handle and joins callbacks before closing. Its logical duration
+includes executor queueing. Run `python examples/callback_operation.py`; no
+optional client, driver, framework or exporter is needed for that example.
+
+Choose one observing layer for each call. Manual recording cannot automatically
+deduplicate arbitrary third-party spans; do not count a call already owned by
+an enabled native adapter or sampled fallback. See the
+[draft contract](operation-contract.md) for the capability limits.
+
 ## Limits of this experiment
 
 - The normal distribution still installs FastAPI and Starlette. Framework-free
@@ -99,6 +138,9 @@ closed copied contexts no longer expose the operation's request ID/user context.
   include successful cursor executions only. No new datastore support is added.
 - The boundary borrows active trace context and creates no spans/providers.
   Existing tracing bridges retain native/span deduplication.
+- Sampled-span ownership is captured at start, with at most 4,096 tracked client
+  spans per provider. Missing/expired/overflowed ownership remains unknown and
+  is never reassigned to the completion context. Closing releases tracking slots.
 - Library-owned log sampling and failure retention reuse the current pipeline.
   Automatic slow-operation promotion and N+1 warnings are not implemented for
   manual operations. FastAPI retains its existing behavior.
@@ -109,6 +151,8 @@ closed copied contexts no longer expose the operation's request ID/user context.
   operation's result or original exception, but failed output can lose records.
   The operation does not promise remote delivery or exactly-once emission.
 
-See the [2.2.1 baseline](baseline.md) and
-[extraction decision](decisions/0016-experimental-python-operations.md), with
-[validation evidence](validation/2026-11-04-experimental-core.md).
+See the [2.2.1 baseline](baseline.md),
+[extraction decision](decisions/0016-experimental-python-operations.md) and
+[call ownership decision](decisions/0017-record-calls-against-their-start-owner.md),
+with [initial operation evidence](validation/2026-11-04-experimental-core.md) and
+[call recording evidence](validation/2026-11-04-call-recording.md).

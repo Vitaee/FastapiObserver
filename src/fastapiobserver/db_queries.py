@@ -8,14 +8,14 @@ their OpenTelemetry spans when tracing is on.
 
 from __future__ import annotations
 
-import time
 from typing import Any
 
+from .core.recording import CallHandle
 from .request_context import get_request_state
 
 # SQLAlchemy's instrumentation for OpenTelemetry; its spans would count twice.
 SQLALCHEMY_INSTRUMENTATION = "opentelemetry.instrumentation.sqlalchemy"
-_STARTED = "_fastapiobserver_started"
+_STARTED = "_fastapiobserver_call"
 
 
 def count_queries(engine: Any) -> None:
@@ -32,17 +32,16 @@ def _before(
     conn: Any, cursor: Any, statement: str, parameters: Any, context: Any, executemany: bool
 ) -> None:
     if context is not None:
-        setattr(context, _STARTED, time.perf_counter())
+        state = get_request_state()
+        setattr(context, _STARTED, CallHandle(state, "db") if state is not None else None)
 
 
 def _after(
     conn: Any, cursor: Any, statement: str, parameters: Any, context: Any, executemany: bool
 ) -> None:
-    state = get_request_state()
-    if state is None:
-        return
-    started = getattr(context, _STARTED, None)
-    state.add_call("db", time.perf_counter() - started if started is not None else 0.0, statement)
+    call = getattr(context, _STARTED, None)
+    if call is not None:
+        call.finish(statement=statement)
 
 
 __all__ = ["SQLALCHEMY_INSTRUMENTATION", "count_queries"]

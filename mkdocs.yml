@@ -60,6 +60,7 @@ nav:
       - Architecture: architecture.md
       - Compatibility Baseline: baseline.md
       - Experimental Python Operations: experimental-core.md
+      - Draft Operation Contract: operation-contract.md
       - Roadmap: roadmap.md
       - Production Deployment: deployment.md
       - Kubernetes: kubernetes.md
@@ -83,4 +84,6 @@ nav:
       - 0013 Every setting has one name: decisions/0013-every-setting-has-one-name.md
       - 0014 Diagnosis without tracing: decisions/0014-diagnosis-without-tracing.md
       - 0015 Application-owned logging: decisions/0015-application-owned-logging.md
+      - 0016 Experimental Python operations: decisions/0016-experimental-python-operations.md
+      - 0017 Call start ownership: decisions/0017-record-calls-against-their-start-owner.md
   - Contributing: contributing.md
