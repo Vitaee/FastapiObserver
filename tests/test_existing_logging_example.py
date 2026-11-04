@@ -83,7 +83,8 @@ def test_existing_logger_redacts_failures_and_isolates_concurrent_requests(loggi
     deadline = time.monotonic() + 5
     while time.monotonic() < deadline:
         text = log_path.read_text()
-        payloads = [json.loads(line) for line in text.splitlines() if line.strip()]
+        # Parse only newline-terminated records; the final fragment may be in flight.
+        payloads = [json.loads(line) for line in text.split("\n")[:-1] if line.strip()]
         diagnostics = [p for p in payloads if p["message"].startswith("request.")]
         if len([p for p in diagnostics if p["event"]["path"].startswith("/orders/")]) == 12:
             failures = [p for p in diagnostics if p["message"] == "request.failed"]
