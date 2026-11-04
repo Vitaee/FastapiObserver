@@ -151,3 +151,70 @@ def test_response_duration_includes_stream_and_trailers(monkeypatch, caplog) -> 
     assert observations[0]["duration_seconds"] == 3.0
     assert records[0].event["duration_ms"] == 3000
     assert records[0].event["app_duration_ms"] == 8000
+
+
+def test_observed_disconnect_is_distinct_from_cancellation(caplog):
+    async def app(scope, receive, send):
+        message = await receive()
+        assert message["type"] == "http.disconnect"
+        await asyncio.sleep(0.02)  # The app keeps working after observing it.
+
+    async def receive():
+        return {"type": "http.disconnect"}
+
+    async def send(message):
+        pass
+
+    middleware = RequestLoggingMiddleware(app, ObservabilitySettings())
+    scope = {"type": "http", "method": "GET", "path": "/left", "headers": []}
+    with caplog.at_level(logging.INFO):
+        asyncio.run(middleware(scope, receive, send))
+    [record] = [r for r in caplog.records if r.name == "fastapiobserver.middleware"]
+    assert record.message == "request.client_disconnected"
+    assert record.event["after_disconnect_ms"] >= 15
+    assert record.event["cancelled"] is False
+    assert record.event["status_code"] == 499
+
+
+def test_disconnect_received_after_response_is_not_an_abandoned_request(caplog):
+    async def app(scope, receive, send):
+        await send({"type": "http.response.start", "status": 200, "headers": []})
+        await send({"type": "http.response.body", "body": b"done"})
+        await receive()  # ASGI can return disconnect because the response has ended.
+
+    async def receive():
+        return {"type": "http.disconnect"}
+
+    async def send(message):
+        pass
+
+    scope = {"type": "http", "method": "GET", "path": "/done", "headers": []}
+    with caplog.at_level(logging.INFO):
+        asyncio.run(RequestLoggingMiddleware(app, ObservabilitySettings())(scope, receive, send))
+    [record] = [r for r in caplog.records if r.name == "fastapiobserver.middleware"]
+    assert record.message == "request.completed"
+    assert record.event["client_disconnected"] is False
+
+
+def test_disconnect_while_start_send_waits_preserves_successfully_sent_status(caplog):
+    wrapped_receive = None
+
+    async def app(scope, receive, send):
+        nonlocal wrapped_receive
+        wrapped_receive = receive
+        await send({"type": "http.response.start", "status": 200, "headers": []})
+        await send({"type": "http.response.body", "body": b"done"})
+
+    async def receive():
+        return {"type": "http.disconnect"}
+
+    async def send(message):
+        if message["type"] == "http.response.start":
+            await wrapped_receive()
+
+    scope = {"type": "http", "method": "GET", "path": "/race", "headers": []}
+    with caplog.at_level(logging.INFO):
+        asyncio.run(RequestLoggingMiddleware(app, ObservabilitySettings())(scope, receive, send))
+    [record] = [r for r in caplog.records if r.name == "fastapiobserver.middleware"]
+    assert record.event["status_code"] == 200
+    assert record.event["client_disconnected"] is True

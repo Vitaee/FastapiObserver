@@ -63,13 +63,16 @@ def test_multiprocess_workers_are_summed_at_metrics(
     from fastapiobserver.metrics.prometheus import mount_metrics_endpoint
 
     worker = """
+        import os
+        from prometheus_client.multiprocess import mark_process_dead
         from fastapiobserver.metrics import build_metrics_backend
 
         backend = build_metrics_backend(True, service="svc", environment="test")
         for _ in range(5):
             backend.observe(method="GET", path="/orders", status_code=200, duration_seconds=0.01)
+        mark_process_dead(os.getpid())
         """
-    for _ in range(3):
+    for _ in range(12):
         _run(worker, env={"PROMETHEUS_MULTIPROC_DIR": str(tmp_path)})
 
     monkeypatch.setenv("PROMETHEUS_MULTIPROC_DIR", str(tmp_path))
@@ -82,4 +85,37 @@ def test_multiprocess_workers_are_summed_at_metrics(
         for line in body.splitlines()
         if line.startswith("http_requests_total{") and 'path="/orders"' in line
     ]
-    assert float(line.rsplit(" ", 1)[1]) == 15.0
+    assert float(line.rsplit(" ", 1)[1]) == 60.0
+    [histogram] = [line for line in body.splitlines()
+                   if line.startswith("http_request_duration_seconds_count{")
+                   and 'path="/orders"' in line]
+    assert float(histogram.rsplit(" ", 1)[1]) == 60.0
+
+
+@pytest.mark.skipif(not hasattr(os, "fork"), reason="needs os.fork()")
+def test_child_statistics_never_touch_the_inherited_queue_mutex() -> None:
+    stdout = _run(
+        """
+        import logging, os, signal
+        from fastapiobserver import ObservabilitySettings, setup_logging
+        from fastapiobserver.logging import get_log_queue_stats, flush_logging
+        from fastapiobserver.logging import state
+
+        setup_logging(ObservabilitySettings())
+        old_queue = state._QUEUE_LISTENER.queue
+        old_queue.mutex.acquire()
+        pid = os.fork()
+        if pid == 0:
+            signal.signal(signal.SIGALRM, lambda *_: os._exit(42))
+            signal.alarm(2)
+            assert get_log_queue_stats()["queue_size"] == 0
+            assert get_log_queue_stats()["enqueued_total"] == 0
+            logging.getLogger("child").warning("child statistics work")
+            flush_logging()
+            os._exit(0)
+        old_queue.mutex.release()
+        _, status = os.waitpid(pid, 0)
+        assert os.waitstatus_to_exitcode(status) == 0
+        """
+    )
+    assert "child statistics work" in stdout

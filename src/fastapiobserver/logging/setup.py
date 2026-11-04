@@ -4,8 +4,8 @@ import atexit
 import logging
 import logging.handlers
 import queue
+import sys
 import threading
-import time
 from typing import Literal, cast
 
 from ..config import ObservabilitySettings
@@ -46,31 +46,20 @@ def shutdown_logging() -> None:
             )
 
 
-def flush_logging(timeout_seconds: float = 5.0) -> None:
+def flush_logging(timeout_seconds: float = 5.0) -> bool:
     """Wait until queued records are written, then flush the outputs.
 
     Logging keeps running, for other apps in the process and for this one if it
     starts again. ``atexit`` stops it when the process exits.
+    Returns false on a deadline or output flush failure. Sink I/O stays on the
+    listener thread, so a blocked flush does not extend the caller's deadline.
     """
     import fastapiobserver.logging.state as state
 
     listener = state._QUEUE_LISTENER
     if listener is None:
-        return
-    log_queue = cast(queue.Queue[logging.LogRecord], listener.queue)
-    deadline = time.monotonic() + timeout_seconds
-    # The listener marks each record done once its handlers have run.
-    while log_queue.unfinished_tasks and time.monotonic() < deadline:
-        time.sleep(0.005)
-    for handler in list(state._MANAGED_OUTPUT_HANDLERS):
-        try:
-            handler.flush()
-        except Exception:
-            _LOGGER.debug(
-                "logging.output_handler.flush_failed",
-                exc_info=True,
-                extra={"_skip_enrichers": True},
-            )
+        return True
+    return cast(DrainingQueueListener, listener).flush(timeout_seconds)
 
 
 def _teardown_handlers_locked(suppress_errors: bool = True) -> None:
@@ -303,6 +292,18 @@ def _ensure_fork_reinitialization_locked() -> None:
 def _restart_queue_listener_in_child() -> None:
     import fastapiobserver.logging.state as state
 
+    # No thread in the child can release a vanished parent's module locks.
+    state._LOGGING_LOCK = threading.Lock()
+    for module_name, attribute, factory in (
+        ("fastapiobserver.logging.volume", "_LOCK", threading.Lock),
+        ("fastapiobserver.request_context", "_CALLS_LOCK", threading.Lock),
+        ("fastapiobserver.otel.settings", "_RUNTIME_LOCK", threading.RLock),
+        ("fastapiobserver.plugins", "_LOCK", threading.RLock),
+        ("fastapiobserver.sinks.registry", "_SINK_REGISTRY_LOCK", threading.RLock),
+    ):
+        module = sys.modules.get(module_name)
+        if module is not None:
+            setattr(module, attribute, factory())
     listener = state._QUEUE_LISTENER
     if listener is not None:
         # Another thread of the parent may have held any lock at the moment of
@@ -314,6 +315,11 @@ def _restart_queue_listener_in_child() -> None:
             breaker._lock = threading.Lock()
         old_queue = cast(queue.Queue[logging.LogRecord], listener.queue)
         new_queue: queue.Queue[logging.LogRecord] = queue.Queue(maxsize=old_queue.maxsize)
+        _LOG_QUEUE_TELEMETRY.reset(
+            log_queue=new_queue,
+            queue_capacity=new_queue.maxsize,
+            overflow_policy=_LOG_QUEUE_TELEMETRY._overflow_policy,
+        )
 
         # Re-attach the new queue to the OverflowPolicyQueueHandler if present
         for handler in state._MANAGED_HANDLERS:

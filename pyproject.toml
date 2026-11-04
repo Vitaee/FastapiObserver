@@ -67,6 +67,7 @@ otel-requests = [
 ]
 otel-sqlalchemy = [
     "opentelemetry-instrumentation-sqlalchemy>=0.66b1",
+    "sqlalchemy>=2.0,<2.1",
 ]
 all = [
     "orjson>=3.11.7",
@@ -80,6 +81,7 @@ all = [
     "opentelemetry-instrumentation-httpx>=0.66b1",
     "opentelemetry-instrumentation-requests>=0.66b1",
     "opentelemetry-instrumentation-sqlalchemy>=0.66b1",
+    "sqlalchemy>=2.0,<2.1",
 ]
 dev = [
     "httpx>=0.28.1",

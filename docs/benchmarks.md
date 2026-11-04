@@ -32,6 +32,21 @@ python examples/benchmarks/request_cpu.py default > /dev/null
 
 Its other modes are listed in the script.
 
+### CI regression gate
+
+```bash
+python scripts/compare_overhead.py --baseline origin/main --output overhead.json
+```
+
+This uses the current harness for both source versions with the same interpreter
+and dependencies, alternates run order, and compares nine baseline/candidate
+pairs. It covers the default queue and an application-owned JSON handler. The
+budget is 10% of baseline CPU overhead plus three robust standard errors of the
+paired differences. Either side with robust relative spread above 10% fails as
+an unreliable measurement. The JSON artifact includes raw samples, the resolved
+baseline commit, Python/platform and dependency versions. This CPU check runs
+alongside real-server failure budgets; it does not measure network tail latency.
+
 ### Request timing and HTTP diagnostics
 
 On the same interpreter, the default overhead before these changes (`059399a`)

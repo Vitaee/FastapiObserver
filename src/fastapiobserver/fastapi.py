@@ -5,7 +5,6 @@ import os
 import re
 import weakref
 import typing
-from urllib.parse import urlsplit, urlunsplit
 from collections.abc import Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
@@ -38,6 +37,7 @@ from .otel.native import keep_native_logs_out
 from .pools import watch_db_pool, watch_thread_pool
 from .propagation import install_request_id_propagation
 from .security import SecurityPolicy, TrustedProxyPolicy
+from .utils import endpoint_for_log as _endpoint_for_log
 
 _LOGGER = logging.getLogger("fastapiobserver.fastapi")
 _REGISTERED_APPS: weakref.WeakSet[FastAPI] = weakref.WeakSet()
@@ -251,14 +251,6 @@ def install_observability(
             "_skip_enrichers": True,
         },
     )
-
-
-def _endpoint_for_log(endpoint: str | None) -> str | None:
-    """*endpoint* without credentials, query or fragment, which can carry tokens."""
-    if not endpoint:
-        return None
-    parts = urlsplit(endpoint)
-    return urlunsplit((parts.scheme, parts.netloc.rpartition("@")[2], parts.path, "", ""))
 
 
 def _setup_structured_logging(

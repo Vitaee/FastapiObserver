@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import threading
+from hashlib import sha256
 from collections import deque
 from collections.abc import Mapping
 from contextvars import ContextVar
@@ -41,6 +42,7 @@ _CALLS_LOCK = threading.Lock()
 
 # Requests that matched no route share this label, so scanners can't add one per URL.
 UNMATCHED_ROUTE = "<unmatched>"
+_MAX_REQUEST_STATEMENTS = 128
 
 
 @dataclass(eq=False, slots=True)
@@ -76,7 +78,10 @@ class RequestState:
                 errors = self.call_errors.setdefault(kind, {})
                 errors[error] = errors.get(error, 0) + 1
             if statement:
-                self.statements[statement] = self.statements.get(statement, 0) + 1
+                # SQL is never retained in request state or emitted by N+1 warnings.
+                fingerprint = sha256(statement.encode("utf-8", errors="replace")).hexdigest()
+                if fingerprint in self.statements or len(self.statements) < _MAX_REQUEST_STATEMENTS:
+                    self.statements[fingerprint] = self.statements.get(fingerprint, 0) + 1
 
 
 def route_template(scope: Mapping[str, Any]) -> str | None:

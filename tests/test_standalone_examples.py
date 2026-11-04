@@ -9,6 +9,7 @@ import sys
 from pathlib import Path
 
 import pytest
+import fastapiobserver
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -56,7 +57,7 @@ shutdown_logging()
         cwd=ROOT,
         env={
             **os.environ,
-            "PYTHONPATH": str(ROOT / "src"),
+            "PYTHONPATH": str(Path(fastapiobserver.__file__).resolve().parents[1]),
             "OBS_OTEL_ENABLED": "false",
             "OBS_OTEL_LOGS_ENABLED": "false",
             "OBS_OTEL_METRICS_ENABLED": "false",

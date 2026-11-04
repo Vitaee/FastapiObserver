@@ -12,6 +12,7 @@ from ..config import ObservabilitySettings
 from ..db_queries import SQLALCHEMY_INSTRUMENTATION
 from ..http_calls import is_counted_http_span
 from ..request_context import get_request_state
+from ..utils import endpoint_for_log
 from .lifecycle import flush_on_app_shutdown
 from .exclusions import build_excluded_urls_csv
 from .native import trace_natively
@@ -93,7 +94,7 @@ def install_otel(
             extra={
                 "event": {
                     "provider_class": tracer_provider.__class__.__name__,
-                    "otlp_endpoint": otel_settings.otlp_endpoint,
+                    "otlp_endpoint": endpoint_for_log(otel_settings.otlp_endpoint),
                 },
                 "_skip_enrichers": True,
             },

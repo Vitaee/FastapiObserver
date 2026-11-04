@@ -16,6 +16,7 @@ from urllib.parse import parse_qs, urlsplit
 
 import httpx2
 import pytest
+import fastapiobserver
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -68,7 +69,7 @@ def demo_server(tmp_path_factory: pytest.TempPathFactory):
     log_path = tmp_path_factory.mktemp("full-stack") / "server.log"
     env = {
         **os.environ,
-        "PYTHONPATH": str(ROOT / "src"),
+        "PYTHONPATH": str(Path(fastapiobserver.__file__).resolve().parents[1]),
         "PYTHONUNBUFFERED": "1",
         "OBS_SERVICE_NAME": "example-test",
         "OBS_METRICS_ENABLED": "true",

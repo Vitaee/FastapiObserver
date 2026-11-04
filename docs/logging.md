@@ -310,11 +310,29 @@ The logging pipeline uses a bounded in-memory queue and configurable overflow po
 - `drop_newest`: preserve older queued records.
 - `block`: wait for queue space up to timeout, then drop newest.
 
-A circuit breaker around each sink stops a failing sink from slowing the others.
+A circuit breaker skips a sink after repeated errors. All destinations share one
+listener, so a slow or indefinitely blocked sink can still delay the others and
+cause counted queue drops. Set transport timeouts on network sinks.
 
 The settings are in the [configuration guide](configuration.md#identity-and-logging). The queue and breaker metrics are listed under [bounded queue](advanced.md#bounded-queue-and-overflow-policy) and [sink circuit breaker](advanced.md#sink-circuit-breaker). Why the queue drops instead of blocking is in [decision 0002](decisions/0002-logs-leave-through-a-queue.md).
 
-`shutdown_logging()` and forced logging reconfiguration stop accepting new records, drain the existing queue and stop its listener before closing sinks. They wait for pending sink writes to finish, including when the queue is full. If stopping the listener fails, its state and sinks are retained so shutdown can be retried.
+`shutdown_logging()` and forced logging reconfiguration stop accepting new records
+and wait up to five seconds for the listener to drain and stop. A timeout retains
+the listener and its outputs for a later retry; reconfiguration fails instead of
+starting overlapping writers. A handler still in use is never closed.
+
+`flush_logging(timeout_seconds=5.0)` returns `True` after preceding records and
+output flush hooks complete, or `False` on timeout/flush failure. Flush hooks run
+on the listener thread. Application-owned logging keeps its own shutdown policy.
+Python cannot terminate an arbitrary blocked handler thread: custom close hooks
+must be bounded, and the process supervisor remains responsible for a final
+termination deadline. Records in process memory are not durable.
+
+`db.n_plus_one` includes `statement_fingerprint`, a SHA-256 digest of the complete
+statement, instead of SQL text. Use parameterized statements for stable grouping.
+Only the first 128 distinct fingerprints per request are tracked, and the oldest
+warning keys are evicted after 1,024 entries per middleware instance. Query totals
+are always counted, including queries omitted from the N+1 diagnostic budget.
 
 ## Security and Data Hygiene
 

@@ -5,10 +5,12 @@ import logging
 import logging.handlers
 import queue
 import threading
+import time
 from dataclasses import dataclass
 from typing import cast
 
 from ..config import LogQueueOverflowPolicy
+from .circuit_breaker import _report_logging_failure
 
 
 @dataclass(frozen=True)
@@ -120,21 +122,63 @@ class LogQueueTelemetry:
 _LOG_QUEUE_TELEMETRY = LogQueueTelemetry()
 
 
+class _FlushRecord(logging.LogRecord):
+    def __init__(self) -> None:
+        super().__init__(__name__, logging.NOTSET, "", 0, "", (), None)
+        self.done = threading.Event()
+        self.succeeded = True
+
+
 class DrainingQueueListener(logging.handlers.QueueListener):
-    """Wait for space for the stop sentinel after producers have been closed."""
+    """Serialize sink I/O, including flushes, with deadlines on callers' waits."""
 
     _sentinel = None
     _thread: threading.Thread | None
+    _sentinel_enqueued = False
 
-    def enqueue_sentinel(self) -> None:
-        log_queue = cast(queue.Queue[logging.LogRecord | None], self.queue)
-        # A failed, unwrapped sink can kill the consumer while its queue is full.
-        while self._thread is not None and self._thread.is_alive():
+    def handle(self, record: logging.LogRecord) -> None:
+        if isinstance(record, _FlushRecord):
             try:
-                log_queue.put(self._sentinel, timeout=0.1)
-                return
+                for handler in self.handlers:
+                    try:
+                        handler.flush()
+                    except Exception:
+                        record.succeeded = False
+            finally:
+                record.done.set()
+        else:
+            super().handle(record)
+
+    def flush(self, timeout_seconds: float) -> bool:
+        deadline = time.monotonic() + max(0.0, timeout_seconds)
+        record = _FlushRecord()
+        try:
+            cast(queue.Queue[logging.LogRecord], self.queue).put(
+                record, timeout=max(0.0, deadline - time.monotonic())
+            )
+        except queue.Full:
+            return False
+        return record.done.wait(max(0.0, deadline - time.monotonic())) and record.succeeded
+
+    def stop(self, timeout_seconds: float = 5.0) -> None:
+        thread = self._thread
+        if thread is None:
+            return
+        deadline = time.monotonic() + max(0.0, timeout_seconds)
+        while thread.is_alive() and not self._sentinel_enqueued:
+            remaining = deadline - time.monotonic()
+            try:
+                cast(queue.Queue[logging.LogRecord | None], self.queue).put(
+                    self._sentinel, timeout=max(0.0, min(0.05, remaining))
+                )
+                self._sentinel_enqueued = True
             except queue.Full:
-                pass
+                if remaining <= 0:
+                    raise TimeoutError("Log listener did not drain before its deadline") from None
+        thread.join(max(0.0, deadline - time.monotonic()))
+        if thread.is_alive():
+            raise TimeoutError("Log listener did not stop before its deadline")
+        self._thread = None
 
 
 class OverflowPolicyQueueHandler(logging.handlers.QueueHandler):
@@ -153,6 +197,10 @@ class OverflowPolicyQueueHandler(logging.handlers.QueueHandler):
         self.block_timeout_seconds = block_timeout_seconds
         self.telemetry = telemetry
         self._accepting = True
+
+    def handleError(self, record: logging.LogRecord) -> None:  # noqa: N802
+        self.telemetry.record_drop_newest()
+        _report_logging_failure("queue")
 
     def prepare(self, record: logging.LogRecord) -> logging.LogRecord:
         # The stdlib version formats the record here and drops exc_info, which

@@ -4,11 +4,15 @@ import logging
 import subprocess
 import sys
 import threading
+import time
 
 import pytest
 
 from fastapiobserver import ObservabilitySettings
-from fastapiobserver.logging import get_log_queue_stats, setup_logging, shutdown_logging
+from fastapiobserver.logging import (
+    flush_logging, get_log_queue_stats, setup_logging, shutdown_logging,
+)
+from fastapiobserver.logging.circuit_breaker import get_sink_circuit_breaker_stats
 import fastapiobserver.logging.state as state
 
 
@@ -29,6 +33,53 @@ class _BlockingSink(logging.Handler):
     def close(self) -> None:
         self.closed.set()
         super().close()
+
+
+def test_flush_deadline_does_not_wait_for_a_blocked_sink():
+    sink = _BlockingSink()
+    setup_logging(ObservabilitySettings(), logs_mode="otlp", extra_handlers=[sink])
+    try:
+        logging.getLogger("test.deadline").warning("in flight")
+        assert sink.started.wait(1)
+        started = time.monotonic()
+        assert flush_logging(timeout_seconds=0.05) is False
+        assert time.monotonic() - started < 0.5
+        assert not sink.closed.is_set()
+    finally:
+        sink.allow_write.set()
+        shutdown_logging()
+
+
+def test_stop_deadline_keeps_resources_for_retry():
+    sink = _BlockingSink()
+    setup_logging(ObservabilitySettings(), logs_mode="otlp", extra_handlers=[sink])
+    listener = state._QUEUE_LISTENER
+    try:
+        logging.getLogger("test.deadline").warning("in flight")
+        assert sink.started.wait(1)
+        started = time.monotonic()
+        with pytest.raises(TimeoutError):
+            listener.stop(timeout_seconds=0.05)
+        assert time.monotonic() - started < 0.5
+        assert not sink.closed.is_set()
+        assert listener._thread.is_alive()
+    finally:
+        sink.allow_write.set()
+        shutdown_logging()
+
+
+def test_failed_flush_is_not_reported_as_success(capsys):
+    class FailedFlush(logging.Handler):
+        def emit(self, record):
+            pass
+
+        def flush(self):
+            raise OSError("SECRET")
+
+    setup_logging(ObservabilitySettings(), logs_mode="otlp", extra_handlers=[FailedFlush()])
+    assert flush_logging(timeout_seconds=0.5) is False
+    assert get_sink_circuit_breaker_stats()["failedflush"]["failures_total"] >= 1
+    assert "SECRET" not in capsys.readouterr().err
 
 
 @pytest.mark.parametrize("action", ["shutdown", "reconfigure"])

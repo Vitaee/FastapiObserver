@@ -64,26 +64,32 @@ Releases are published from CI with PyPI Trusted Publishing; no token is stored 
     git push origin vX.Y.Z
     ```
 
-On a tag push, `.github/workflows/release.yml` runs the tests, rejects a tag that doesn't match `_version.py`, builds and checks the distributions, publishes them to PyPI with attestations, and creates the GitHub Release from the matching `CHANGELOG.md` section.
+On a tag push, `.github/workflows/release.yml` verifies that the tag and
+checked-out commit agree, then calls the same validation workflow as pull
+requests. It builds the distributions once, tests that wheel, runs the dependency
+matrix, quality/audit, runtime budgets, paired CPU benchmark and Compose backend
+checks, then publishes the stored artifact with attestations. The publisher
+checks its commit and file hashes instead of rebuilding it.
 
-Keep published tags immutable. Diagnose a failed job before retrying it. If
-tests failed before publication, rerun the failed workflow at the same tag.
-For a partial publication, the publisher's `skip-existing: true` leaves existing
-PyPI files untouched. A manual retry must also check out the original tag:
+Keep published tags immutable. After a partial publication, use **Re-run failed
+jobs** on the original workflow run so the original distribution artifact is
+reused. Existing PyPI filenames must have identical SHA-256 hashes;
+only files absent from PyPI are staged for upload. The publisher does not use
+`skip-existing`, so a concurrent conflicting upload fails visibly. Publication
+jobs for the same tag are serialized. If the original artifact is unavailable,
+prepare a new patch version.
+
+For a full manual run, select the original tag:
 
 ```bash
 gh workflow run release.yml --ref vX.Y.Z -f tag=vX.Y.Z
 ```
 
-Using `main` could publish code that differs from the tag. Code changes require
-a new version and tag. Before announcing completion, verify the GitHub Release,
-both PyPI distributions and a fresh installation from PyPI.
-
-For high-risk changes, run the stress harness before tagging:
-
-```bash
-uv run python scripts/runtime_stress.py --profile standard
-```
+Selecting a branch whose commit differs from the requested tag now fails before
+validation/publication. Code changes require a new version and tag. Before
+announcing completion, verify the GitHub Release, both PyPI distributions and a
+fresh installation from PyPI. Standard stress is a required shared validation
+gate; use `uv run python scripts/runtime_stress.py --profile standard` locally too.
 
 ---
 

@@ -78,6 +78,26 @@ granian --interface asgi --workers 4 --log-config granian-log.json main:app
 
 Keep Granian's access log off (`--no-access-log`, the default); `request.completed` already covers it.
 
+## Client disconnects and shutdown
+
+`request.client_disconnected` means the application received `http.disconnect`
+before the response finished. `event.after_disconnect_ms` measures how long it
+continued afterward. The middleware only observes the application's own reads;
+it adds no body reader. If the application never reads after the client leaves,
+the disconnect may remain unobserved. A disconnect received after completion is
+not an abandoned request.
+
+Exceptions and cancellation keep their existing event names, with independent
+`event.cancelled` and `event.client_disconnected` fields. Cancellation alone does
+not identify a disconnect, timeout or shutdown. A successful response send keeps
+its status even when a disconnect was observed concurrently.
+
+The server owns signals and graceful request draining. Configure its graceful
+timeout and give the process supervisor enough additional time for logging and
+configured exporter timeouts. CI exercises Uvicorn SIGTERM during ordinary,
+streaming and background work; its test budgets are in the
+[deployment guide](deployment.md#release-validation-budgets).
+
 ## Checking the result
 
 Every line of output should now parse as JSON. A quick check, assuming the server writes to `server.log`:

@@ -75,7 +75,7 @@ services:
   # ---------- OpenTelemetry Collector ----------
 
   otel-collector:
-    image: otel/opentelemetry-collector-contrib:0.120.0
+    image: otel/opentelemetry-collector-contrib:0.120.0@sha256:85ac41c2db88d0df9bd6145e608a3cb023f5d8443868adbfbbf66efb51087917
     command: ["--config=/etc/otel-collector.yml"]
     volumes:
       - ./config/otel-collector.yml:/etc/otel-collector.yml:ro
@@ -92,7 +92,7 @@ services:
   # ---------- Prometheus ----------
 
   prometheus:
-    image: prom/prometheus:latest
+    image: prom/prometheus@sha256:fa3302279710be2f21a8301ec17a8b4f2301fd829bd113839b3b6b02b6f191a2
     volumes:
       - ./config/prometheus.yml:/etc/prometheus/prometheus.yml:ro
     ports:
@@ -102,7 +102,7 @@ services:
   # ---------- Loki ----------
 
   loki:
-    image: grafana/loki:3.4.3
+    image: grafana/loki:3.4.3@sha256:5fe9fa99e9a747297cdf0239a5b25d192d8f668bd6505b09beef4dffcab5aac2
     command: -config.file=/etc/loki/loki.yml
     volumes:
       - ./config/loki.yml:/etc/loki/loki.yml:ro
@@ -114,7 +114,7 @@ services:
   # ---------- Tempo ----------
 
   tempo:
-    image: grafana/tempo:2.7.2
+    image: grafana/tempo:2.7.2@sha256:4b0277a9b572a4b1fa43b01468e58911ec214dd69d033f2cd476596d14de9fe3
     command: ["-config.file=/etc/tempo/tempo.yml"]
     volumes:
       - ./config/tempo.yml:/etc/tempo/tempo.yml:ro
