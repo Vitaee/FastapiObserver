@@ -58,6 +58,9 @@ nav:
       - Plugins: plugins.md
   - Operations:
       - Architecture: architecture.md
+      - Compatibility Baseline: baseline.md
+      - Experimental Python Operations: experimental-core.md
+      - Roadmap: roadmap.md
       - Production Deployment: deployment.md
       - Kubernetes: kubernetes.md
       - Performance Tuning: tuning.md

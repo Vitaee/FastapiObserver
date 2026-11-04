@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import logging
 import threading
-from typing import Callable, Mapping, Protocol
+from typing import TYPE_CHECKING, Callable, Mapping, Protocol
 
-from starlette.requests import Request
-from starlette.responses import Response
+if TYPE_CHECKING:
+    from starlette.requests import Request
+    from starlette.responses import Response
 
 __all__ = [
     "LogEnricher",
@@ -25,7 +26,7 @@ __all__ = [
 logger = logging.getLogger("fastapiobserver.plugins")
 
 LogEnricher = Callable[[dict[str, object]], dict[str, object]]
-MetricHook = Callable[[Request, Response, float], None]
+MetricHook = Callable[["Request", "Response", float], None]
 LogFilterFn = Callable[[logging.LogRecord], bool]
 
 

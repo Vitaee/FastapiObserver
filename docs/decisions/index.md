@@ -19,6 +19,7 @@ Each record says what was decided, the evidence for it and what it cost. Read th
 | [0013](0013-every-setting-has-one-name.md) | Every setting has one name | The library's own variables start with `OBS_`, OpenTelemetry's are the specification's, and nothing is read from a field's bare name. |
 | [0014](0014-diagnosis-without-tracing.md) | Diagnosis works without tracing | SQLAlchemy queries and N+1 are counted from SQLAlchemy's events; the `production` profile turns the loop watchdog on, and held `DEBUG` logs stay opt-in. |
 | [0015](0015-application-owned-logging.md) | Application-owned logging | Install diagnostics through an existing logging pipeline, retaining its sanitizer and exporters. |
+| [0016](0016-experimental-python-operations.md) | Experimental Python operations | Reuse context, logging and client hooks for opt-in manual operations, preserving the FastAPI interface. |
 
 ## Writing a new record
 

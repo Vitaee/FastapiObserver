@@ -21,6 +21,7 @@ jobs:
       tag: ${{ steps.resolve.outputs.tag }}
       version: ${{ steps.resolve.outputs.version }}
       baseline: ${{ steps.resolve.outputs.baseline }}
+      prerelease: ${{ steps.resolve.outputs.prerelease }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -101,4 +102,5 @@ jobs:
           tag_name: ${{ needs.identity.outputs.tag }}
           name: ${{ needs.identity.outputs.tag }}
           body_path: RELEASE_NOTES.md
-          make_latest: true
+          prerelease: ${{ needs.identity.outputs.prerelease == 'true' }}
+          make_latest: ${{ needs.identity.outputs.prerelease != 'true' }}

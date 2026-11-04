@@ -204,7 +204,7 @@ flowchart TD
 ```
 
 - `event_loop.blocked` needs `OBS_LOOP_BLOCK_THRESHOLD_MS`. The pool warnings are always on. SQLAlchemy query totals and explicitly installed HTTP client diagnostics do not need tracing.
-- `request.cancelled` means the application received cancellation. It does not identify whether the cause was a client disconnect, a timeout or shutdown. A disconnected client can leave a handler running without cancellation; explicit disconnect and shutdown diagnostics remain on the [roadmap](https://github.com/Vitaee/FastapiObserver/blob/main/ROADMAP.md#diagnosis).
+- `request.cancelled` means the application received cancellation. It does not identify whether the cause was a client disconnect, a timeout or shutdown. An `http.disconnect` observed before response completion produces `request.client_disconnected`; the middleware adds no reader, so an application that never receives the event can leave a disconnect unobserved. Further shutdown attribution is covered by the [roadmap](roadmap.md#delivery-and-shutdown-contract).
 
 ### Route Exclusion Auto-Discovery
 

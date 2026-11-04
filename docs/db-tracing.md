@@ -73,10 +73,15 @@ See [outbound HTTP diagnostics](opentelemetry.md#outbound-http-diagnostics).
 When one statement runs 10 or more times in a request, usually a query per item in a loop, a warning names it. It's written once per method, route and statement in each process:
 
 ```json
-{"level": "WARNING", "message": "db.n_plus_one", "request_id": "...", "event": {"method": "GET", "route": "/orders", "statement": "SELECT * FROM items WHERE items.order_id = %(order_id_1)s", "count": 12}}
+{"level": "WARNING", "message": "db.n_plus_one", "request_id": "...", "event": {"method": "GET", "route": "/orders", "statement_fingerprint": "<sha256>", "count": 12}}
 ```
 
-Quoted strings and numbers in the statement are replaced with `?` before it's written. The `request_id` leads to that request's trace.
+The warning retains and emits a SHA-256 fingerprint of the full statement,
+without SQL text. Parameterized statements group consistently; different inline
+literals produce different fingerprints. Each request retains at most 128
+fingerprints and each middleware instance retains at most 1,024 warning keys;
+total successful-query counts remain complete. A fingerprint is not
+anonymization. The `request_id` leads to that request's logs and available trace.
 
 ## Recommended Setup (via `install_observability`)
 
@@ -224,6 +229,6 @@ Runnable demo:
 > `fastapi-observer` security redaction. If queries contain inline sensitive values,
 > those values can be exported to tracing backends. Use parameterized statements and
 > enforce review of trace payloads in production. The `db.n_plus_one` log line
-> replaces quoted strings and numbers in the statement with `?`.
+> emits a SHA-256 statement fingerprint without retaining or emitting SQL text.
 
 ---

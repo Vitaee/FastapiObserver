@@ -4,7 +4,8 @@ import logging
 import threading
 from hashlib import sha256
 from collections import deque
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
+from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import Any
@@ -66,11 +67,15 @@ class RequestState:
     call_errors: dict[str, dict[str, int]] = field(default_factory=dict)
     http_span_ids: set[int | None] = field(default_factory=set)
     statements: dict[str, int] = field(default_factory=dict)
+    operation_id: str | None = None
+    closed: bool = False
 
     def add_call(
         self, kind: str, seconds: float, statement: str | None = None, *, error: str | None = None
     ) -> None:
         with _CALLS_LOCK:
+            if self.closed:
+                return
             totals = self.calls.setdefault(kind, [0, 0.0])
             totals[0] += 1
             totals[1] += seconds
@@ -82,6 +87,30 @@ class RequestState:
                 fingerprint = sha256(statement.encode("utf-8", errors="replace")).hexdigest()
                 if fingerprint in self.statements or len(self.statements) < _MAX_REQUEST_STATEMENTS:
                     self.statements[fingerprint] = self.statements.get(fingerprint, 0) + 1
+
+    def close(self) -> tuple[dict[str, list[float]], dict[str, dict[str, int]]]:
+        """Freeze experimental totals and release state retained by copied contexts."""
+        with _CALLS_LOCK:
+            self.closed = True
+            calls, errors = self.calls, self.call_errors
+            self.calls, self.call_errors = {}, {}
+            self.statements.clear()
+            self.http_span_ids.clear()
+            self.held_logs = None
+            self.user_context = None
+            return calls, errors
+
+    def hold_log(self, record: logging.LogRecord, limit: int) -> None:
+        with _CALLS_LOCK:
+            if not self.closed:
+                if self.held_logs is None:
+                    self.held_logs = deque(maxlen=limit)
+                self.held_logs.append(record)
+
+    def mark_http_span(self, span_id: int) -> None:
+        with _CALLS_LOCK:
+            if not self.closed:
+                self.http_span_ids.add(span_id)
 
 
 def route_template(scope: Mapping[str, Any]) -> str | None:
@@ -104,7 +133,8 @@ def set_request_state(value: RequestState | None) -> None:
 
 
 def get_request_state() -> RequestState | None:
-    return _request_state_var.get()
+    state = _request_state_var.get()
+    return state if state is not None and not state.closed else None
 
 
 def set_request_id(value: str | None) -> None:
@@ -112,6 +142,9 @@ def set_request_id(value: str | None) -> None:
 
 
 def get_request_id() -> str | None:
+    state = _request_state_var.get()
+    if state is not None and state.closed:
+        return None
     return _request_id_var.get()
 
 
@@ -144,8 +177,15 @@ def clear_span_id() -> None:
 
 
 def set_user_context(value: dict[str, Any] | None) -> None:
-    _user_context_var.set(value)
     request_state = _request_state_var.get()
+    # Experimental contexts retain user data only on their shared, closeable
+    # state. A copied ContextVar must not keep it alive after closure.
+    if request_state is not None and request_state.operation_id is not None:
+        with _CALLS_LOCK:
+            if not request_state.closed:
+                request_state.user_context = value
+        return
+    _user_context_var.set(value)
     if request_state is not None:
         # Also on the request, which the middleware sees even when a sync
         # endpoint sets it from the thread pool.
@@ -154,6 +194,8 @@ def set_user_context(value: dict[str, Any] | None) -> None:
 
 def get_user_context() -> dict[str, Any] | None:
     request_state = _request_state_var.get()
+    if request_state is not None and request_state.closed:
+        return None
     if request_state is not None and request_state.user_context is not None:
         return request_state.user_context
     # Set outside the request, for example by middleware added after ours.
@@ -162,3 +204,21 @@ def get_user_context() -> dict[str, Any] | None:
 
 def clear_user_context() -> None:
     set_user_context(None)
+
+
+@contextmanager
+def _operation_context(state: RequestState, request_id: str) -> Iterator[None]:
+    """Bind the existing correlation seam without clearing an outer request."""
+    state_token = _request_state_var.set(state)
+    id_token = _request_id_var.set(request_id)
+    user_token = _user_context_var.set(None)
+    trace_token = _trace_id_var.set(_trace_id_var.get())
+    span_token = _span_id_var.set(_span_id_var.get())
+    try:
+        yield
+    finally:
+        _span_id_var.reset(span_token)
+        _trace_id_var.reset(trace_token)
+        _user_context_var.reset(user_token)
+        _request_id_var.reset(id_token)
+        _request_state_var.reset(state_token)

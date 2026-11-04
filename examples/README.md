@@ -28,6 +28,12 @@ The database example uses an in-memory SQLite database and closes it at shutdown
 `DATABASE_URL` can select another async SQLAlchemy driver. Its query counts work
 without tracing; SQL spans require a supported instrumentation version.
 
+For a Python operation without a web application, run
+`python examples/python_operation.py` with SQLAlchemy and HTTPX installed. It
+performs real SQLite queries and loopback HTTP, forwards correlation, and emits
+an experimental operation summary through the existing JSON logging pipeline.
+See [experimental operations](../docs/experimental-core.md).
+
 ## Reproduce and diagnose failures
 
 The [full-stack demo](full_stack/README.md) runs three copies of one app alongside

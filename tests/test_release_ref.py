@@ -41,6 +41,22 @@ def test_release_uses_the_tagged_commit(release_repo):
     assert metadata["tag"] == "v2.2.0"
 
 
+@pytest.mark.parametrize(("version", "expected"), [
+    ("2.3.0a1", "true"), ("2.3.0b1", "true"), ("2.3.0rc1", "true"),
+    ("2.3.0.dev1", "true"), ("2.3.0", "false"), ("2.3.0.post1", "false"),
+])
+def test_release_classifies_prereleases_without_promoting_them(release_repo, version, expected):
+    (release_repo / "src/fastapiobserver/_version.py").write_text(
+        f'__version__ = "{version}"\n'
+    )
+    git(release_repo, "add", ".")
+    git(release_repo, "commit", "-qm", "prepare next version")
+    git(release_repo, "tag", "v" + version)
+    result = resolve(release_repo, version)
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout)["prerelease"] == expected
+
+
 def test_same_version_on_another_commit_cannot_be_released(release_repo):
     (release_repo / "unreleased.py").write_text("changed = True\n")
     git(release_repo, "add", ".")

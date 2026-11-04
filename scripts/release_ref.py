@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import ast
 import json
+import re
 import shutil
 import subprocess
 import sys
@@ -39,7 +40,8 @@ def resolve(repo: Path, tag: str | None, expected_commit: str | None = None) -> 
     tagged_commit = git(repo, "rev-parse", "--verify", f"refs/tags/{tag}^{{commit}}")
     if tagged_commit != commit:
         raise ValueError(f"Requested tag {tag} identifies a different commit from HEAD")
-    return {"tag": tag, "version": str(version), "commit": commit}
+    return {"tag": tag, "version": str(version), "commit": commit,
+            "prerelease": "true" if re.search(r"(?:a|b|rc|dev)\d", version) else "false"}
 
 
 def verify_existing_files(directory: Path, published: dict[str, str]) -> list[Path]:
