@@ -110,4 +110,5 @@ closed copied contexts no longer expose the operation's request ID/user context.
   The operation does not promise remote delivery or exactly-once emission.
 
 See the [2.2.1 baseline](baseline.md) and
-[extraction decision](decisions/0016-experimental-python-operations.md).
+[extraction decision](decisions/0016-experimental-python-operations.md), with
+[validation evidence](validation/2026-11-04-experimental-core.md).

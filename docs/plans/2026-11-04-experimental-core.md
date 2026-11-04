@@ -69,8 +69,30 @@ messages. Keep the existing checkout and its local roadmap changes.
   with tracing disabled and enabled. Preserve native/span deduplication.
 - [x] Document the experimental contract and limitations, update the roadmap
   sequencing and add an architectural decision in the existing format.
-- [ ] Build a prerelease wheel/sdist; validate installed-wheel imports and
+- [x] Build a prerelease wheel/sdist; validate installed-wheel imports and
   behavior, full tests/coverage, typing/lint, strict documentation, production
   stress, paired overhead and available backend checks. Review the whole diff.
-- [ ] Commit and push on the single branch, open one PR, and record release
+- [x] Commit and push on the single branch, open one PR, and record release
   readiness and any remaining real application or publication gate honestly.
+
+## Execution record
+
+The maintainer selected the bundled application for runnable validation. The
+initial implementation is committed and pushed as `f297d2f`; PR #58 is the only
+PR for this work. Local evidence is recorded in
+[the validation report](../validation/2026-11-04-experimental-core.md).
+
+Ruling: keep shared state and existing module/lock ownership for this first
+experiment, avoiding a package split before the interface is proven.
+
+Ruling: isolate global OTel tracing probes in fresh interpreters, following the
+existing standalone-example test pattern, after an order-dependent SQL tracing
+teardown failure appeared in a full randomized run.
+
+Ruling: make selected project requirements direct inputs to CI's resolver. A
+fresh wheel-only `lowest-direct` environment selected current dependencies;
+explicit requirements resolved and passed the actual documented lower bounds.
+
+Publication remains gated by PR merge, a matching immutable release tag and the
+shared release validation workflow. No separate distribution or independent
+deployed-app validation is claimed.

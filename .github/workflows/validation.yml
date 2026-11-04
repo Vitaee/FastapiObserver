@@ -107,8 +107,20 @@ jobs:
           EXTRAS: dev,prometheus,otel,otel-httpx,otel-requests,otel-sqlalchemy${{ matrix.extra }}
         run: |
           python -m pip install uv
-          wheels=(dist/packages/*.whl)
-          uv pip install --system --resolution "$RESOLUTION" "${wheels[0]}[$EXTRAS]"
+          python - <<'PY'
+          import os, pathlib, subprocess, tomllib
+          project = tomllib.loads(pathlib.Path('pyproject.toml').read_text())['project']
+          extras = os.environ['EXTRAS']
+          requirements = list(project['dependencies'])
+          for extra in extras.split(','):
+              requirements.extend(project['optional-dependencies'][extra])
+          wheel = next(pathlib.Path('dist/packages').glob('*.whl'))
+          # The wheel alone makes its dependencies transitive to uv. Supply
+          # their requirements directly so lowest-direct tests the actual floors.
+          subprocess.run(['uv', 'pip', 'install', '--system', '--resolution',
+                          os.environ['RESOLUTION'], f'{wheel}[{extras}]', *requirements],
+                         check=True)
+          PY
       - name: Test installed package, including real server failure budgets
         run: python -m pytest -q --cov -o pythonpath=
 

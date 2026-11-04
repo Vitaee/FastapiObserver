@@ -12,6 +12,7 @@ All notable changes to this project will be documented in this file.
 
 ### Maintenance
 - Alpha, beta, release-candidate and development versions are marked as GitHub prereleases without replacing the latest stable release. Existing immutable-artifact validation and publication gates remain required.
+- Dependency-floor validation passes the selected project requirements directly to the resolver alongside the built wheel; the previous wheel-only command treated those requirements as transitive and selected newer versions.
 
 ## [2.2.1] - 2026-11-04
 

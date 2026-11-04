@@ -28,6 +28,14 @@ exporters or contact an external backend. `tests/test_release_compatibility.py`
 checks the fixture on each test run. Existing tests provide the wider timing,
 metrics, privacy and lifecycle contracts that three example records cannot prove.
 
+The earlier dependency matrix used `lowest-direct` with only the wheel as a
+direct requirement, which resolved newer versions of its transitive framework
+dependencies. The validation workflow now passes the project's selected
+requirements explicitly alongside the same built wheel. A fresh Python 3.11
+check resolved FastAPI 0.133.0, Starlette 1.3.1 and SQLAlchemy 2.0.0 and passed
+the installed-wheel integration checks. See the
+[validation report](validation/2026-11-04-experimental-core.md).
+
 ## Claims and their limits
 
 | Claim | Evidence | Limit |
