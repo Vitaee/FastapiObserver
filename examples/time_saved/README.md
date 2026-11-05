@@ -54,7 +54,7 @@ Both the hand-rolled ~160 line script and the ~30 line `fastapiobserver` script 
 ```
 **The Easy Way:**
 ```json
-{"timestamp":"2026-02-21T00:27:41.354913+00:00","level":"INFO","logger":"fastapiobserver.middleware","message":"request.completed","app_name":"easy-way-api","service":"easy-way-api","environment":"development","version":"0.0.0","log_schema_version":"1.0.0","library":"fastapiobserver","library_version":"2.0.0","request_id":"75...14","trace_id":"2d...72","span_id":"be...dd","event":{"method":"GET","path":"/hello/world","status_code":200,"duration_ms":1.193,"client_ip":"127.0.0.1","error_type":"ok","http.request.method":"GET","url.path":"/hello/world","http.response.status_code":200}}
+{"timestamp":"2026-11-05T00:27:41.354913+00:00","level":"INFO","logger":"fastapiobserver.middleware","message":"request.completed","app_name":"easy-way-api","service":"easy-way-api","environment":"development","version":"0.0.0","log_schema_version":"1.0.0","library":"fastapiobserver","library_version":"2.3.0","request_id":"75...14","trace_id":"2d...72","span_id":"be...dd","event":{"method":"GET","path":"/hello/world","status_code":200,"duration_ms":1.193,"client_ip":"127.0.0.1","error_type":"ok","http.request.method":"GET","url.path":"/hello/world","http.response.status_code":200,"app_duration_ms":1.201,"response_start_ms":0.912,"first_body_ms":1.193,"stream_duration_ms":0.0,"http.route":"/hello/{name}","response_completed":true,"cancelled":false,"client_disconnected":false,"observation":{"coverage":"unknown"},"log_sampling":{"owner":"observer","inclusion_probability":1.0,"reason":"all"}}}
 ```
 
 #### Prometheus Metrics (Scraped on /metrics)

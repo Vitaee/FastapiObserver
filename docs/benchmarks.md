@@ -19,12 +19,23 @@ The hand-wired version also has to get these details right, which the library ha
 
 ## CPU per request, in process
 
-[`examples/benchmarks/request_cpu.py`](https://github.com/Vitaee/FastapiObserver/blob/main/examples/benchmarks/request_cpu.py) calls the app directly, with no server or network, and reports the CPU the library adds to each request: on the request's own thread, and in the whole process once the background thread has written the log line. Apple M1, macOS 15.8.1, Python 3.14.7, FastAPI 0.162.0, Starlette 1.10.0; medians of nine runs of 5,000 requests after warm-up, measured 4 November 2026:
+[`examples/benchmarks/request_cpu.py`](https://github.com/Vitaee/FastapiObserver/blob/main/examples/benchmarks/request_cpu.py) calls the app directly, with no server or network, and reports the CPU the library adds to each request: on the request's own thread, and in the whole process once the background thread has written the log line. Apple M1, macOS 15.8.1, Python 3.14.7, FastAPI 0.162.0, Starlette 1.10.0; medians of nine runs of 5,000 requests after warm-up, measured 4 November 2026 on the code released as 2.1.0:
 
 | Mode | CPU added per request | On the request's thread |
 |---|---|---|
 | `default` | 49.2 µs | 35.2 µs |
 | `sampled` (`OBS_LOG_SAMPLE_RATE=0.1`) | 38.3 µs | 34.7 µs |
+
+### 2.3.0
+
+The 2.3.0 release validation compared it with 2.2.1 in nine alternating pairs with `scripts/compare_overhead.py`, on an Apple ARM64 Mac with Python 3.14.7 and FastAPI 0.162.0. Process CPU added per request, including writing the line on the background thread:
+
+| Logging | 2.2.1 | 2.3.0 |
+|---|---:|---:|
+| Default | 49.6 µs | 55.2 µs |
+| Application-owned (`configure_logging=False`) | 34.4 µs | 38.5 µs |
+
+The share on the request's thread wasn't measured for 2.3.0. Raw results are in the [validation note](validation/2026-11-05-streaming-diagnostics.md#cpu-overhead).
 
 ```bash
 python examples/benchmarks/request_cpu.py default > /dev/null

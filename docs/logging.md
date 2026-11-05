@@ -94,6 +94,7 @@ Request middleware emits one primary event per request:
 | `request.server_error` | `ERROR` | Server-side HTTP errors (`5xx` without exception) |
 | `request.failed` | `ERROR` + traceback | Unhandled exception in request path |
 | `request.cancelled` | `WARNING` | Cancelled before it finished: the client left, the server shut down or a timeout fired. `status_code` is `499` if no response had started |
+| `request.client_disconnected` | `WARNING` | The application received `http.disconnect` before the response finished, and ran on without being cancelled or raising. `after_disconnect_ms` says how long. See [servers](servers.md) |
 
 Standard request event fields include:
 - `method`
@@ -101,10 +102,14 @@ Standard request event fields include:
 - `status_code`
 - `duration_ms`
 - `app_duration_ms`
-- `response_completed`
+- `response_start_ms`, `first_body_ms` and `stream_duration_ms`: when the response started, sent its first body chunk and finished streaming. See [route and timing](request-diagnostics.md#route-and-timing)
+- `response_completed`, `cancelled` and `client_disconnected`, plus `after_disconnect_ms` after a disconnect
+- `http.route`: the matched route template, left out when no route matched
 - `client_ip`
 - `error_type`
 - OTel semantic aliases (`http.request.method`, `url.path`, `http.response.status_code`)
+- `observation`: which clients the `db` and `http` totals come from, and whether they're complete. See [observation coverage](request-diagnostics.md#observation-coverage)
+- `log_sampling`: who decided whether the line was written, and with what probability. See [sampling policy](request-diagnostics.md#sampling-policy-and-delivery)
 - `db` and `http`: the count and total time of completed database queries and outbound HTTP calls. SQLAlchemy engines passed as `db_engine`, HTTPX/HTTPX2 clients passed to `instrument_httpx_client()`, and Requests instrumented with `instrument_requests_session()` are counted without tracing. Other instrumented clients are counted from sampled spans. See [database tracing](db-tracing.md#query-count-and-time-on-the-request-line) and [HTTP diagnostics](opentelemetry.md#outbound-http-diagnostics).
 
 ### What the durations mean
@@ -164,7 +169,7 @@ OBS_LOG_SLOW_REQUEST_MS=1000    # the default
 
 Requests are chosen by trace ID, with the rule OpenTelemetry's `TraceIdRatioBased` sampler uses for `OTEL_TRACES_SAMPLER_ARG`. If every service samples traces that way at the same ratio, a request's lines are written exactly when its trace is kept, in every service. You get whole requests across services, not scattered lines. A lower log ratio keeps a subset of the traced requests. Without a trace ID, the request ID is hashed instead. Services forward it, so they still agree.
 
-The lines of a request that isn't sampled are held until it ends, at most the last 200. In [`request_cpu.py`](https://github.com/Vitaee/FastapiObserver/blob/main/examples/benchmarks/request_cpu.py), `OBS_LOG_SAMPLE_RATE=0.1` took CPU per request from 45 to 37 µs.
+The lines of a request that isn't sampled are held until it ends, at most the last 200. In [`request_cpu.py`](https://github.com/Vitaee/FastapiObserver/blob/main/examples/benchmarks/request_cpu.py), `OBS_LOG_SAMPLE_RATE=0.1` took CPU per request from 49.2 to 38.3 µs (see [benchmarks](benchmarks.md#cpu-per-request-in-process)).
 
 ## Calls that block the event loop
 
@@ -230,7 +235,7 @@ Example request log:
 
 ```json
 {
-  "timestamp": "2026-02-18T10:30:00.000000+00:00",
+  "timestamp": "2026-11-05T10:30:00.000000+00:00",
   "level": "INFO",
   "logger": "fastapiobserver.middleware",
   "message": "request.completed",
@@ -240,7 +245,7 @@ Example request log:
   "version": "0.1.0",
   "log_schema_version": "1.0.0",
   "library": "fastapiobserver",
-  "library_version": "2.0.0",
+  "library_version": "2.3.0",
   "request_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
   "trace_id": "0af7651916cd43dd8448eb211c80319c",
   "span_id": "b7ad6b7169203331",
@@ -248,12 +253,28 @@ Example request log:
     "method": "GET",
     "path": "/orders/42",
     "status_code": 200,
+    "duration_ms": 3.456,
+    "client_ip": "10.0.0.1",
+    "error_type": "ok",
     "http.request.method": "GET",
     "url.path": "/orders/42",
     "http.response.status_code": 200,
-    "duration_ms": 3.456,
-    "client_ip": "10.0.0.1",
-    "error_type": "ok"
+    "app_duration_ms": 3.471,
+    "response_start_ms": 2.912,
+    "first_body_ms": 3.456,
+    "stream_duration_ms": 0.0,
+    "http.route": "/orders/{order_id}",
+    "response_completed": true,
+    "cancelled": false,
+    "client_disconnected": false,
+    "observation": {
+      "coverage": "unknown"
+    },
+    "log_sampling": {
+      "owner": "observer",
+      "inclusion_probability": 1.0,
+      "reason": "all"
+    }
   }
 }
 ```

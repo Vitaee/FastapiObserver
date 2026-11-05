@@ -58,7 +58,7 @@ the installed-wheel integration checks. See the
 | Fork safety and recycled workers | `test_fork_queue_listener.py`, `test_processes.py` | POSIX scenarios; not a Windows fork claim |
 | Prometheus labels stay bounded | `test_route_template_cardinality.py`, `test_metrics_contracts.py` | Queue/pool/process pressure collectors are unavailable in multiprocess mode |
 | OTLP delivery and borrowed providers | `test_otlp_export_integration.py`, `test_otel_lifecycle.py`, `test_application_logging.py` | SDK/global-provider ownership persists; no exactly-once backend guarantee |
-| Production and release gates | `test_production_runtime.py`, `test_overhead_gate.py`, `test_release_ref.py`, shared validation workflow | Controlled budgets, not universal application SLAs; local tests do not replace the dependency/backend matrix |
+| Production and release gates | `test_production_runtime.py`, `test_release_ref.py`, shared validation workflow | Controlled budgets, not universal application SLAs; local tests do not replace the dependency/backend matrix. CPU comparisons are [manual](benchmarks.md#manual-version-comparison), not a gate; `test_overhead_gate.py` checks only their arithmetic |
 
 Configuration compatibility includes the `OBS_*` names documented in
 [configuration](configuration.md), `OBS_PROFILE` defaults, standard

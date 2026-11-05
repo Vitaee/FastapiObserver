@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+- Docs that no longer matched 2.3.0 are corrected:
+  - the README's CPU cost (about 55 µs per request in 2.3.0, not 49 µs) and the benchmarks page, which now has the 2.3.0 figures and says which version its older table measured;
+  - the supported versions in `SECURITY.md`;
+  - the logging guide's list of request events and fields, which lacked `request.client_disconnected` and the fields added in 2.3.0, and its sample line;
+  - the README's claim that request IDs reach every service you call: they're forwarded through the client helpers, `inject_trace_headers()` and OpenTelemetry-instrumented clients;
+  - pages that still described a CPU comparison gating releases;
+  - the request diagram and package map in the architecture page, and a roadmap link that broke on the published site.
+
 ### Maintenance
 - CPU comparisons are manual profiling tools rather than required CI/release gates. Shared-runner timing noise no longer blocks publication; correctness, installed-wheel, runtime stress and backend validation remain required.
 

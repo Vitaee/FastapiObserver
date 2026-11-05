@@ -67,9 +67,11 @@ Releases are published from CI with PyPI Trusted Publishing; no token is stored 
 On a tag push, `.github/workflows/release.yml` verifies that the tag and
 checked-out commit agree, then calls the same validation workflow as pull
 requests. It builds the distributions once, tests that wheel, runs the dependency
-matrix, quality/audit, runtime budgets, paired CPU benchmark and Compose backend
-checks, then publishes the stored artifact with attestations. The publisher
-checks its commit and file hashes instead of rebuilding it.
+matrix, quality/audit, runtime budgets and Compose backend checks, then publishes
+the stored artifact with attestations. The publisher checks its commit and file
+hashes instead of rebuilding it. CPU comparisons between versions don't gate a
+release; run them by hand as described in
+[benchmarks](benchmarks.md#manual-version-comparison).
 
 Experimental versions such as `2.3.0a1` use the same gates and tag convention.
 Their GitHub releases are marked as prereleases and do not replace the latest

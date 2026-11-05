@@ -105,6 +105,8 @@ sequenceDiagram
     M->>L: Held records, then request.failed at ERROR with error.fingerprint
   else cancelled
     M->>L: request.cancelled at WARNING, status 499 if no response started
+  else client disconnected before the response finished
+    M->>L: request.client_disconnected at WARNING, with after_disconnect_ms
   else 5xx
     M->>L: Held records, then request.server_error at ERROR
   else 4xx
@@ -225,6 +227,13 @@ The project is now organized as focused subpackages instead of large monolithic 
 - `fastapiobserver/metrics/`: backend contract and registry; `prometheus.py` holds the Prometheus backend, the `/metrics` endpoint (rendered by `prometheus_client`) and multiprocess helpers.
 - `fastapiobserver/security/`: policy/settings models, normalization helpers, redaction engine, trusted-proxy utilities.
 - `fastapiobserver/otel/`: OTel settings/resource/tracing/logs/metrics/lifecycle helpers.
+- `fastapiobserver/core/`: `recording.py` validates completed `db`/`http` calls and ties each to the request or operation that started it.
+- `fastapiobserver/integrations/`: the Strawberry GraphQL extension.
+- `request_context.py`: per-request state in a `ContextVar`, the request, trace and span IDs, and the call totals.
+- `db_queries.py` and `http_calls.py`: SQLAlchemy query counts from its events, and outbound HTTP counts from the client helpers, without tracing.
+- `pools.py` and `loop_watchdog.py`: the thread-pool and database-pool warnings, and the `event_loop.blocked` watchdog.
+- `experimental.py`: `observe_operation()`, the experimental operation boundary for code outside requests.
+- `testing.py`: `assert_query_budget()`, a native SQL query budget for tests.
 
 The top-level `fastapiobserver` package exports only the names in its `__init__.py`. Everything else is imported from its submodule, without the same promise of stability.
 

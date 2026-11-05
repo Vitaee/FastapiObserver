@@ -236,7 +236,7 @@ can rely on.
   a Redis/MongoDB application, a Tortoise application and a worker or CLI tool.
   Sanitized reproducible examples are sufficient to begin design.
 
-The checked baseline work is recorded in [the compatibility inventory](docs/baseline.md).
+The checked baseline work is recorded in [the compatibility inventory](https://vitaee.github.io/FastapiObserver/baseline/).
 M0 remains open for portable-artifact contribution/naming policies and the broader
 adopter examples. The bundled FastAPI app is validated; external applications
 and the unimplemented datastore adapters are not claimed as validated.
