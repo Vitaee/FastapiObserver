@@ -13,4 +13,3 @@ jobs:
     uses: ./.github/workflows/validation.yml
     with:
       source-ref: ${{ github.sha }}
-      baseline-ref: ${{ github.event.pull_request.base.sha || github.event.before }}

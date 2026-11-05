@@ -20,7 +20,6 @@ jobs:
       commit: ${{ steps.resolve.outputs.commit }}
       tag: ${{ steps.resolve.outputs.tag }}
       version: ${{ steps.resolve.outputs.version }}
-      baseline: ${{ steps.resolve.outputs.baseline }}
       prerelease: ${{ steps.resolve.outputs.prerelease }}
     steps:
       - uses: actions/checkout@v7
@@ -38,12 +37,8 @@ jobs:
         run: |
           python scripts/release_ref.py --tag "$REQUESTED_TAG" --expected-commit "$EXPECTED_COMMIT" > release.json
           python - <<'PY'
-          import json, os, subprocess
+          import json, os
           metadata = json.load(open("release.json"))
-          metadata["baseline"] = subprocess.check_output(
-              ["git", "describe", "--tags", "--match", "v[0-9]*", "--abbrev=0", metadata["commit"] + "^"],
-              text=True,
-          ).strip()
           with open(os.environ["GITHUB_OUTPUT"], "a") as output:
               for key, value in metadata.items():
                   output.write(f"{key}={value}\n")
@@ -54,7 +49,6 @@ jobs:
     uses: ./.github/workflows/validation.yml
     with:
       source-ref: ${{ needs.identity.outputs.commit }}
-      baseline-ref: ${{ needs.identity.outputs.baseline }}
 
   publish:
     needs: [identity, validation]

@@ -4,6 +4,9 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Maintenance
+- CPU comparisons are manual profiling tools rather than required CI/release gates. Shared-runner timing noise no longer blocks publication; correctness, installed-wheel, runtime stress and backend validation remain required.
+
 ## [2.3.0] - 2026-11-05
 
 This stable release includes the diagnostic improvements and fixes developed in

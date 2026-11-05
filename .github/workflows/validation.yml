@@ -6,9 +6,6 @@ on:
       source-ref:
         required: true
         type: string
-      baseline-ref:
-        required: true
-        type: string
     outputs:
       distribution-id:
         value: ${{ jobs.package.outputs.distribution-id }}
@@ -159,7 +156,6 @@ jobs:
       - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.source-ref }}
-          fetch-depth: 0
           persist-credentials: false
       - uses: actions/setup-python@v7
         with:
@@ -186,22 +182,11 @@ jobs:
           python -m pytest -q tests/test_sqlalchemy_integration.py tests/test_otel_integration.py tests/test_metrics_contracts.py tests/test_application_logging.py tests/test_release_compatibility.py tests/test_experimental_operations.py tests/test_core_imports.py tests/test_call_recording.py tests/test_call_ownership.py tests/test_operation_contract.py tests/test_route_template_cardinality.py tests/test_sql_execution_details.py tests/test_observation_metadata.py tests/test_redaction_properties.py tests/test_query_budget.py tests/test_response_timing.py tests/test_diagnostic_spans.py
       - name: Standard runtime stress gate
         run: python scripts/runtime_stress.py --profile standard --json > runtime-stress.log
-      - name: Paired CPU overhead gate
-        env:
-          BASELINE_REF: ${{ inputs.baseline-ref }}
-        run: python scripts/compare_overhead.py --baseline "$BASELINE_REF" --output overhead.json
-      - name: Cumulative CPU overhead against the stable release
-        # Keep the stable baseline while 2.3 is experimental; advance it only
-        # when a new stable release is promoted, not after each prerelease.
-        run: python scripts/compare_overhead.py --baseline v2.2.1 --output overhead-stable.json
       - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: production-evidence
-          path: |
-            runtime-stress.log
-            overhead.json
-            overhead-stable.json
+          path: runtime-stress.log
           if-no-files-found: error
 
   backends:

@@ -134,10 +134,11 @@ The automated workload budgets are deliberately explicit:
 | Blocked sink | A 50 ms drain/stop wait returns within 500 ms; 100 loopback requests retain p95 below 100 ms while queue drops are counted; active outputs remain open for retry |
 | Warm worker | After 300 warm-up and 1,000 further distinct-query requests, retained Python heap grows less than 8 MiB, Linux RSS less than 32 MiB, and thread count by at most two |
 | Worker replacement | Twelve sequential workers retain one bounded route series and accurate cumulative request/histogram counts |
-| CPU overhead | Nine paired measurements per logging mode; median regression within a 10% baseline budget plus three robust standard errors of paired noise; robust relative spread of both sides must be at most 10% |
 
-The stress report and paired benchmark samples are retained as workflow
-artifacts. These are reproducible release checks, not a promise of arbitrary
+The stress report is retained as a workflow artifact. CPU version comparisons
+are available as [manual profiling commands](benchmarks.md#manual-version-comparison);
+shared-runner timing variance does not block releases. These are reproducible
+workload checks, not a promise of arbitrary
 production capacity. Measure the same limits against your service's traffic,
 payload sizes and failure budget. OTLP data may be lost throughout a Collector
 outage; durable retry queues belong in the collection layer. Queue overflow is

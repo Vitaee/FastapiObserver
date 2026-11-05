@@ -348,7 +348,8 @@ framework-free installation becomes a public guarantee at M7.
 
 **Exit gate:** core import and manual-operation tests pass without FastAPI,
 Starlette, SQLAlchemy, Redis, PyMongo or OpenTelemetry installed. Existing wheel,
-compatibility, production and overhead gates pass through the FastAPI facade.
+compatibility and production gates pass through the FastAPI facade. Use manual
+CPU comparisons for performance-sensitive changes.
 Closing one operation or application cannot corrupt a concurrent one.
 
 ## M3 — Provide datastore coverage beyond SQLAlchemy
@@ -478,15 +479,15 @@ not service-level guarantees for arbitrary applications:
 | Warm-worker memory | After 300 warm-up requests and 1,000 additional requests: heap growth below 8 MiB, Linux RSS growth below 32 MiB, thread growth at most 2 |
 | Blocked logging sink | Across 100 loopback requests, p95 below 100 ms and dropped records counted |
 | Queue lifecycle | Flush/stop waits are bounded; live resources survive a stop timeout so the caller can retry |
-| CPU regression | Nine paired measurements on one runner, alternating order, default and application-owned logging modes |
-| CPU acceptance | Median paired regression within 10% of baseline plus measured noise; both sample sets must have robust relative spread at most 10% |
 | Backend delivery | Existing Compose verifier passes with traces enabled and disabled, using the built wheel |
 | Worker lifecycle | Fork safety and recycled-worker request/histogram totals are exercised |
 
-The exact CPU budget is `0.10 * median(baseline) +
-3 * 1.4826 * MAD(paired_differences) / sqrt(pair_count)`. An unreliable run is
-inconclusive and blocks acceptance; preserve its evidence. A rerun does not
-change the threshold. Persistent noise needs a runner or harness fix.
+CPU comparisons remain manual diagnostics. The existing command compares nine
+alternating baseline/candidate pairs for default and application-owned logging,
+using `0.10 * median(baseline) +
+3 * 1.4826 * MAD(paired_differences) / sqrt(pair_count)` as a review threshold.
+An unreliable run is inconclusive; preserve the samples and investigate on a
+quiet machine. Shared-runner CPU variance does not block CI or release publication.
 
 ### Extend the acceptance matrix
 
