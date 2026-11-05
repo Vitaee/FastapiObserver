@@ -194,6 +194,10 @@ def test_sigterm_drains_inflight_work_without_telemetry_loss(tmp_path, route):
         assert len(terminal) == len({r["request_id"] for r in terminal}) == 8
         assert all(r["message"] == "request.completed" for r in terminal)
         assert all(r["event"]["response_completed"] is True for r in terminal)
+        for record in terminal:
+            event = record["event"]
+            assert 0 <= event["response_start_ms"] <= event["first_body_ms"] <= event["duration_ms"]
+            assert event["stream_duration_ms"] >= (200 if route == "stream" else 0)
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX SIGTERM contract")
@@ -209,6 +213,9 @@ def test_sigterm_cancellation_does_not_claim_a_client_disconnect(tmp_path):
         assert event["cancelled"] is True
         assert event["client_disconnected"] is False
         assert event["response_completed"] is False
+        assert event["response_start_ms"] is None
+        assert event["first_body_ms"] is None
+        assert event["stream_duration_ms"] is None
 
 
 def test_unavailable_collector_preserves_local_logs_and_shutdown_budget(tmp_path):

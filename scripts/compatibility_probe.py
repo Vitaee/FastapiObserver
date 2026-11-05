@@ -54,7 +54,8 @@ def snapshot() -> dict[str, Any]:
                 for key in ("timestamp", "request_id", "library_version"):
                     payload.pop(key, None)
                 event = payload.get("event", {})
-                for key in ("duration_ms", "app_duration_ms"):
+                for key in ("duration_ms", "app_duration_ms", "response_start_ms", "first_body_ms",
+                            "stream_duration_ms"):
                     event.pop(key, None)
                 # Additive diagnostics have their own contract tests. Retain
                 # exact comparison for every field frozen from the 2.2.1 tag.

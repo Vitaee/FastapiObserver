@@ -66,7 +66,7 @@ def test_query_diagnostics_retain_only_bounded_fingerprints(caplog):
         state.add_call("db", 0.001, sensitive)
     middleware = RequestLoggingMiddleware(FastAPI(), ObservabilitySettings())
     with caplog.at_level(logging.WARNING):
-        middleware._report_repeated_statement("GET", "/report", state.statements)
+        middleware._report_repeated_statement("GET", "/report", state)
     record = next(r for r in caplog.records if r.msg == "db.n_plus_one")
     assert "SQL_SECRET" not in repr(record.event)
     assert "statement" not in record.event
@@ -81,7 +81,9 @@ def test_query_diagnostics_retain_only_bounded_fingerprints(caplog):
 
     with caplog.at_level(logging.CRITICAL):
         for number in range(5_000):
-            middleware._report_repeated_statement("GET", "/report", {f"{number:064x}": 12})
+            middleware._report_repeated_statement(
+                "GET", "/report", RequestState({}, statements={f"{number:064x}": 12})
+            )
     assert len(middleware._reported_statements) <= 1_024
 
 

@@ -22,6 +22,7 @@ Each record says what was decided, the evidence for it and what it cost. Read th
 | [0016](0016-experimental-python-operations.md) | Experimental Python operations | Reuse context, logging and client hooks for opt-in manual operations, preserving the FastAPI interface. |
 | [0017](0017-record-calls-against-their-start-owner.md) | Completed-call ownership | Capture ownership at start, invalidate weak handles at closure and share recording across native/manual/span sources. |
 | [0018](0018-additive-diagnostic-metadata.md) | Additive diagnostic metadata | Preserve existing counts while exposing native failures, coverage, sampling policy and scoped query budgets. |
+| [0019](0019-stream-timing-and-diagnostic-events.md) | Stream timing and diagnostic events | Measure successful ASGI sends and annotate existing server spans with bounded, safe diagnostic facts. |
 
 ## Writing a new record
 

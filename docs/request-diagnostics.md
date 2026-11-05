@@ -1,6 +1,6 @@
 # Request summaries and query budgets
 
-The upcoming `2.3.0a3` adds diagnostic fields while retaining existing request
+Released `2.3.0a3` adds diagnostic fields while retaining existing request
 fields, metric names/labels and successful-SQL contributions to `db.count/ms`.
 The experimental operation boundary emits the same dependency metadata.
 
@@ -16,6 +16,53 @@ Plain Starlette routes and FastAPI router prefixes remain supported.
 background work and cleanup. `db.ms/http.ms` are sums of completed call durations,
 not a partition of request latency. Parallel calls can exceed elapsed time.
 No critical-path or application-CPU attribution is inferred.
+
+The next alpha adds three millisecond fields. Times use a monotonic clock and
+are rounded to three decimals:
+
+| Field | Meaning | When unknown |
+|---|---|---|
+| `response_start_ms` | Request entry through successful `send(http.response.start)` completion | No successful response-start send |
+| `first_body_ms` | Request entry through the first successful nonempty body send | No nonempty body was successfully sent |
+| `stream_duration_ms` | First nonempty body send completion through successful response completion, including final trailers | Empty or unfinished response |
+
+A completed single-chunk body has `stream_duration_ms: 0`. Empty chunks do not
+start the stream clock. These measure ASGI sends, including transport
+backpressure, **not client-perceived time to first byte**. Headers can be buffered;
+a server/proxy can buffer body data or suppress it for HEAD. No extra receive or
+send messages are introduced. `response_completed`, `cancelled` and
+`client_disconnected` distinguish interrupted responses; unknown times are `null`,
+not zero. Background work does not extend a completed stream's timing.
+
+## Diagnostic events on existing traces
+
+When a request already has a recording **server** span, the next alpha adds:
+
+| Event | Attributes |
+|---|---|
+| `fastapiobserver.db.n_plus_one` | `count`, `threshold` (10), `statement_fingerprint` (SHA-256) |
+| `fastapiobserver.threadpool.saturated` | `busy`, `limit`, `waiting` |
+| `fastapiobserver.db.pool_exhausted` | `checked_out`, `limit` |
+
+Each event is attempted at most once per request (three events maximum), even
+when many watched pools are full. The first observed full database pool supplies
+the snapshot; its identity/URL is excluded. Events do not create providers,
+tracers or child spans, and a faulty application span cannot break the request.
+They are independent of process-wide log warning rate limits and remain subject
+to the application's sampling, span-event limits and exporter delivery.
+
+N+1 events capture the highest repeated statement count at the final body send,
+before ASGI tracing may end the server span. On interruption or later work they
+can be added at application completion only if the span is still recording.
+Their count is a snapshot; the terminal request log can include later queries.
+No raw SQL, parameters or engine URLs are copied into these events. Fingerprints
+identify exact statements and are not anonymization. Existing SQL client-span
+attributes remain under the instrumentor/provider owner's policy.
+
+Pool pressure is checked at request entry after correlation is established.
+It reports a process-wide capacity snapshot, not how long that request waited
+or proof that pool pressure caused its latency. Process-wide event-loop lag is
+not attached to an arbitrary request span.
 
 ## SQL execution detail
 

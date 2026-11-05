@@ -118,9 +118,7 @@ class LogSamplingFilter(logging.Filter):
                 or not isinstance(event, dict)):
             return True
         owner = get_request_state()
-        metadata: dict[str, object] = {
-            "owner": "application", "inclusion_probability": None, "reason": "unknown",
-        }
+        metadata: dict[str, object]
         if owner is not None and owner.observer_logging and state._QUEUE_LISTENER is not None:
             held = state._HELD_LOG_FILTER
             reason, probability = "all", 1.0
@@ -134,6 +132,10 @@ class LogSamplingFilter(logging.Filter):
                 probability = (owner.sample_probability if owner.sample_probability is not None
                                else held.sample_rate)
             metadata = {"owner": "observer", "inclusion_probability": probability, "reason": reason}
+        else:
+            metadata = {
+                "owner": "application", "inclusion_probability": None, "reason": "unknown",
+            }
         event["log_sampling"] = metadata
         return True
 

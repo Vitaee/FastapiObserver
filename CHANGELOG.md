@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- Request events add `response_start_ms`, `first_body_ms` and `stream_duration_ms`, measured at successful ASGI sends. Empty/unfinished timings remain unknown; completed response and application/background durations retain their existing meanings.
+- Existing recording server spans receive bounded N+1 and pool diagnostic events, independently of log warning rate limits. No providers or spans are created, and attributes exclude raw SQL and engine URLs. Pool events are capacity snapshots, not measured request waits.
+
+### Maintenance
+- Profiling identified redundant nested-mapping copies and runtime typing checks in log formatting. Sanitization now reuses its existing copy step and standard-library mapping checks without bypassing policy or application sanitizers.
+- SQLite integration tests close connections on the TestClient thread that opened them and assert closure instead of suppressing resource warnings.
+- Roadmap and baseline documentation distinguish released alpha 3 capabilities from unfinished lifecycle, payload bounds and portable-contract work.
+
 ## [2.3.0a3] - 2026-11-05
 
 ### Added

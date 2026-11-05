@@ -1,6 +1,7 @@
 import logging
 import os
 import tempfile
+from contextlib import closing
 from typing import Any
 
 from fastapiobserver import ObservabilitySettings
@@ -28,10 +29,10 @@ def test_rotating_file_sink() -> None:
         sink = RotatingFileSink(log_dir=d, filename="test.log", max_bytes=100, backup_count=2)
         assert sink.name == "rotating_file"
 
-        handler = sink.create_handler(formatter)
-        assert isinstance(handler, logging.handlers.RotatingFileHandler)
-        assert handler.formatter is formatter
-        assert handler.baseFilename == os.path.join(d, "test.log")
+        with closing(sink.create_handler(formatter)) as handler:
+            assert isinstance(handler, logging.handlers.RotatingFileHandler)
+            assert handler.formatter is formatter
+            assert handler.baseFilename == os.path.join(d, "test.log")
 
 def test_sink_registry() -> None:
     clear_sinks()
@@ -68,9 +69,13 @@ def test_build_sink_handlers_creates_configured_sinks() -> None:
 
         handlers_with_names = build_sink_handlers(settings, formatter)
 
-        names = [n for _, n in handlers_with_names]
-        assert "stdout" in names
-        assert "rotating_file" in names
+        try:
+            names = [n for _, n in handlers_with_names]
+            assert "stdout" in names
+            assert "rotating_file" in names
+        finally:
+            for handler, _ in handlers_with_names:
+                handler.close()
 
 def test_sinks_registry_contract() -> None:
     from fastapiobserver.sinks import register_sink, get_registered_sinks, clear_sinks, StdoutSink

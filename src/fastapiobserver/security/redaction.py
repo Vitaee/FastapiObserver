@@ -198,9 +198,9 @@ def _sanitize_value(
         # Too deep to inspect: mask rather than pass unchecked data through.
         return policy.mask_text
     if isinstance(value, Mapping):
-        string_mapping = {str(k): v for k, v in value.items()}
+        # _sanitize_mapping already converts keys while building the safe copy.
         return _sanitize_mapping(
-            string_mapping,
+            value,
             policy,
             sensitive_fields,
             sensitive_headers,
