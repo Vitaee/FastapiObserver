@@ -157,5 +157,5 @@ an enabled native adapter or sampled fallback. See the
 See the [2.2.1 baseline](baseline.md),
 [extraction decision](decisions/0016-experimental-python-operations.md) and
 [call ownership decision](decisions/0017-record-calls-against-their-start-owner.md),
-with [initial operation evidence](validation/2026-11-04-experimental-core.md) and
-[call recording evidence](validation/2026-11-04-call-recording.md).
+with [initial operation evidence](https://github.com/Vitaee/FastapiObserver/blob/v2.3.0/docs/validation/2026-11-04-experimental-core.md) and
+[call recording evidence](https://github.com/Vitaee/FastapiObserver/blob/v2.3.0/docs/validation/2026-11-04-call-recording.md).

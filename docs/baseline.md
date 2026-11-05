@@ -39,7 +39,7 @@ dependencies. The validation workflow now passes the project's selected
 requirements explicitly alongside the same built wheel. A fresh Python 3.11
 check resolved FastAPI 0.133.0, Starlette 1.3.1 and SQLAlchemy 2.0.0 and passed
 the installed-wheel integration checks. See the
-[validation report](validation/2026-11-04-experimental-core.md).
+[validation report](https://github.com/Vitaee/FastapiObserver/blob/v2.3.0/docs/validation/2026-11-04-experimental-core.md).
 
 ## Claims and their limits
 
