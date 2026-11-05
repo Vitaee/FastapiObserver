@@ -190,6 +190,10 @@ jobs:
         env:
           BASELINE_REF: ${{ inputs.baseline-ref }}
         run: python scripts/compare_overhead.py --baseline "$BASELINE_REF" --output overhead.json
+      - name: Cumulative CPU overhead against the stable release
+        # Keep the stable baseline while 2.3 is experimental; advance it only
+        # when a new stable release is promoted, not after each prerelease.
+        run: python scripts/compare_overhead.py --baseline v2.2.1 --output overhead-stable.json
       - uses: actions/upload-artifact@v7
         if: always()
         with:
@@ -197,6 +201,7 @@ jobs:
           path: |
             runtime-stress.log
             overhead.json
+            overhead-stable.json
           if-no-files-found: error
 
   backends:

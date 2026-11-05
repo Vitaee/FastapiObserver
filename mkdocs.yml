@@ -60,6 +60,7 @@ nav:
   - Operations:
       - Architecture: architecture.md
       - Compatibility Baseline: baseline.md
+      - Stream Timing Validation: validation/2026-11-05-streaming-diagnostics.md
       - Experimental Python Operations: experimental-core.md
       - Draft Operation Contract: operation-contract.md
       - Roadmap: roadmap.md

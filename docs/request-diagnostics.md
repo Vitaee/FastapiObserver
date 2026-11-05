@@ -64,6 +64,9 @@ It reports a process-wide capacity snapshot, not how long that request waited
 or proof that pool pressure caused its latency. Process-wide event-loop lag is
 not attached to an arbitrary request span.
 
+See the [validation evidence](validation/2026-11-05-streaming-diagnostics.md)
+for compatibility, installed-wheel/backend checks and CPU comparisons.
+
 ## SQL execution detail
 
 For an explicitly instrumented SQLAlchemy engine:

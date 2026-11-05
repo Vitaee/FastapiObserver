@@ -10,7 +10,9 @@ All notable changes to this project will be documented in this file.
 
 ### Maintenance
 - Profiling identified redundant nested-mapping copies and runtime typing checks in log formatting. Sanitization now reuses its existing copy step and standard-library mapping checks without bypassing policy or application sanitizers.
+- Request helpers reuse the captured state and completed single-body timing. Disabled metrics avoid route/hook work; late-registered hooks still run at response completion. Shared CI retains paired comparisons against both its rolling reference and stable 2.2.1.
 - SQLite integration tests close connections on the TestClient thread that opened them and assert closure instead of suppressing resource warnings.
+- Resource-owning sink tests close their handlers, and the multiprocess cleanup test imports the Prometheus client before changing its temporary directory to avoid selecting a different process-wide metrics mode.
 - Roadmap and baseline documentation distinguish released alpha 3 capabilities from unfinished lifecycle, payload bounds and portable-contract work.
 
 ## [2.3.0a3] - 2026-11-05
