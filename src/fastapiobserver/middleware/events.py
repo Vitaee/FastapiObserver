@@ -5,7 +5,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.routing import Match
 from starlette.types import Scope
 
-from ..request_context import UNMATCHED_ROUTE, get_request_state, route_template
+from ..request_context import UNMATCHED_ROUTE, RequestState, get_request_state, route_template
 from ..security import SecurityPolicy, strip_url_credentials
 from ..security.redaction import redact_body
 
@@ -71,7 +71,7 @@ def _classify_error(status_code: int, error: Exception | None) -> str:
     return "ok"
 
 
-def _extract_route_template(scope: Scope) -> str:
+def _extract_route_template(scope: Scope, state: RequestState | None = None) -> str:
     """Return the metrics ``path`` label: the matched route template if known.
 
     After routing, the scope holds the matched route's template (e.g.
@@ -81,7 +81,7 @@ def _extract_route_template(scope: Scope) -> str:
     middleware rejected, and shares ``UNMATCHED_ROUTE`` instead of adding a time
     series per URL.
     """
-    state = get_request_state()
+    state = state if state is not None else get_request_state()
     if state is not None and state.scope is scope and state.resolved_route is not None:
         return state.resolved_route
     template = _resolve_route_template(scope)

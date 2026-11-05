@@ -11,7 +11,7 @@ from ..logging.filters import RequestIdFilter, TraceContextFilter
 from ..logging.held import LogSamplingFilter, keep_request_logs
 from ..metrics import MetricsBackend, NoopMetricsBackend
 from ..pools import check_pools
-from ..request_context import UNMATCHED_ROUTE, RequestState, get_request_state
+from ..request_context import UNMATCHED_ROUTE, RequestState
 from ..security import (
     SecurityPolicy,
     TrustedProxyPolicy,
@@ -77,10 +77,10 @@ class RequestLoggingMiddleware:
         start = time.perf_counter()
         raw_headers = scope.get("headers", [])
         client_ip, trusted_source = self.ip_resolver.resolve(scope, raw_headers)
-        request_id = self.context_manager.initialize(scope, raw_headers, trusted_source)
-        request_state = get_request_state()
-        if request_state is not None:
-            request_state.observer_logging = self.configure_logging
+        request_id, request_state = self.context_manager.initialize(
+            scope, raw_headers, trusted_source
+        )
+        request_state.observer_logging = self.configure_logging
 
         path = scope.get("path", "")
         method = scope.get("method", "UNKNOWN")
@@ -136,7 +136,7 @@ class RequestLoggingMiddleware:
 
             response_body_capture.capture_from_message(message, "http.response.body")
             if (message["type"] == "http.response.body" and not message.get("more_body", False)
-                    and request_state is not None and request_state.span is not None):
+                    and request_state.span is not None):
                 # ASGI tracing may end its server span inside send(final_body).
                 self._report_repeated_statement(method, "", request_state, warn=False)
             await send(message)
@@ -160,7 +160,9 @@ class RequestLoggingMiddleware:
                     first_body = sent_at
             if finished and response_finished is None:
                 response_finished = sent_at
-                self._observe_response(scope, method, status_code, response_finished - start)
+                self._observe_response(
+                    scope, method, status_code, response_finished - start, request_state
+                )
 
         try:
             check_pools()
@@ -202,9 +204,10 @@ class RequestLoggingMiddleware:
                     first_body=first_body,
                     response_finished=response_finished,
                     disconnected_at=disconnected_at,
+                    request_state=request_state,
                 )
             finally:
-                self.context_manager.cleanup()
+                self.context_manager.cleanup(request_state)
 
     def _finalize_request(
         self,
@@ -223,6 +226,7 @@ class RequestLoggingMiddleware:
         first_body: float | None,
         response_finished: float | None,
         disconnected_at: float | None,
+        request_state: RequestState,
     ) -> None:
         app_finished = time.perf_counter()
         app_duration_seconds = max(0.0, app_finished - start)
@@ -242,8 +246,7 @@ class RequestLoggingMiddleware:
         else:
             level, message = logging.INFO, "request.completed"
 
-        route_template = _extract_route_template(scope)
-        request_state = get_request_state()
+        route_template = _extract_route_template(scope, request_state)
         failed = level >= logging.ERROR
         if failed or app_duration_seconds * 1000 >= self.settings.log_slow_request_ms:
             keep_request_logs(failed=failed)
@@ -266,13 +269,18 @@ class RequestLoggingMiddleware:
                 round(max(0.0, response_started - start) * 1000, 3)
                 if response_started is not None else None
             )
-            safe_event["first_body_ms"] = (
-                round(max(0.0, first_body - start) * 1000, 3) if first_body is not None else None
-            )
-            safe_event["stream_duration_ms"] = (
-                round(max(0.0, response_finished - first_body) * 1000, 3)
-                if response_finished is not None and first_body is not None else None
-            )
+            if first_body is None:
+                safe_event["first_body_ms"] = safe_event["stream_duration_ms"] = None
+            elif first_body == response_finished:
+                # A single successful body send already has its elapsed time.
+                safe_event["first_body_ms"] = safe_event["duration_ms"]
+                safe_event["stream_duration_ms"] = 0.0
+            else:
+                safe_event["first_body_ms"] = round(max(0.0, first_body - start) * 1000, 3)
+                safe_event["stream_duration_ms"] = (
+                    round(max(0.0, response_finished - first_body) * 1000, 3)
+                    if response_finished is not None else None
+                )
             if route_template != UNMATCHED_ROUTE:
                 safe_event["http.route"] = route_template
             safe_event["response_completed"] = response_finished is not None
@@ -282,7 +290,7 @@ class RequestLoggingMiddleware:
                 safe_event["after_disconnect_ms"] = round(
                     max(0.0, app_finished - disconnected_at) * 1000, 3
                 )
-            if request_state is not None:
+            if not request_state.closed:
                 safe_event.update(request_state.summarize_calls())
             self.logger.log(
                 level,
@@ -292,21 +300,22 @@ class RequestLoggingMiddleware:
             )
 
         metric_method = method if method in _HTTP_METHODS else "_OTHER"
-        if request_state is not None and request_state.statements:
+        if request_state.statements:
             self._report_repeated_statement(
                 metric_method, route_template, request_state
             )
 
         if response_finished is None:
-            self._observe_response(scope, method, status_code, duration_seconds)
+            self._observe_response(scope, method, status_code, duration_seconds, request_state)
 
     def _observe_response(
-        self, scope: Scope, method: str, status_code: int, duration_seconds: float
+        self, scope: Scope, method: str, status_code: int, duration_seconds: float,
+        request_state: RequestState,
     ) -> None:
         metric_method = method if method in _HTTP_METHODS else "_OTHER"
         self.metrics_recorder.observe(
             method=metric_method,
-            path=_extract_route_template(scope),
+            path=_extract_route_template(scope, request_state),
             status_code=status_code,
             duration_seconds=max(0.0, duration_seconds),
             scope=scope,
