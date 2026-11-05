@@ -4,9 +4,27 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [2.3.0] - 2026-11-05
+
+This stable release includes the diagnostic improvements and fixes developed in
+the 2.3 prereleases. The opt-in `fastapiobserver.experimental` operation API and
+its `0.1.0` event schema remain experimental; this does not promote the broader
+generic-core or portable-contract roadmap.
+
 ### Added
+- Request summaries include the matched `http.route`, separate native SQLAlchemy attempt/success/failure detail, and honest observation/sampling metadata. Existing successful-SQL contributions to `db.count/ms` and metric meanings are preserved.
+- `fastapiobserver.testing.assert_query_budget(engine, max_queries)` checks native cursor-entry attempts, including failures and nested scopes, independently of logs or tracing.
+- Experimental sync/async Python operations reuse existing logging, SQLAlchemy and HTTP helpers. Custom clients can report completed calls or use exactly-once completion handles; nested operations restore their outer context.
 - Request events add `response_start_ms`, `first_body_ms` and `stream_duration_ms`, measured at successful ASGI sends. Empty/unfinished timings remain unknown; completed response and application/background durations retain their existing meanings.
 - Existing recording server spans receive bounded N+1 and pool diagnostic events, independently of log warning rate limits. No providers or spans are created, and attributes exclude raw SQL and engine URLs. Pool events are capacity snapshots, not measured request waits.
+
+### Fixed
+- SQL, native HTTP and sampled client-span completions retain their original request/operation across nesting and callbacks in unrelated threads. Late completions cannot move to another owner or double-count native HTTP calls.
+- Closed requests and operations invalidate outstanding weak recording handles and release detailed state. Span ownership tracking is bounded and fork-safe.
+
+### Testing
+- Generated redaction cases cover nested, encoded, malformed and truncated bodies across JSON, real OTLP records and safe stderr failure paths. Frozen 2.2.1 fields retain their compatibility checks, with separate contracts for additive diagnostics.
+- Installed-wheel validation covers Python 3.11–3.15, minimum dependencies, real sync/async SQL tracing, streaming/shutdown cases and the full backend stack with tracing enabled and disabled.
 
 ### Maintenance
 - Profiling identified redundant nested-mapping copies and runtime typing checks in log formatting. Sanitization now reuses its existing copy step and standard-library mapping checks without bypassing policy or application sanitizers.

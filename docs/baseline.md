@@ -14,7 +14,7 @@ immutable `v2.2.1` tag. The candidate runs the same probe against that fixture.
 Timestamps, generated request IDs, elapsed durations, library version and
 exception stack locations are normalized; existing field names and outcomes are
 not. Released alpha 3 adds `http.route`, `observation` and `log_sampling`;
-the probe projects out exactly those additive diagnostics. The next slice also
+the probe projects out exactly those additive diagnostics. For `2.3.0`, it also
 excludes its three new elapsed-time fields (`response_start_ms`, `first_body_ms`,
 `stream_duration_ms`) from the frozen comparison. Separate contract tests cover
 each addition without rewriting the tagged fixture.

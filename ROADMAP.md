@@ -1,6 +1,6 @@
 # Roadmap: Python observability and a portable ecosystem
 
-**Reviewed:** 5 November 2026 · **Released baseline:** 2.2.1 · **Status:** proposed implementation roadmap
+**Reviewed:** 5 November 2026 · **Release:** 2.3.0 · **Compatibility baseline:** 2.2.1 · **Status:** proposed implementation roadmap
 
 ## Current delivery slice
 
@@ -26,11 +26,16 @@ redaction checks and an engine-scoped query-budget helper. See
 It preserves legacy count/metric meanings and keeps broad integrations and
 language implementations outside this delivery.
 
-The next slice adds ASGI response-start/first-body/stream timing and bounded
+The stable `2.3.0` release includes the preceding slices and adds ASGI
+response-start/first-body/stream timing and bounded
 N+1/pool events on existing recording server spans. It also removes redundant
 log-sanitization work and corrects SQLite integration-test cleanup. These changes
 retain request/count semantics and do not complete the generic lifecycle or
 portable contract.
+
+Stable distribution versioning preserves the existing FastAPI product's release
+policy. The opt-in operation API and `0.1.0` schema remain experimental; the
+broader generic product and portable contract still require their own gates.
 
 Prior real FastAPI adoption is reported by the maintainer. The maintainer chose
 the bundled application for this change's reproducible validation; independent

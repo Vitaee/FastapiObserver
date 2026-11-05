@@ -1,6 +1,6 @@
 # Request summaries and query budgets
 
-Released `2.3.0a3` adds diagnostic fields while retaining existing request
+Release `2.3.0` adds diagnostic fields while retaining existing request
 fields, metric names/labels and successful-SQL contributions to `db.count/ms`.
 The experimental operation boundary emits the same dependency metadata.
 
@@ -17,7 +17,7 @@ background work and cleanup. `db.ms/http.ms` are sums of completed call duration
 not a partition of request latency. Parallel calls can exceed elapsed time.
 No critical-path or application-CPU attribution is inferred.
 
-The next alpha adds three millisecond fields. Times use a monotonic clock and
+Version `2.3.0` adds three millisecond fields. Times use a monotonic clock and
 are rounded to three decimals:
 
 | Field | Meaning | When unknown |
@@ -36,7 +36,7 @@ not zero. Background work does not extend a completed stream's timing.
 
 ## Diagnostic events on existing traces
 
-When a request already has a recording **server** span, the next alpha adds:
+When a request already has a recording **server** span, `2.3.0` adds:
 
 | Event | Attributes |
 |---|---|

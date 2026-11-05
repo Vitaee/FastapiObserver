@@ -3,7 +3,8 @@
 The `fastapiobserver.experimental` module observes a sync or async Python
 operation using the existing logging, SQLAlchemy and HTTP helpers. It is an
 opt-in experiment; its interface and operation event schema can change before
-promotion. The stable FastAPI interface and request records are unchanged.
+promotion, including in the stable `2.3.0` distribution. The stable FastAPI
+interface and existing request fields retain their compatibility guarantees.
 
 ```python
 import logging
@@ -55,7 +56,7 @@ framework middleware, handlers, providers, instrumentors, threads or signals.
 Run the [Python-only example](https://github.com/Vitaee/FastapiObserver/blob/main/examples/python_operation.py):
 
 ```bash
-python -m pip install --pre 'fastapi-observer==2.3.0a2' sqlalchemy httpx
+python -m pip install 'fastapi-observer==2.3.0' sqlalchemy httpx
 python examples/python_operation.py
 ```
 
