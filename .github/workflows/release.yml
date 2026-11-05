@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Existing tag to release; select that tag as the workflow ref."
+        description: "Existing tag to release (for example v2.3.0); the workflow may run from main."
         required: false
         type: string
 
@@ -35,6 +35,13 @@ jobs:
           REQUESTED_TAG: ${{ inputs.tag || (github.ref_type == 'tag' && github.ref_name) || '' }}
           EXPECTED_COMMIT: ${{ github.sha }}
         run: |
+          # Manual retries use the current workflow while keeping source pinned
+          # to the existing tag. Tag pushes still require github.sha exactly.
+          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ] && [ -n "$REQUESTED_TAG" ]; then
+            RELEASE_REF="refs/tags/v${REQUESTED_TAG#v}"
+            EXPECTED_COMMIT="$(git rev-parse --verify "${RELEASE_REF}^{commit}")"
+            git checkout --detach "$EXPECTED_COMMIT"
+          fi
           python scripts/release_ref.py --tag "$REQUESTED_TAG" --expected-commit "$EXPECTED_COMMIT" > release.json
           python - <<'PY'
           import json, os
