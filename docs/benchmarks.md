@@ -35,7 +35,7 @@ The 2.3.0 release validation compared it with 2.2.1 in nine alternating pairs wi
 | Default | 49.6 µs | 55.2 µs |
 | Application-owned (`configure_logging=False`) | 34.4 µs | 38.5 µs |
 
-The share on the request's thread wasn't measured for 2.3.0. Raw results are in the [validation note](validation/2026-11-05-streaming-diagnostics.md#cpu-overhead).
+The share on the request's thread wasn't measured for 2.3.0. Raw results are in the [validation note](https://github.com/Vitaee/FastapiObserver/blob/v2.3.0/docs/validation/2026-11-05-streaming-diagnostics.md#cpu-overhead).
 
 ```bash
 python examples/benchmarks/request_cpu.py default > /dev/null

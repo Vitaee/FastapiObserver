@@ -9,13 +9,13 @@ in the existing distribution. Its scope is the
 [2.2.1 compatibility baseline](https://github.com/Vitaee/FastapiObserver/blob/main/docs/baseline.md),
 the bundled application-owned logging regression, a plain-Python SQLite/HTTP
 proof and the experimental operation boundary. See the
-[implementation plan](https://github.com/Vitaee/FastapiObserver/blob/main/docs/plans/2026-11-04-experimental-core.md).
+[implementation plan](https://github.com/Vitaee/FastapiObserver/blob/v2.3.0/docs/plans/2026-11-04-experimental-core.md).
 
 The second slice, released as `2.3.0a2`, shares completed-call recording across
 native integrations and experimental custom callbacks. It captures ownership
 at start, rejects late completion, bounds sampled-span tracking and records a
 narrow [draft operation contract](https://github.com/Vitaee/FastapiObserver/blob/main/spec/README.md).
-See its [implementation plan](https://github.com/Vitaee/FastapiObserver/blob/main/docs/plans/2026-11-04-call-recording.md).
+See its [implementation plan](https://github.com/Vitaee/FastapiObserver/blob/v2.3.0/docs/plans/2026-11-04-call-recording.md).
 This advances the M1/M2 interfaces; it does not complete either milestone or
 claim new datastore integrations or portable-contract 1.0.
 
