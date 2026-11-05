@@ -11,6 +11,7 @@ from ..logging.filters import RequestIdFilter, TraceContextFilter
 from ..logging.held import LogSamplingFilter, keep_request_logs
 from ..metrics import MetricsBackend, NoopMetricsBackend
 from ..pools import check_pools
+from ..plugins import _METRIC_HOOKS
 from ..request_context import UNMATCHED_ROUTE, RequestState
 from ..security import (
     SecurityPolicy,
@@ -312,19 +313,21 @@ class RequestLoggingMiddleware:
         self, scope: Scope, method: str, status_code: int, duration_seconds: float,
         request_state: RequestState,
     ) -> None:
-        metric_method = method if method in _HTTP_METHODS else "_OTHER"
-        self.metrics_recorder.observe(
-            method=metric_method,
-            path=_extract_route_template(scope, request_state),
-            status_code=status_code,
-            duration_seconds=max(0.0, duration_seconds),
-            scope=scope,
-        )
-        self.metrics_recorder.emit_hooks(
-            scope=scope,
-            status_code=status_code,
-            duration_seconds=duration_seconds,
-        )
+        if not isinstance(self.metrics_backend, NoopMetricsBackend):
+            metric_method = method if method in _HTTP_METHODS else "_OTHER"
+            self.metrics_recorder.observe(
+                method=metric_method,
+                path=_extract_route_template(scope, request_state),
+                status_code=status_code,
+                duration_seconds=max(0.0, duration_seconds),
+                scope=scope,
+            )
+        if _METRIC_HOOKS:
+            self.metrics_recorder.emit_hooks(
+                scope=scope,
+                status_code=status_code,
+                duration_seconds=duration_seconds,
+            )
 
     def _report_repeated_statement(
         self, method: str, route: str, state: RequestState, *, warn: bool = True

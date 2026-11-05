@@ -10,6 +10,7 @@ from fastapiobserver import ObservabilitySettings
 from fastapiobserver.middleware.request_logging import RequestLoggingMiddleware
 import fastapiobserver.middleware.request_logging as request_logging
 from fastapiobserver.request_context import get_request_state
+from fastapiobserver.plugins import register_metric_hook
 
 
 class _Metrics:
@@ -86,6 +87,34 @@ def test_http_metrics_finish_before_background_work(monkeypatch, caplog) -> None
     assert records[0].event["response_start_ms"] == 1000
     assert records[0].event["first_body_ms"] == 2000
     assert records[0].event["stream_duration_ms"] == 0
+
+
+def test_late_metric_hook_runs_at_response_completion_with_backend_disabled(monkeypatch):
+    clock = [1.0]
+    monkeypatch.setattr(request_logging, "time", SimpleNamespace(perf_counter=lambda: clock[0]))
+    calls = []
+
+    async def app(scope, receive, send):
+        await send({"type": "http.response.start", "status": 202, "headers": []})
+        clock[0] = 2.0
+        await send({"type": "http.response.body", "body": b"ok"})
+        assert calls == [("/hook", 202, 1.0)]
+        clock[0] = 5.0
+
+    middleware = RequestLoggingMiddleware(app, ObservabilitySettings())
+    register_metric_hook("late", lambda request, response, duration: calls.append(
+        (request.url.path, response.status_code, duration)
+    ))
+
+    async def receive():
+        return {"type": "http.request"}
+
+    async def send(message):
+        pass
+
+    asyncio.run(middleware({"type": "http", "method": "GET", "path": "/hook", "headers": []},
+                           receive, send))
+    assert calls == [("/hook", 202, 1.0)]
 
 
 @pytest.mark.parametrize("cancelled", [False, True])
