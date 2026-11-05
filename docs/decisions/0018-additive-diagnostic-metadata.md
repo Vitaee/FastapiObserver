@@ -41,7 +41,9 @@ separate tests for their contracts. SQL failure-only scopes now have an explicit
 zero legacy DB count alongside native failure detail. No SQL text is retained.
 
 Additional snapshots and metadata have a measurable serialization/resource cost;
-existing CPU/runtime gates remain required. Sampling metadata is not a delivery
+existing CPU/runtime gates remain required. (Since the release after 2.3.0, CPU
+comparisons are a [manual check](../benchmarks.md#manual-version-comparison);
+the runtime budgets still gate releases.) Sampling metadata is not a delivery
 guarantee. A query budget covers one engine's native cursor-entry layer, not all
 databases or out-of-context work. No new transport, datastore integration,
 critical-path estimator or pytest plugin is introduced.

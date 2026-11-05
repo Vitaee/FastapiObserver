@@ -84,7 +84,7 @@ Explicit variables and Python arguments always win over profile defaults. Every 
 ## What you get
 
 - **One JSON line per request** with method, path, sent status, response duration, total application lifetime and client IP, and your service's name, environment and version on every line, including your own `logging` calls. HTTP latency excludes background work; later failures still appear on the correlated request line.
-- **Request IDs** taken from `X-Request-ID` when the caller is a trusted proxy, generated otherwise, returned in the response and passed on to the services you call, so one ID finds a request's logs in every service.
+- **Request IDs** taken from `X-Request-ID` when the caller is a trusted proxy, generated otherwise, returned in the response and passed on to the services you call through `instrument_httpx_client()`, `instrument_requests_session()`, `inject_trace_headers()` or OpenTelemetry-instrumented clients, so one ID finds a request's logs in every service. See [request ID forwarding](https://vitaee.github.io/FastapiObserver/opentelemetry/#request-id-forwarding).
 - **Field-name redaction on by default.** The library's outputs mask values under configured sensitive field and header names, including passwords, tokens, API keys, `Authorization` and cookies. URL credentials are masked in exception messages and stack traces. Arbitrary free text is not scanned for secrets or personal data; retain your approved sanitizer for that. Presets (`strict`, `pci`, `gdpr`) select fields and masking rules, not compliance guarantees. See the [redaction limits](https://vitaee.github.io/FastapiObserver/security/#what-redaction-covers).
 - **Prometheus metrics** labelled by route template (`/orders/{order_id}`). Requests no route matches, such as scanners, CORS preflights and requests an auth middleware rejects, share one `<unmatched>` label, and made-up methods share `_OTHER`, so neither IDs nor anonymous clients explode cardinality.
 - **OpenTelemetry traces**, from FastAPI's own support on 0.142 and later, with `trace_id` and `span_id` on log records when trace context is available, and optional log export over OTLP using the same field-name redaction.
@@ -120,7 +120,7 @@ Since 0.142, FastAPI traces requests on its own once an OpenTelemetry provider i
 - You already send everything to Logfire, Datadog or Sentry: their own FastAPI integrations fit better.
 - Your app isn't built on FastAPI or Starlette.
 
-What it costs: with default settings, about 49 µs of CPU per request on an Apple M1, 35 µs of it on the request's own thread and the rest writing the line on a background thread. See the [benchmarks](https://vitaee.github.io/FastapiObserver/benchmarks/), including outbound HTTP diagnostics and a comparison with wiring the same stack by hand.
+What it costs: in 2.3.0 with default settings, about 55 µs of CPU per request on an Apple ARM64 Mac, including writing the line on a background thread, and about 38 µs when the application owns logging (`configure_logging=False`). See the [benchmarks](https://vitaee.github.io/FastapiObserver/benchmarks/), including outbound HTTP diagnostics and a comparison with wiring the same stack by hand.
 
 ## Works with
 
