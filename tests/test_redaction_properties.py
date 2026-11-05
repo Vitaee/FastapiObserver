@@ -5,6 +5,7 @@ import io
 import json
 import logging
 import queue
+from types import MappingProxyType
 from urllib.parse import quote
 
 from hypothesis import given, settings, strategies as st
@@ -15,6 +16,20 @@ from fastapiobserver import ObservabilitySettings, StructuredJsonFormatter
 from fastapiobserver.middleware.body_capture import _BodyCapture
 from fastapiobserver.middleware.events import _RequestEventBuilder
 from fastapiobserver.security import SecurityPolicy
+from fastapiobserver.security.redaction import sanitize_record
+
+
+@given(values=st.dictionaries(st.one_of(st.text(max_size=30), st.integers()),
+                             st.one_of(st.none(), st.booleans(), st.integers(), st.text()),
+                             max_size=15))
+def test_nested_readonly_mappings_preserve_key_conversion_and_redaction(values):
+    source = MappingProxyType({**values, "PaSsWoRd": "private-mapping-value"})
+    result = sanitize_record({"event": {"nested": source}}, SecurityPolicy())
+    expected = sanitize_record({"event": {"nested": dict(source)}}, SecurityPolicy())
+    assert result == expected
+    assert all(isinstance(key, str) for key in result["event"]["nested"])
+    assert "private-mapping-value" not in json.dumps(result)
+    assert source["PaSsWoRd"] == "private-mapping-value"
 
 
 @st.composite

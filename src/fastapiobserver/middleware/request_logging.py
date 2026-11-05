@@ -11,7 +11,8 @@ from ..logging.filters import RequestIdFilter, TraceContextFilter
 from ..logging.held import LogSamplingFilter, keep_request_logs
 from ..metrics import MetricsBackend, NoopMetricsBackend
 from ..pools import check_pools
-from ..request_context import UNMATCHED_ROUTE, get_request_state
+from ..plugins import _METRIC_HOOKS
+from ..request_context import UNMATCHED_ROUTE, RequestState
 from ..security import (
     SecurityPolicy,
     TrustedProxyPolicy,
@@ -74,14 +75,13 @@ class RequestLoggingMiddleware:
             await self.app(scope, receive, send)
             return
 
-        check_pools()
         start = time.perf_counter()
         raw_headers = scope.get("headers", [])
         client_ip, trusted_source = self.ip_resolver.resolve(scope, raw_headers)
-        request_id = self.context_manager.initialize(scope, raw_headers, trusted_source)
-        request_state = get_request_state()
-        if request_state is not None:
-            request_state.observer_logging = self.configure_logging
+        request_id, request_state = self.context_manager.initialize(
+            scope, raw_headers, trusted_source
+        )
+        request_state.observer_logging = self.configure_logging
 
         path = scope.get("path", "")
         method = scope.get("method", "UNKNOWN")
@@ -101,7 +101,8 @@ class RequestLoggingMiddleware:
         )
         had_error = False
         cancelled = False
-        response_started = False
+        response_started: float | None = None
+        first_body: float | None = None
         response_finished: float | None = None
         response_trailers = False
         disconnected_at: float | None = None
@@ -116,7 +117,7 @@ class RequestLoggingMiddleware:
             return message
 
         async def send_wrapper(message: Message) -> None:
-            nonlocal status_code, response_started, response_finished, response_trailers
+            nonlocal status_code, response_started, first_body, response_finished, response_trailers
             if message["type"] == "http.response.start":
                 status_code = int(message.get("status", 500))
                 response_trailers = bool(message.get("trailers", False))
@@ -135,9 +136,17 @@ class RequestLoggingMiddleware:
                 message["headers"] = updated_headers
 
             response_body_capture.capture_from_message(message, "http.response.body")
+            if (message["type"] == "http.response.body" and not message.get("more_body", False)
+                    and request_state.span is not None):
+                # ASGI tracing may end its server span inside send(final_body).
+                self._report_repeated_statement(method, "", request_state, warn=False)
             await send(message)
             if message["type"] == "http.response.start":
-                response_started = True
+                response_started = time.perf_counter()
+            first_chunk = (
+                first_body is None and message["type"] == "http.response.body"
+                and bool(message.get("body"))
+            )
             finished = (
                 message["type"] == "http.response.body"
                 and not message.get("more_body", False)
@@ -146,11 +155,18 @@ class RequestLoggingMiddleware:
                 message["type"] == "http.response.trailers"
                 and not message.get("more_trailers", False)
             )
+            if first_chunk or (finished and response_finished is None):
+                sent_at = time.perf_counter()
+                if first_chunk:
+                    first_body = sent_at
             if finished and response_finished is None:
-                response_finished = time.perf_counter()
-                self._observe_response(scope, method, status_code, response_finished - start)
+                response_finished = sent_at
+                self._observe_response(
+                    scope, method, status_code, response_finished - start, request_state
+                )
 
         try:
+            check_pools()
             await self.app(
                 scope,
                 receive_wrapper,
@@ -159,19 +175,19 @@ class RequestLoggingMiddleware:
         except Exception as exc:
             had_error = True
             captured_error = exc
-            if not response_started:
+            if response_started is None:
                 status_code = 500
             raise
         except get_cancelled_exc_class():
             # The client left, the server is shutting down or a timeout fired.
             # Not a server error: without a response, use nginx's 499.
             cancelled = True
-            if not response_started:
+            if response_started is None:
                 status_code = 499
             raise
         finally:
             try:
-                if disconnected_at is not None and not response_started and not had_error:
+                if disconnected_at is not None and response_started is None and not had_error:
                     status_code = 499
                 self._finalize_request(
                     scope=scope,
@@ -185,11 +201,14 @@ class RequestLoggingMiddleware:
                     captured_error=captured_error,
                     had_error=had_error,
                     cancelled=cancelled,
+                    response_started=response_started,
+                    first_body=first_body,
                     response_finished=response_finished,
                     disconnected_at=disconnected_at,
+                    request_state=request_state,
                 )
             finally:
-                self.context_manager.cleanup()
+                self.context_manager.cleanup(request_state)
 
     def _finalize_request(
         self,
@@ -204,8 +223,11 @@ class RequestLoggingMiddleware:
         captured_error: Exception | None,
         had_error: bool,
         cancelled: bool,
+        response_started: float | None,
+        first_body: float | None,
         response_finished: float | None,
         disconnected_at: float | None,
+        request_state: RequestState,
     ) -> None:
         app_finished = time.perf_counter()
         app_duration_seconds = max(0.0, app_finished - start)
@@ -225,8 +247,7 @@ class RequestLoggingMiddleware:
         else:
             level, message = logging.INFO, "request.completed"
 
-        route_template = _extract_route_template(scope)
-        request_state = get_request_state()
+        route_template = _extract_route_template(scope, request_state)
         failed = level >= logging.ERROR
         if failed or app_duration_seconds * 1000 >= self.settings.log_slow_request_ms:
             keep_request_logs(failed=failed)
@@ -245,6 +266,22 @@ class RequestLoggingMiddleware:
                 exception=captured_error,
             )
             safe_event["app_duration_ms"] = round(app_duration_seconds * 1000, 3)
+            safe_event["response_start_ms"] = (
+                round(max(0.0, response_started - start) * 1000, 3)
+                if response_started is not None else None
+            )
+            if first_body is None:
+                safe_event["first_body_ms"] = safe_event["stream_duration_ms"] = None
+            elif first_body == response_finished:
+                # A single successful body send already has its elapsed time.
+                safe_event["first_body_ms"] = safe_event["duration_ms"]
+                safe_event["stream_duration_ms"] = 0.0
+            else:
+                safe_event["first_body_ms"] = round(max(0.0, first_body - start) * 1000, 3)
+                safe_event["stream_duration_ms"] = (
+                    round(max(0.0, response_finished - first_body) * 1000, 3)
+                    if response_finished is not None else None
+                )
             if route_template != UNMATCHED_ROUTE:
                 safe_event["http.route"] = route_template
             safe_event["response_completed"] = response_finished is not None
@@ -254,7 +291,7 @@ class RequestLoggingMiddleware:
                 safe_event["after_disconnect_ms"] = round(
                     max(0.0, app_finished - disconnected_at) * 1000, 3
                 )
-            if request_state is not None:
+            if not request_state.closed:
                 safe_event.update(request_state.summarize_calls())
             self.logger.log(
                 level,
@@ -264,38 +301,52 @@ class RequestLoggingMiddleware:
             )
 
         metric_method = method if method in _HTTP_METHODS else "_OTHER"
-        if request_state is not None and request_state.statements:
+        if request_state.statements:
             self._report_repeated_statement(
-                metric_method, route_template, request_state.statements
+                metric_method, route_template, request_state
             )
 
         if response_finished is None:
-            self._observe_response(scope, method, status_code, duration_seconds)
+            self._observe_response(scope, method, status_code, duration_seconds, request_state)
 
     def _observe_response(
-        self, scope: Scope, method: str, status_code: int, duration_seconds: float
+        self, scope: Scope, method: str, status_code: int, duration_seconds: float,
+        request_state: RequestState,
     ) -> None:
-        metric_method = method if method in _HTTP_METHODS else "_OTHER"
-        self.metrics_recorder.observe(
-            method=metric_method,
-            path=_extract_route_template(scope),
-            status_code=status_code,
-            duration_seconds=max(0.0, duration_seconds),
-            scope=scope,
-        )
-        self.metrics_recorder.emit_hooks(
-            scope=scope,
-            status_code=status_code,
-            duration_seconds=duration_seconds,
-        )
+        if not isinstance(self.metrics_backend, NoopMetricsBackend):
+            metric_method = method if method in _HTTP_METHODS else "_OTHER"
+            self.metrics_recorder.observe(
+                method=metric_method,
+                path=_extract_route_template(scope, request_state),
+                status_code=status_code,
+                duration_seconds=max(0.0, duration_seconds),
+                scope=scope,
+            )
+        if _METRIC_HOOKS:
+            self.metrics_recorder.emit_hooks(
+                scope=scope,
+                status_code=status_code,
+                duration_seconds=duration_seconds,
+            )
 
     def _report_repeated_statement(
-        self, method: str, route: str, statements: dict[str, int]
+        self, method: str, route: str, state: RequestState, *, warn: bool = True
     ) -> None:
         """Warn once per method, route and statement when a query runs once per item (N+1)."""
-        statement, count = max(statements.items(), key=lambda item: item[1])
+        repeated = state.most_repeated_statement()
+        if repeated is None:
+            return
+        statement, count = repeated
+        if count < _N_PLUS_ONE_MIN_REPEATS:
+            return
+        state.add_diagnostic("db.n_plus_one", {
+            "count": count, "threshold": _N_PLUS_ONE_MIN_REPEATS,
+            "statement_fingerprint": statement,
+        })
+        if not warn:
+            return
         key = (method, route, statement)
-        if count < _N_PLUS_ONE_MIN_REPEATS or key in self._reported_statements:
+        if key in self._reported_statements:
             return
         if len(self._reported_statements) >= _MAX_REPORTED_STATEMENTS:
             del self._reported_statements[next(iter(self._reported_statements))]

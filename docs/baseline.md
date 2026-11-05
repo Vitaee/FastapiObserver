@@ -1,7 +1,7 @@
 # Compatibility baseline: 2.2.1
 
-Reviewed 4 November 2026. The package remains **Beta**. This inventory covers the
-existing FastAPI product and the first experimental Python operation slice;
+Reviewed 5 November 2026. The package remains **Beta**. This inventory covers the
+existing FastAPI product and the experimental Python operation slices;
 future datastore/framework/language support remains outside this baseline.
 
 ## Reproducible compatibility evidence
@@ -13,9 +13,11 @@ the log schema version, and representative success, 404 and exception records.
 immutable `v2.2.1` tag. The candidate runs the same probe against that fixture.
 Timestamps, generated request IDs, elapsed durations, library version and
 exception stack locations are normalized; existing field names and outcomes are
-not. The upcoming alpha 3 adds `http.route`, `observation` and `log_sampling`;
-the probe projects out exactly these three fields for the frozen comparison.
-Their new contracts are asserted separately, without rewriting the tagged fixture.
+not. Released alpha 3 adds `http.route`, `observation` and `log_sampling`;
+the probe projects out exactly those additive diagnostics. The next slice also
+excludes its three new elapsed-time fields (`response_start_ms`, `first_body_ms`,
+`stream_duration_ms`) from the frozen comparison. Separate contract tests cover
+each addition without rewriting the tagged fixture.
 
 To reproduce the baseline without importing the candidate:
 
@@ -45,11 +47,12 @@ the installed-wheel integration checks. See the
 |---|---|---|
 | One-call FastAPI setup and repeated lifespans | `test_fastapi_install.py`, `test_lifespan_teardown.py` | FastAPI/Starlette remain required installation dependencies |
 | Concurrent request correlation | `test_context_isolation.py`, `test_trust_boundary.py` | Copied thread contexts share request state; arbitrary new threads need explicit handoff |
-| Response timing excludes background work | `test_response_timing.py` | Final request record follows application completion; sent status is preserved |
+| Response/stream timing excludes background work | `test_response_timing.py`, `test_production_runtime.py` | ASGI send completion, not client receipt; final record follows application completion; sent status is preserved |
 | Structured logs and application-owned logging | `test_logging_schema_contract.py`, `test_application_logging.py`, `test_existing_logging_example.py` | Existing handlers own free-text sanitization, delivery and shutdown in application mode |
-| SQLAlchemy counts without tracing | `test_request_insights.py`, `test_sqlalchemy_integration.py` | Explicit engines; successful cursor executions only; SQLite sync/async is tested |
+| SQLAlchemy counts without tracing | `test_request_insights.py`, `test_sqlalchemy_integration.py`, `test_sql_execution_details.py` | Explicit engines; legacy counts are successful executions, native detail also counts attempts/failures; SQLite sync/async is tested |
 | HTTP diagnostics without tracing | `test_http_calls.py`, `test_propagation.py` | Explicit HTTPX/HTTPX2 or Requests helpers; streamed calls complete at consumption/closure |
 | N+1 warnings avoid raw SQL | `test_security_audit_fixes.py`, `test_request_insights.py` | Full-statement SHA-256; 128 per-request fingerprints, 1,024 retained warning keys; a hash is not anonymization |
+| Diagnostic span events | `test_diagnostic_spans.py`, `test_sqlalchemy_integration.py` | At most three per request; existing recording server spans only; pool pressure is a snapshot, not a measured wait |
 | Safe field/header redaction | `test_security_redaction.py`, `test_body_media_allowlist.py` | No universal free-text detector; SQL tracing payloads require separate review |
 | Bounded queue and blocked-sink behavior | `test_log_queue_controls.py`, `test_logging_shutdown.py`, `test_production_runtime.py` | Record counts do not bound arbitrary record bytes; application handlers can block |
 | Fork safety and recycled workers | `test_fork_queue_listener.py`, `test_processes.py` | POSIX scenarios; not a Windows fork claim |

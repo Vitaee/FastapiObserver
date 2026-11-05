@@ -60,8 +60,9 @@ class _RequestContextManager:
         scope: Scope,
         headers: list[tuple[bytes, bytes]],
         trusted_source: bool,
-    ) -> str:
-        set_request_state(RequestState(scope, span=_recording_span()))
+    ) -> tuple[str, RequestState]:
+        state = RequestState(scope, span=_recording_span())
+        set_request_state(state)
         request_id_header = _get_header(headers, self._request_id_header_bytes)
         request_id = _resolve_request_id(request_id_header, trusted_source)
         set_request_id(request_id)
@@ -73,11 +74,11 @@ class _RequestContextManager:
                 set_trace_id(trace_id)
             if span_id:
                 set_span_id(span_id)
-        return request_id
+        return request_id, state
 
-    def cleanup(self) -> None:
-        state = get_request_state()
-        if state is not None:
+    def cleanup(self, state: RequestState | None = None) -> None:
+        state = state if state is not None else get_request_state()
+        if state is not None and not state.closed:
             state.close()
         set_request_state(None)
         clear_request_id()

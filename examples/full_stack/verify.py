@@ -79,6 +79,9 @@ def verify(args: argparse.Namespace) -> None:
     )
     call("status", "/lab/downstream?failure=true", 502, count=1, errors={"http_5xx": 1})
     call("background", "/lab/background?seconds=0.2&fail=true", 202)
+    # The second request's span still gets the diagnostic after log rate limiting.
+    for number in range(2):
+        call(f"nplus-{number}", "/lab/n-plus-one", 200, db_count=11)
     assert call("stream", "/lab/downstream-stream?seconds=0.2", 200, count=1) == b"first\nlast\n"
     broken_id = f"{prefix}-broken-stream"
     try:
@@ -110,9 +113,15 @@ def verify(args: argparse.Namespace) -> None:
         assert event["status_code"] == wanted["status_code"], record
         assert event["app_duration_ms"] >= event["duration_ms"], record
         assert event["response_completed"] is (request_id != broken_id), record
+        assert (
+            0 <= event["response_start_ms"] <= event["first_body_ms"] <= event["duration_ms"]
+        ), record
+        assert (event["stream_duration_ms"] is None) is (request_id == broken_id), record
         if "count" in wanted:
             assert event["http"]["count"] == wanted["count"], record
             assert event["http"].get("errors", {}) == wanted.get("errors", {}), record
+        if "db_count" in wanted:
+            assert event["db"]["count"] == wanted["db_count"], record
         if args.no_tracing:
             assert not record.get("trace_id"), record
     background = records[f"{prefix}-background"]
@@ -121,6 +130,7 @@ def verify(args: argparse.Namespace) -> None:
     assert records[broken_id]["message"] == "request.failed"
     assert records[f"{prefix}-slow"]["event"]["http"]["ms"] >= 300
     assert records[f"{prefix}-stream"]["event"]["duration_ms"] >= 150
+    assert records[f"{prefix}-stream"]["event"]["stream_duration_ms"] >= 150
 
     def prometheus_ready() -> bool:
         query = urlencode(
@@ -148,12 +158,29 @@ def verify(args: argparse.Namespace) -> None:
             return {"app-a", "app-b", "app-c"} <= services and clients >= 2
 
         wait_for(trace_ready, "the three-service trace and both client spans in Tempo")
+
+        def diagnostics_ready() -> bool:
+            for number in range(2):
+                trace_id = records[f"{prefix}-nplus-{number}"]["trace_id"]
+                payload = json.loads(fetch(f"http://localhost:3200/api/traces/{trace_id}")[1])
+                diagnostics = [event for span in objects(payload)
+                               if span.get("kind") in (2, "SPAN_KIND_SERVER")
+                               for event in span.get("events", [])
+                               if event.get("name") == "fastapiobserver.db.n_plus_one"]
+                if len(diagnostics) != 1:
+                    return False
+                assert {attr["key"] for attr in diagnostics[0]["attributes"]} == {
+                    "count", "threshold", "statement_fingerprint",
+                }
+            return True
+
+        wait_for(diagnostics_ready, "both server-span N+1 events in Tempo")
     print("PASS: response/background timing, HTTP counts, timeout/status errors, streaming,")
     print("      cross-service request IDs, Loki export and Prometheus scraping")
     print(
         "      tracing disabled"
         if args.no_tracing
-        else "      Tempo trace and client spans without duplicate counts"
+        else "      Tempo trace, N+1 events and client spans without duplicate counts"
     )
 
 

@@ -5,8 +5,9 @@ import json
 import logging
 import traceback
 from datetime import datetime, timezone
+from collections.abc import Mapping
 from types import TracebackType
-from typing import Any, Callable, Mapping
+from typing import Any, Callable
 
 from .._version import __version__
 from ..config import ObservabilitySettings

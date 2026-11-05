@@ -10,6 +10,7 @@ from fastapiobserver import ObservabilitySettings
 from fastapiobserver.middleware.request_logging import RequestLoggingMiddleware
 import fastapiobserver.middleware.request_logging as request_logging
 from fastapiobserver.request_context import get_request_state
+from fastapiobserver.plugins import register_metric_hook
 
 
 class _Metrics:
@@ -20,7 +21,8 @@ class _Metrics:
         self.observations.append(values)
 
 
-def _run(app, monkeypatch, caplog, *, send_error: bool = False):
+def _run(app, monkeypatch, caplog, *, send_error: bool = False, disconnect: bool = False,
+         send_latency: float = 0):
     clock = [1.0]
     monkeypatch.setattr(request_logging, "time", SimpleNamespace(perf_counter=lambda: clock[0]))
     metrics = _Metrics()
@@ -29,11 +31,14 @@ def _run(app, monkeypatch, caplog, *, send_error: bool = False):
     )
 
     async def receive():
+        if disconnect:
+            return {"type": "http.disconnect"}
         return {"type": "http.request", "body": b"", "more_body": False}
 
     async def send(message):
         if send_error and message["type"] == "http.response.body":
             raise OSError("connection closed")
+        clock[0] += send_latency
 
     scope = {
         "type": "http",
@@ -79,6 +84,37 @@ def test_http_metrics_finish_before_background_work(monkeypatch, caplog) -> None
     assert records[0].event["duration_ms"] == 2000
     assert records[0].event["app_duration_ms"] == 10000
     assert records[0].event["response_completed"] is True
+    assert records[0].event["response_start_ms"] == 1000
+    assert records[0].event["first_body_ms"] == 2000
+    assert records[0].event["stream_duration_ms"] == 0
+
+
+def test_late_metric_hook_runs_at_response_completion_with_backend_disabled(monkeypatch):
+    clock = [1.0]
+    monkeypatch.setattr(request_logging, "time", SimpleNamespace(perf_counter=lambda: clock[0]))
+    calls = []
+
+    async def app(scope, receive, send):
+        await send({"type": "http.response.start", "status": 202, "headers": []})
+        clock[0] = 2.0
+        await send({"type": "http.response.body", "body": b"ok"})
+        assert calls == [("/hook", 202, 1.0)]
+        clock[0] = 5.0
+
+    middleware = RequestLoggingMiddleware(app, ObservabilitySettings())
+    register_metric_hook("late", lambda request, response, duration: calls.append(
+        (request.url.path, response.status_code, duration)
+    ))
+
+    async def receive():
+        return {"type": "http.request"}
+
+    async def send(message):
+        pass
+
+    asyncio.run(middleware({"type": "http", "method": "GET", "path": "/hook", "headers": []},
+                           receive, send))
+    assert calls == [("/hook", 202, 1.0)]
 
 
 @pytest.mark.parametrize("cancelled", [False, True])
@@ -151,6 +187,86 @@ def test_response_duration_includes_stream_and_trailers(monkeypatch, caplog) -> 
     assert observations[0]["duration_seconds"] == 3.0
     assert records[0].event["duration_ms"] == 3000
     assert records[0].event["app_duration_ms"] == 8000
+    assert records[0].event["response_start_ms"] == 0
+    assert records[0].event["first_body_ms"] == 1000
+    assert records[0].event["stream_duration_ms"] == 2000
+
+
+@pytest.mark.parametrize("method", ["GET", "HEAD"])
+def test_empty_response_has_no_body_or_stream_timing(monkeypatch, caplog, method):
+    def app(clock, metrics):
+        async def serve(scope, receive, send):
+            scope["method"] = method
+            clock[0] = 2.0
+            await send({"type": "http.response.start", "status": 204, "headers": []})
+            clock[0] = 3.0
+            await send({"type": "http.response.body"})
+        return serve
+
+    _, [record] = _run(app, monkeypatch, caplog)
+    assert record.event["response_start_ms"] == 1000
+    assert record.event["first_body_ms"] is None
+    assert record.event["stream_duration_ms"] is None
+
+
+def test_timestamps_include_transport_backpressure(monkeypatch, caplog):
+    def app(clock, metrics):
+        async def serve(scope, receive, send):
+            clock[0] = 2.0
+            await send({"type": "http.response.start", "status": 200, "headers": []})
+            clock[0] = 5.0
+            await send({"type": "http.response.body", "body": b"ok"})
+        return serve
+
+    _, [record] = _run(app, monkeypatch, caplog, send_latency=.5)
+    assert record.event["response_start_ms"] == 1500
+    assert record.event["first_body_ms"] == record.event["duration_ms"] == 4500
+    assert record.event["stream_duration_ms"] == 0
+
+
+def test_failure_before_headers_leaves_timings_unknown(monkeypatch, caplog):
+    def app(clock, metrics):
+        async def serve(scope, receive, send):
+            clock[0] = 3.0
+            raise RuntimeError("before any send")
+        return serve
+
+    _, [record] = _run(app, monkeypatch, caplog)
+    assert record.event["duration_ms"] == 2000
+    assert record.event["response_start_ms"] is None
+    assert record.event["first_body_ms"] is None
+    assert record.event["stream_duration_ms"] is None
+
+
+@pytest.mark.parametrize("ending", ["complete", "disconnect", "cancel", "send_error"])
+def test_stream_timing_uses_successful_nonempty_sends(monkeypatch, caplog, ending):
+    def app(clock, metrics):
+        async def serve(scope, receive, send):
+            clock[0] = 2.0
+            await send({"type": "http.response.start", "status": 200, "headers": []})
+            clock[0] = 3.0
+            await send({"type": "http.response.body", "body": b"", "more_body": True})
+            clock[0] = 5.0
+            await send({"type": "http.response.body", "body": b"first", "more_body": True})
+            clock[0] = 8.0
+            if ending == "disconnect":
+                await receive()
+                return
+            if ending == "cancel":
+                raise asyncio.CancelledError()
+            await send({"type": "http.response.body", "body": b"last"})
+            clock[0] = 20.0  # Background work is outside stream timing.
+        return serve
+
+    observations, [record] = _run(
+        app, monkeypatch, caplog,
+        send_error=ending == "send_error", disconnect=ending == "disconnect",
+    )
+    assert len(observations) == 1
+    assert record.event["response_start_ms"] == 1000
+    assert record.event["first_body_ms"] == (None if ending == "send_error" else 4000)
+    assert record.event["stream_duration_ms"] == (3000 if ending == "complete" else None)
+    assert record.event["client_disconnected"] == (ending == "disconnect")
 
 
 def test_observed_disconnect_is_distinct_from_cancellation(caplog):

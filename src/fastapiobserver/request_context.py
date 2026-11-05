@@ -47,6 +47,7 @@ _CALLS_LOCK = threading.Lock()
 UNMATCHED_ROUTE = "<unmatched>"
 _MAX_REQUEST_STATEMENTS = 128
 _MAX_ERROR_CATEGORIES = 32
+_DIAGNOSTICS = frozenset({"db.n_plus_one", "threadpool.saturated", "db.pool_exhausted"})
 
 
 def _add_error(errors: dict[str, int], error: str) -> None:
@@ -103,6 +104,7 @@ class RequestState:
     dropped_spans: int = 0
     observer_logging: bool = False
     retention_reason: str | None = None
+    _diagnostics: set[str] | None = field(default=None, repr=False)
     _call_owner_token: CallOwner | None = field(default=None, repr=False)
 
     def _call_owner(self, source: str | None = None, kind: str | None = None) -> CallOwner | None:
@@ -171,6 +173,37 @@ class RequestState:
             if not self.closed:
                 self.dropped_spans += 1
 
+    def add_diagnostic(self, name: str, attributes: dict[str, str | int | float]) -> None:
+        """Add at most one of each fixed diagnostic to the borrowed server span.
+
+        No provider or span is created. Attribute values come from diagnostic
+        code, never from arbitrary log events or engine URLs.
+        """
+        span = self.span
+        if self.closed or span is None or name not in _DIAGNOSTICS:
+            return
+        try:
+            if (getattr(getattr(span, "kind", None), "name", None) != "SERVER"
+                    or not span.is_recording()):
+                return
+            with _CALLS_LOCK:
+                if self.closed:
+                    return
+                if self._diagnostics is None:
+                    self._diagnostics = set()
+                if name in self._diagnostics:
+                    return
+                self._diagnostics.add(name)
+            # Application SDK code must run outside the aggregation lock.
+            span.add_event(f"fastapiobserver.{name}", attributes=attributes)
+        except Exception:
+            # Diagnostics must never replace an application result or exception.
+            pass
+
+    def most_repeated_statement(self) -> tuple[str, int] | None:
+        with _CALLS_LOCK:
+            return max(self.statements.items(), key=lambda item: item[1], default=None)
+
     def _observation(self) -> dict[str, Any]:
         if not self.call_sources and not self.dropped_spans:
             return {"coverage": "unknown"}
@@ -217,6 +250,7 @@ class RequestState:
         self.sql = None
         self.call_sources.clear()
         self.pending_calls.clear()
+        self._diagnostics = None
 
     def close(self) -> tuple[dict[str, list[float]], dict[str, dict[str, int]]]:
         """Freeze experimental totals and release state retained by copied contexts."""

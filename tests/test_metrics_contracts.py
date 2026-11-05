@@ -123,6 +123,9 @@ def test_mark_prometheus_process_dead_removes_live_gauge_files(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # The client selects its value implementation at first import. This test
+    # changes only the cleanup directory, not the process's metrics mode.
+    pytest.importorskip("prometheus_client")
     from fastapiobserver import mark_prometheus_process_dead
 
     dead_gauge = tmp_path / "gauge_liveall_4321.db"

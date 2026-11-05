@@ -19,12 +19,18 @@ See its [implementation plan](https://github.com/Vitaee/FastapiObserver/blob/mai
 This advances the M1/M2 interfaces; it does not complete either milestone or
 claim new datastore integrations or portable-contract 1.0.
 
-The current slice, prepared as `2.3.0a3`, adds matched routes, separate native
+The third slice, released as `2.3.0a3`, adds matched routes, separate native
 SQL execution/failure detail, observation and sampling metadata, generated
 redaction checks and an engine-scoped query-budget helper. See
 [request diagnostics](https://github.com/Vitaee/FastapiObserver/blob/main/docs/request-diagnostics.md).
 It preserves legacy count/metric meanings and keeps broad integrations and
 language implementations outside this delivery.
+
+The next slice adds ASGI response-start/first-body/stream timing and bounded
+N+1/pool events on existing recording server spans. It also removes redundant
+log-sanitization work and corrects SQLite integration-test cleanup. These changes
+retain request/count semantics and do not complete the generic lifecycle or
+portable contract.
 
 Prior real FastAPI adoption is reported by the maintainer. The maintainer chose
 the bundled application for this change's reproducible validation; independent
@@ -206,17 +212,17 @@ implementation PR.
 **Outcome:** a truthful starting point and a migration contract existing users
 can rely on.
 
-- [ ] Audit README, architecture, database and deployment claims against 2.2.1.
+- [x] Audit README, architecture, database and deployment claims against 2.2.1.
   Correct references that still call it unreleased, describe raw SQL in N+1
   warnings, or imply native SQL counting requires tracing.
-- [ ] Record public exports, documented submodule APIs, `OBS_*` settings,
+- [x] Record public exports, documented submodule APIs, `OBS_*` settings,
   supported `OTEL_*` settings, event shapes, metric names, label sets and timing
   semantics. Capture representative output as compatibility fixtures.
-- [ ] Classify current global state: process-owned logging, borrowed providers,
+- [x] Classify current global state: process-owned logging, borrowed providers,
   per-application registrations, engine registries and per-operation data.
-- [ ] Inventory import dependencies and side effects, including root exports,
+- [x] Inventory import dependencies and side effects, including root exports,
   settings, metric hooks, endpoint mounting and OTel lifecycle wrappers.
-- [ ] Publish a claim-to-evidence matrix with links to tests and known limits.
+- [x] Publish a claim-to-evidence matrix with links to tests and known limits.
   Keep Beta until the relevant stability gates pass.
 - [ ] Confirm licensing and contribution rules for schemas, fixtures, generated
   artifacts and future implementations. Propose neutral project/package naming;
@@ -224,6 +230,11 @@ can rely on.
 - [ ] Obtain representative integration examples: an existing FastAPI service,
   a Redis/MongoDB application, a Tortoise application and a worker or CLI tool.
   Sanitized reproducible examples are sufficient to begin design.
+
+The checked baseline work is recorded in [the compatibility inventory](docs/baseline.md).
+M0 remains open for portable-artifact contribution/naming policies and the broader
+adopter examples. The bundled FastAPI app is validated; external applications
+and the unimplemented datastore adapters are not claimed as validated.
 
 **Exit gate:** the compatibility inventory is committed; existing release gates
 remain green; every current support claim has evidence or a visible limitation.
@@ -294,18 +305,20 @@ review finds no Python-only requirement in the mandatory profile.
 
 **Outcome:** reusable Python behavior is separated from framework wiring.
 
-- [ ] Introduce internal `core/` boundaries for operation context, completed-call
-  recording and lifecycle. Move behavior in small slices from request state,
-  logging and framework-specific lifecycle code.
-- [ ] Keep route discovery, ASGI messages, HTTP response timing, endpoint mounting,
+- [x] Introduce internal `core/` boundaries for operation context and completed-call
+  recording, shared by native integrations and the opt-in operation boundary.
+- [ ] Separate reusable lifecycle coordination from framework wiring. Existing
+  logging/provider ownership is inventoried and preserved; no generic runtime
+  lifecycle API has been shipped.
+- [x] Keep route discovery, ASGI messages, HTTP response timing, endpoint mounting,
   trusted proxy handling and framework exceptions in the appropriate adapter.
-- [ ] Preserve existing root exports and documented hooks through facades.
+- [x] Preserve existing root exports and documented hooks through facades.
   Remove eager framework imports from the core's import path without changing
   what existing FastAPI installations receive.
-- [ ] Support sync and async context managers, explicit context handoff to thread
+- [x] Support sync and async context managers, explicit context handoff to thread
   pools, nested operations, detached work and exception-safe restoration. A
   closed operation releases held records and detailed aggregation state.
-- [ ] Move SQL/HTTP totals onto the common recorder. Keep exact legacy event
+- [x] Move SQL/HTTP totals onto the common recorder. Keep exact legacy event
   mappings and existing SQLAlchemy/HTTP span deduplication during extraction.
 - [ ] Define lifecycle ownership per resource. Detaching one application must
   not stop another application's logging or a borrowed global provider.
@@ -314,8 +327,13 @@ review finds no Python-only requirement in the mandatory profile.
 - [ ] Bound state for long-lived operations, including HTTP span-ID deduplication,
   held records, exception summaries and callbacks. A bounded record count alone
   is insufficient when individual record size is unbounded.
-- [ ] Preserve process fork/reset behavior and explicit registration. Importing
+- [x] Preserve process fork/reset behavior and explicit registration. Importing
   the core starts no listener, watcher, network exporter or driver instrumentation.
+
+M2 is partial: request/call ownership, operation nesting/restoration, import
+separation and existing FastAPI compatibility have executable evidence. Generic
+resource lifecycle and byte bounds for arbitrary held log payloads remain open.
+The operation schema is experimental `0.1.0`, not portable contract 1.0.
 
 **Packaging during extraction:** keep the 2.x distribution's current framework
 dependencies. Test core imports and operation behavior in a clean environment
@@ -678,9 +696,9 @@ entry requires tested version ranges and a capability report before promotion.
 |---|---|---|
 | FastAPI request diagnostics | Shipped | Preserve through M2; promote after M5/M7 evidence |
 | Standalone structured logging | Shipped | Retain and document generic lifecycle in M2 |
-| Manual sync/async operations | Planned | M2; examples and adoption in M4 |
-| SQLAlchemy native counts | Shipped for configured engines | Common recorder and broader backend evidence in M3 |
-| HTTPX/HTTPX2/Requests native diagnostics | Shipped through explicit helpers | Generic-operation support and retained tracing deduplication in M2/M4 |
+| Manual sync/async operations | Experimental since 2.3.0a1 | Complete M2 lifecycle/bounds; broader adoption in M4 |
+| SQLAlchemy native counts | Shipped for configured engines; common recorder since 2.3.0a2 | Broader backend evidence in M3 |
+| HTTPX/HTTPX2/Requests native diagnostics | Shipped through explicit helpers, including experimental operations | Broader runtime evidence in M4 |
 | Redis sync/async diagnostics | Sampled-span fallback only | Dedicated capability-tested adapter in M3 |
 | PyMongo sync/async diagnostics | No dedicated tested adapter | Separate driver-mode validation in M3 |
 | Tortoise diagnostics | No dedicated tested adapter | SQLite/PostgreSQL in M3; MySQL separately |
@@ -759,15 +777,10 @@ The existing FastAPI runtime controls remain supported according to their
 current scope. A cross-language remote control plane is a separate project and
 must not become a dependency of local diagnostics.
 
-## First work to start
+## Next work
 
-Complete M0, then publish the M1 draft and its examples. The first core slice
-should prove a plain Python operation can produce correlated diagnostics without
-framework dependencies while all existing FastAPI behavior stays covered.
-Use that slice to refine the remaining effort estimates.
-
-The first four-week planning target is the verified baseline, a reviewable
-contract draft and the beginning of that core proof. Production integration work
-follows the contract and recorder decisions. Broader runtime integrations and
-language implementations stay visible here without blocking delivery of a
-useful, testable Python core.
+Keep the shipped FastAPI behavior and the experimental operation boundary covered
+by the existing compatibility, wheel, backend and production budgets. Finish the
+remaining M0 policy/evidence items and M2 lifecycle/byte-bound decisions before
+claiming those milestones complete. The broader M1 contract, datastore adapters,
+framework integrations and language pilot remain separately gated work.

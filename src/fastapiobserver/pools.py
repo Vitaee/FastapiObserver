@@ -16,6 +16,8 @@ import time
 import weakref
 from typing import Any
 
+from .request_context import get_request_state
+
 _LOGGER = logging.getLogger("fastapiobserver.pools")
 # ponytail: fixed; make it a setting if once a minute is too noisy or too quiet.
 _WARN_INTERVAL_SECONDS = 60.0
@@ -83,6 +85,14 @@ def _db_pool_limit(pool: Any) -> float:
 
 
 def _warn(message: str, pool: str, event: dict[str, Any]) -> None:
+    state = get_request_state()
+    if state is not None:
+        # URLs, labels and credentials stay out of span attributes. Per-request
+        # events are independent of process-wide warning rate limits.
+        keys = ("busy", "limit", "waiting") if message == "threadpool.saturated" else (
+            "checked_out", "limit"
+        )
+        state.add_diagnostic(message, {key: event[key] for key in keys})
     now = time.monotonic()
     if now - _last_warned.get(pool, -math.inf) < _WARN_INTERVAL_SECONDS:
         return
