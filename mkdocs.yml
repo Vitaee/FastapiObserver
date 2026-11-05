@@ -45,6 +45,7 @@ nav:
   - Guides:
       - Configuration: configuration.md
       - Structured Logging: logging.md
+      - Request Diagnostics & Query Budgets: request-diagnostics.md
       - Security & Presets: security.md
       - OpenTelemetry: opentelemetry.md
       - Runtime Control: runtime-control.md
@@ -86,4 +87,5 @@ nav:
       - 0015 Application-owned logging: decisions/0015-application-owned-logging.md
       - 0016 Experimental Python operations: decisions/0016-experimental-python-operations.md
       - 0017 Call start ownership: decisions/0017-record-calls-against-their-start-owner.md
+      - 0018 Additive diagnostic metadata: decisions/0018-additive-diagnostic-metadata.md
   - Contributing: contributing.md

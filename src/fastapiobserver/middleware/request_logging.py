@@ -8,10 +8,10 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from ..config import ObservabilitySettings
 from ..logging.filters import RequestIdFilter, TraceContextFilter
-from ..logging.held import keep_request_logs
+from ..logging.held import LogSamplingFilter, keep_request_logs
 from ..metrics import MetricsBackend, NoopMetricsBackend
 from ..pools import check_pools
-from ..request_context import get_request_state
+from ..request_context import UNMATCHED_ROUTE, get_request_state
 from ..security import (
     SecurityPolicy,
     TrustedProxyPolicy,
@@ -34,7 +34,7 @@ _MAX_REPORTED_STATEMENTS = 1024
 _HTTP_METHODS = frozenset(
     {"GET", "HEAD", "POST", "PUT", "DELETE", "CONNECT", "OPTIONS", "TRACE", "PATCH"}
 )
-_CONTEXT_FILTERS = (RequestIdFilter(), TraceContextFilter())
+_CONTEXT_FILTERS = (RequestIdFilter(), TraceContextFilter(), LogSamplingFilter())
 
 
 class RequestLoggingMiddleware:
@@ -45,9 +45,11 @@ class RequestLoggingMiddleware:
         security_policy: SecurityPolicy | None = None,
         trusted_proxy_policy: TrustedProxyPolicy | None = None,
         metrics_backend: MetricsBackend | None = None,
+        configure_logging: bool = True,
     ) -> None:
         self.app = app
         self.settings = settings
+        self.configure_logging = configure_logging
         self.security_policy = security_policy or SecurityPolicy()
         self.trusted_proxy_policy = trusted_proxy_policy or TrustedProxyPolicy()
         self.metrics_backend = metrics_backend or NoopMetricsBackend()
@@ -77,6 +79,9 @@ class RequestLoggingMiddleware:
         raw_headers = scope.get("headers", [])
         client_ip, trusted_source = self.ip_resolver.resolve(scope, raw_headers)
         request_id = self.context_manager.initialize(scope, raw_headers, trusted_source)
+        request_state = get_request_state()
+        if request_state is not None:
+            request_state.observer_logging = self.configure_logging
 
         path = scope.get("path", "")
         method = scope.get("method", "UNKNOWN")
@@ -220,6 +225,7 @@ class RequestLoggingMiddleware:
         else:
             level, message = logging.INFO, "request.completed"
 
+        route_template = _extract_route_template(scope)
         request_state = get_request_state()
         failed = level >= logging.ERROR
         if failed or app_duration_seconds * 1000 >= self.settings.log_slow_request_ms:
@@ -237,9 +243,10 @@ class RequestLoggingMiddleware:
                 response_body=response_body_capture.value,
                 error_type=_classify_error(status_code, captured_error),
                 exception=captured_error,
-                calls=request_state.calls if request_state else None,
             )
             safe_event["app_duration_ms"] = round(app_duration_seconds * 1000, 3)
+            if route_template != UNMATCHED_ROUTE:
+                safe_event["http.route"] = route_template
             safe_event["response_completed"] = response_finished is not None
             safe_event["cancelled"] = cancelled
             safe_event["client_disconnected"] = disconnected_at is not None
@@ -248,8 +255,7 @@ class RequestLoggingMiddleware:
                     max(0.0, app_finished - disconnected_at) * 1000, 3
                 )
             if request_state is not None:
-                for kind, errors in request_state.call_errors.items():
-                    safe_event[kind]["errors"] = dict(errors)
+                safe_event.update(request_state.summarize_calls())
             self.logger.log(
                 level,
                 message,
@@ -257,7 +263,6 @@ class RequestLoggingMiddleware:
                 extra={"event": safe_event},
             )
 
-        route_template = _extract_route_template(scope)
         metric_method = method if method in _HTTP_METHODS else "_OTHER"
         if request_state is not None and request_state.statements:
             self._report_repeated_statement(

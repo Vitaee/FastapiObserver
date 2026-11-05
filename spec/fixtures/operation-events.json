@@ -35,6 +35,40 @@
       "future_field": {
         "enabled": true
       }
+    },
+    {
+      "schema_version": "0.1.0",
+      "name": "catalog.import",
+      "operation_id": "11111111111111111111111111111111",
+      "outcome": "success",
+      "duration_ms": 1.25,
+      "db": {
+        "count": 0,
+        "ms": 0,
+        "sqlalchemy": {
+          "attempted": 1,
+          "succeeded": 0,
+          "failed": 1,
+          "in_flight": 0,
+          "failed_ms": 0.5,
+          "errors": {
+            "execution_error": 1
+          }
+        }
+      },
+      "observation": {
+        "coverage": "instrumented_clients",
+        "sources": {
+          "db": [
+            "sqlalchemy"
+          ]
+        }
+      },
+      "log_sampling": {
+        "owner": "application",
+        "inclusion_probability": null,
+        "reason": "unknown"
+      }
     }
   ],
   "invalid": [
@@ -109,6 +143,74 @@
         "ms": 1,
         "errors": {
           "timeout\n": 1
+        }
+      }
+    },
+    {
+      "schema_version": "0.1.0",
+      "name": "catalog.import",
+      "operation_id": "11111111111111111111111111111111",
+      "outcome": "success",
+      "duration_ms": 1.25,
+      "observation": {
+        "coverage": "complete"
+      }
+    },
+    {
+      "schema_version": "0.1.0",
+      "name": "catalog.import",
+      "operation_id": "11111111111111111111111111111111",
+      "outcome": "success",
+      "duration_ms": 1.25,
+      "observation": {
+        "coverage": "partial",
+        "sources": {
+          "db": [
+            "invented_source"
+          ]
+        }
+      }
+    },
+    {
+      "schema_version": "0.1.0",
+      "name": "catalog.import",
+      "operation_id": "11111111111111111111111111111111",
+      "outcome": "success",
+      "duration_ms": 1.25,
+      "log_sampling": {
+        "owner": "observer",
+        "inclusion_probability": 2,
+        "reason": "sampled"
+      }
+    },
+    {
+      "schema_version": "0.1.0",
+      "name": "catalog.import",
+      "operation_id": "11111111111111111111111111111111",
+      "outcome": "success",
+      "duration_ms": 1.25,
+      "log_sampling": {
+        "owner": "application",
+        "inclusion_probability": 1,
+        "reason": "unknown"
+      }
+    },
+    {
+      "schema_version": "0.1.0",
+      "name": "catalog.import",
+      "operation_id": "11111111111111111111111111111111",
+      "outcome": "success",
+      "duration_ms": 1.25,
+      "db": {
+        "count": 0,
+        "ms": 0,
+        "sqlalchemy": {
+          "attempted": -1,
+          "succeeded": 0,
+          "failed": 1,
+          "in_flight": 0,
+          "failed_ms": 0.1,
+          "errors": {}
         }
       }
     }

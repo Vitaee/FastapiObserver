@@ -145,6 +145,8 @@ def _request_call_totals(trace_api: Any, trace_sdk: Any) -> Any:
                 context = span.get_span_context()
                 if self._owners.capture((context.trace_id, context.span_id), owner):
                     mark_native_http_span(owner, context.span_id)
+                else:
+                    owner.drop_span()
 
         def on_end(self, span: Any) -> None:
             if span.kind != client_kind or span.end_time is None:
@@ -163,10 +165,11 @@ def _request_call_totals(trace_api: Any, trace_sdk: Any) -> Any:
             if "db.system" in attributes or "db.system.name" in attributes:
                 statement = attributes.get("db.query.text") or attributes.get("db.statement")
                 record_completed_call(
-                    request_state, "db", seconds, statement if isinstance(statement, str) else None
+                    request_state, "db", seconds, statement if isinstance(statement, str) else None,
+                    source="sampled_span",
                 )
             elif "http.request.method" in attributes or "http.method" in attributes:
                 if not counted_http:
-                    record_completed_call(request_state, "http", seconds)
+                    record_completed_call(request_state, "http", seconds, source="sampled_span")
 
     return RequestCallTotals()

@@ -135,7 +135,9 @@ an enabled native adapter or sampled fallback. See the
   framework-free installation is not yet a published support claim.
 - Counts cover attached/native instrumentation or available sampled-span
   observations. Missing totals are unknown, not measured zero. SQL counts still
-  include successful cursor executions only. No new datastore support is added.
+  include successful cursor executions only. Separate native SQL failure detail,
+  observation coverage and sampling policy are documented in
+  [request diagnostics](request-diagnostics.md). No new datastore support is added.
 - The boundary borrows active trace context and creates no spans/providers.
   Existing tracing bridges retain native/span deduplication.
 - Sampled-span ownership is captured at start, with at most 4,096 tracked client

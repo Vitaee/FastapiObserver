@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
 from typing import Any
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.routing import Match
 from starlette.types import Scope
 
-from ..request_context import UNMATCHED_ROUTE, route_template
+from ..request_context import UNMATCHED_ROUTE, get_request_state, route_template
 from ..security import SecurityPolicy, strip_url_credentials
 from ..security.redaction import redact_body
 
@@ -31,7 +30,6 @@ class _RequestEventBuilder:
         response_body: str | None,
         error_type: str,
         exception: Exception | None,
-        calls: Mapping[str, list[float]] | None = None,
     ) -> dict[str, Any]:
         event: dict[str, Any] = {
             "method": method,
@@ -53,8 +51,6 @@ class _RequestEventBuilder:
         if exception is not None:
             event["exception_class"] = exception.__class__.__name__
             event["exception_message"] = _sanitize_exception_message(str(exception))
-        for kind, (count, seconds) in (calls or {}).items():
-            event[kind] = {"count": int(count), "ms": round(seconds * 1000, 3)}
         # Redacted with the rest of the line where it's written or exported
         # (decision record 0004), on the log thread instead of the request's.
         return event
@@ -85,10 +81,21 @@ def _extract_route_template(scope: Scope) -> str:
     middleware rejected, and shares ``UNMATCHED_ROUTE`` instead of adding a time
     series per URL.
     """
+    state = get_request_state()
+    if state is not None and state.scope is scope and state.resolved_route is not None:
+        return state.resolved_route
+    template = _resolve_route_template(scope)
+    if state is not None and state.scope is scope:
+        state.resolved_route = template
+    return template
+
+
+def _resolve_route_template(scope: Scope) -> str:
     template = route_template(scope)
     if template:
         return template
-    for route in getattr(scope.get("app"), "routes", ()):
+    routes = getattr(scope.get("app"), "routes", ()) if scope.get("endpoint") is not None else ()
+    for route in routes:
         path = getattr(route, "path", None)
         if path and route.matches(scope)[0] is not Match.NONE:
             return str(path)

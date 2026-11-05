@@ -49,6 +49,28 @@ _MAX_REQUEST_STATEMENTS = 128
 _MAX_ERROR_CATEGORIES = 32
 
 
+def _add_error(errors: dict[str, int], error: str) -> None:
+    if error not in errors and len(errors) >= _MAX_ERROR_CATEGORIES:
+        error = "other"
+    errors[error] = errors.get(error, 0) + 1
+
+
+@dataclass(slots=True)
+class SQLExecutions:
+    attempted: int = 0
+    succeeded: int = 0
+    failed: int = 0
+    failed_seconds: float = 0.0
+    errors: dict[str, int] = field(default_factory=dict)
+
+    def summary(self) -> dict[str, Any]:
+        return {"attempted": self.attempted, "succeeded": self.succeeded,
+                "failed": self.failed,
+                "in_flight": self.attempted - self.succeeded - self.failed,
+                "failed_ms": round(self.failed_seconds * 1000, 3),
+                "errors": dict(self.errors)}
+
+
 @dataclass(eq=False, slots=True, weakref_slot=True)
 class RequestState:
     """What code running for a request adds to it, read when the request ends.
@@ -65,6 +87,8 @@ class RequestState:
     span: Any = None
     user_context: dict[str, Any] | None = None
     sampled: bool | None = None  # decided at its first record that needs it
+    sample_probability: float | None = None
+    sample_reason: str | None = None
     held_logs: deque[logging.LogRecord] | None = None
     calls: dict[str, list[float]] = field(default_factory=dict)  # kind -> [count, seconds]
     call_errors: dict[str, dict[str, int]] = field(default_factory=dict)
@@ -72,14 +96,28 @@ class RequestState:
     statements: dict[str, int] = field(default_factory=dict)
     operation_id: str | None = None
     closed: bool = False
+    resolved_route: str | None = None
+    sql: SQLExecutions | None = None
+    call_sources: dict[str, set[str]] = field(default_factory=dict)
+    pending_calls: dict[str, int] = field(default_factory=dict)
+    dropped_spans: int = 0
+    observer_logging: bool = False
+    retention_reason: str | None = None
     _call_owner_token: CallOwner | None = field(default=None, repr=False)
 
-    def _call_owner(self) -> CallOwner | None:
+    def _call_owner(self, source: str | None = None, kind: str | None = None) -> CallOwner | None:
         with _CALLS_LOCK:
             if self.closed:
                 return None
             if self._call_owner_token is None:
                 self._call_owner_token = CallOwner(self)
+            if kind is not None and source is not None:
+                self.call_sources.setdefault(kind, set()).add(source)
+                self.pending_calls[kind] = self.pending_calls.get(kind, 0) + 1
+            if source == "sqlalchemy":
+                if self.sql is None:
+                    self.sql = SQLExecutions()
+                self.sql.attempted += 1
             return self._call_owner_token
 
     def add_call(
@@ -88,11 +126,21 @@ class RequestState:
         self._record_call(kind, seconds, statement, error=error)
 
     def _record_call(
-        self, kind: str, seconds: float, statement: str | None = None, *, error: str | None = None
+        self, kind: str, seconds: float, statement: str | None = None, *,
+        error: str | None = None, source: str = "manual", started: bool = False,
     ) -> bool:
         with _CALLS_LOCK:
             if self.closed:
                 return False
+            if source == "sqlalchemy" and self.sql is not None and error is not None:
+                total = self.sql.failed_seconds + seconds
+                if not math.isfinite(total * 1000):
+                    return False
+                self.sql.failed += 1
+                self.sql.failed_seconds = total
+                _add_error(self.sql.errors, error)
+                self._complete_call(kind, source, started)
+                return True
             previous = self.calls.get(kind)
             total_seconds = (previous[1] if previous is not None else 0.0) + seconds
             if not math.isfinite(total_seconds * 1000):
@@ -102,9 +150,10 @@ class RequestState:
             totals[1] = total_seconds
             if error is not None:
                 errors = self.call_errors.setdefault(kind, {})
-                if error not in errors and len(errors) >= _MAX_ERROR_CATEGORIES:
-                    error = "other"
-                errors[error] = errors.get(error, 0) + 1
+                _add_error(errors, error)
+            if source == "sqlalchemy" and self.sql is not None:
+                self.sql.succeeded += 1
+            self._complete_call(kind, source, started)
             if statement:
                 # SQL is never retained in request state or emitted by N+1 warnings.
                 fingerprint = sha256(statement.encode("utf-8", errors="replace")).hexdigest()
@@ -112,17 +161,68 @@ class RequestState:
                     self.statements[fingerprint] = self.statements.get(fingerprint, 0) + 1
             return True
 
+    def _complete_call(self, kind: str, source: str, started: bool) -> None:
+        self.call_sources.setdefault(kind, set()).add(source)
+        if started:
+            self.pending_calls[kind] = max(0, self.pending_calls.get(kind, 0) - 1)
+
+    def drop_span(self) -> None:
+        with _CALLS_LOCK:
+            if not self.closed:
+                self.dropped_spans += 1
+
+    def _observation(self) -> dict[str, Any]:
+        if not self.call_sources and not self.dropped_spans:
+            return {"coverage": "unknown"}
+        sources = set().union(*self.call_sources.values())
+        pending = {kind: count for kind, count in self.pending_calls.items() if count}
+        if "sampled_span" in sources or pending or self.dropped_spans or (
+            "manual" in sources and len(sources) > 1
+        ):
+            coverage = "partial"
+        else:
+            coverage = "caller_reported" if sources == {"manual"} else "instrumented_clients"
+        result: dict[str, Any] = {"coverage": coverage}
+        if self.call_sources:
+            result["sources"] = {kind: sorted(values) for kind, values in self.call_sources.items()}
+        if pending:
+            result["in_flight"] = pending
+        if self.dropped_spans:
+            result["dropped_spans"] = self.dropped_spans
+        return result
+
+    def summarize_calls(self, *, close: bool = False) -> dict[str, Any]:
+        """Copy diagnostic fields atomically; optionally freeze the operation."""
+        with _CALLS_LOCK:
+            result: dict[str, Any] = {"observation": self._observation()}
+            for kind, (count, seconds) in self.calls.items():
+                result[kind] = {"count": int(count), "ms": round(seconds * 1000, 3)}
+                if kind in self.call_errors:
+                    result[kind]["errors"] = dict(self.call_errors[kind])
+            if self.sql is not None:
+                result.setdefault("db", {"count": 0, "ms": 0.0})["sqlalchemy"] = self.sql.summary()
+            if close:
+                self._release()
+            return result
+
+    def _release(self) -> None:
+        # Caller holds _CALLS_LOCK, shared with admission and snapshots.
+        self.closed = True
+        self.calls, self.call_errors = {}, {}
+        self.statements.clear()
+        self.http_span_ids.clear()
+        self.held_logs = None
+        self.user_context = None
+        self._call_owner_token = None
+        self.sql = None
+        self.call_sources.clear()
+        self.pending_calls.clear()
+
     def close(self) -> tuple[dict[str, list[float]], dict[str, dict[str, int]]]:
         """Freeze experimental totals and release state retained by copied contexts."""
         with _CALLS_LOCK:
-            self.closed = True
             calls, errors = self.calls, self.call_errors
-            self.calls, self.call_errors = {}, {}
-            self.statements.clear()
-            self.http_span_ids.clear()
-            self.held_logs = None
-            self.user_context = None
-            self._call_owner_token = None
+            self._release()
             return calls, errors
 
     def hold_log(self, record: logging.LogRecord, limit: int) -> None:

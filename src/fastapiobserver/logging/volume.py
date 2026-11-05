@@ -26,7 +26,7 @@ def current_route() -> str:
     request_state = get_request_state()
     if request_state is None:
         return NO_REQUEST
-    return route_template(request_state.scope) or UNMATCHED_ROUTE
+    return request_state.resolved_route or route_template(request_state.scope) or UNMATCHED_ROUTE
 
 
 def count_log_bytes(record: logging.LogRecord, line: str) -> None:

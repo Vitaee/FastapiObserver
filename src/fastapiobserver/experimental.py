@@ -15,7 +15,7 @@ from uuid import uuid4
 
 from .core.recording import CallHandle, CallKind, record_completed_call, validate_call
 from .logging.filters import RequestIdFilter, TraceContextFilter
-from .logging.held import keep_request_logs
+from .logging.held import LogSamplingFilter, keep_request_logs
 from .logging import state as logging_state
 from .request_context import (
     RequestState, _operation_context, get_request_id, get_request_state, get_user_context,
@@ -27,10 +27,13 @@ __all__ = ["observe_operation"]
 class Operation:
     """A single-use sync/async scope; child calls belong to the child only."""
 
-    def __init__(self, name: str, logger: logging.Logger) -> None:
+    def __init__(
+        self, name: str, logger: logging.Logger, *, managed_sampling: bool = False,
+    ) -> None:
         self.operation_id = uuid4().hex
         self._name = name
         self._logger = logger
+        self._managed_sampling = managed_sampling
         self._started: float | None = None
         self._state: RequestState | None = None
         self._context: AbstractContextManager[None] | None = None
@@ -45,6 +48,9 @@ class Operation:
         user_context = get_user_context()
         state = RequestState({}, user_context=dict(user_context) if user_context else None,
                              operation_id=self.operation_id)
+        state.observer_logging = self._managed_sampling and (
+            parent is None or parent.observer_logging
+        )
         self._context = _operation_context(state, get_request_id() or self.operation_id)
         self._context.__enter__()
         self._state = state
@@ -115,14 +121,10 @@ class Operation:
             )
             RequestIdFilter().filter(record)
             TraceContextFilter().filter(record)
+            LogSamplingFilter().filter(record)
             held_filter = logging_state._HELD_LOG_FILTER
             admitted = held_filter is None or held_filter.filter(record)
-            calls, errors = self._state.close()
-            for kind, (count, seconds) in calls.items():
-                summary: dict[str, object] = {"count": int(count), "ms": round(seconds * 1000, 3)}
-                if kind in errors:
-                    summary["errors"] = errors[kind]
-                event[kind] = summary
+            event.update(self._state.summarize_calls(close=True))
             if admitted and self._logger.isEnabledFor(level):
                 self._logger.handle(record)
         except Exception:
@@ -143,4 +145,4 @@ def observe_operation(name: str, *, logger: logging.Logger | None = None) -> Ope
         raise ValueError("Operation name must contain 1–128 printable characters")
     return Operation(name, logger if logger is not None else logging.getLogger(
         "fastapiobserver.operations"
-    ))
+    ), managed_sampling=logger is None)
