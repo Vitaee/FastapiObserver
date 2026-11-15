@@ -22,6 +22,10 @@ def _fresh_warnings() -> None:
     pools._last_warned.clear()
 
 
+def _counted(name: str, **labels: str) -> float:
+    return prometheus_client.REGISTRY.get_sample_value(name, labels) or 0.0
+
+
 def _warnings(caplog: pytest.LogCaptureFixture, message: str) -> list[logging.LogRecord]:
     return [r for r in caplog.records if r.getMessage() == message]
 
@@ -55,6 +59,7 @@ def test_requests_waiting_for_a_thread_are_reported(caplog: pytest.LogCaptureFix
                 await asyncio.gather(*blocked)
         return metrics
 
+    counted = _counted("fastapiobserver_threadpool_saturated_total")
     with caplog.at_level(logging.WARNING, logger="fastapiobserver.pools"):
         metrics = asyncio.run(main())
 
@@ -63,6 +68,8 @@ def test_requests_waiting_for_a_thread_are_reported(caplog: pytest.LogCaptureFix
     assert "fastapiobserver_threadpool_busy 1.0" in metrics
     assert "fastapiobserver_threadpool_limit 1.0" in metrics
     assert "fastapiobserver_threadpool_waiting 1.0" in metrics
+    # One warning a minute; the counter has each request that started while full.
+    assert _counted("fastapiobserver_threadpool_saturated_total") - counted == 2
 
 
 class _QueuePool:
@@ -98,6 +105,11 @@ def test_a_full_database_pool_is_reported(caplog: pytest.LogCaptureFixture) -> N
         return {}
 
     install_observability(app, ObservabilitySettings(), metrics_enabled=True, db_engine=engine)
+    exhausted = {"engine": "postgresql://app@db/orders"}
+    name = "fastapiobserver_db_pool_exhausted_total"
+    # Present before the first exhaustion, so that one shows as an increase.
+    assert prometheus_client.REGISTRY.get_sample_value(name, exhausted) is not None
+    counted = _counted(name, **exhausted)
     client = TestClient(app)
     with caplog.at_level(logging.WARNING, logger="fastapiobserver.pools"):
         client.get("/ping")  # 0 of 3 checked out
@@ -114,3 +126,4 @@ def test_a_full_database_pool_is_reported(caplog: pytest.LogCaptureFixture) -> N
     metrics = prometheus_client.generate_latest().decode()
     assert 'fastapiobserver_db_pool_checked_out{engine="postgresql://app@db/orders"} 3.0' in metrics
     assert 'fastapiobserver_db_pool_limit{engine="postgresql://app@db/orders"} 3.0' in metrics
+    assert _counted("fastapiobserver_db_pool_exhausted_total", **exhausted) - counted == 2

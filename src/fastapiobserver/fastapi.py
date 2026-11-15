@@ -7,7 +7,7 @@ import weakref
 import typing
 from collections.abc import Sequence
 from contextlib import asynccontextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Literal, cast
 
 from fastapi import FastAPI
@@ -25,6 +25,7 @@ from .metrics import (
     mount_backend_metrics_endpoint,
 )
 from .middleware import RequestLoggingMiddleware
+from .middleware.validation import install_validation_error_observer
 from .otel import (
     OTelLogsSettings,
     OTelMetricsSettings,
@@ -36,6 +37,7 @@ from .otel import (
 from .otel.native import keep_native_logs_out
 from .pools import watch_db_pool, watch_thread_pool
 from .propagation import install_request_id_propagation
+from .routes import check_routes
 from .security import SecurityPolicy, TrustedProxyPolicy
 from .utils import endpoint_for_log as _endpoint_for_log
 
@@ -50,6 +52,9 @@ class ObservabilityRuntimeState:
     configure_logging: bool = True
     excluded_urls: frozenset[str] = frozenset()
     lifespan_running: bool = False
+    reported_route_issues: set[tuple[str, str, str, tuple[str, ...]]] = field(
+        default_factory=set
+    )
 
 
 def install_observability(
@@ -160,6 +165,7 @@ def install_observability(
         configure_logging=configure_logging,
     )
     install_request_id_propagation(settings.request_id_header)
+    check_routes(app, app.state._observability_state.reported_route_issues)
 
     # --- 7. Uvicorn access log ---
     # The middleware's `request.completed` line carries the same fields, so drop
@@ -382,6 +388,7 @@ def _setup_request_middleware(
         if cast(object, middleware.cls) is RequestLoggingMiddleware:
             return
 
+    install_validation_error_observer(app)
     app.add_middleware(
         RequestLoggingMiddleware,
         settings=settings,
@@ -468,6 +475,7 @@ async def observability_lifespan(app: FastAPI) -> typing.AsyncGenerator[typing.A
     if state:
         state.lifespan_running = True
         _auto_discover_excluded_routes(app, state.settings)
+        check_routes(app, state.reported_route_issues)
         watch_thread_pool()
         if state.settings.loop_block_threshold_ms:
             watchdog = EventLoopWatchdog(state.settings.loop_block_threshold_ms / 1000)

@@ -2,17 +2,21 @@ from __future__ import annotations
 
 import logging
 import time
+from typing import Any
 
 from anyio import get_cancelled_exc_class
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from ..config import ObservabilitySettings
+from ..core.recording import CallKind
+from ..diagnostics import report_diagnostic
 from ..logging.filters import RequestIdFilter, TraceContextFilter
-from ..logging.held import LogSamplingFilter, keep_request_logs
+from ..logging.held import LogSamplingFilter, keep_request_logs, will_write_request_log
+from ..loop_watchdog import last_loop_block_window
 from ..metrics import MetricsBackend, NoopMetricsBackend
 from ..pools import check_pools
 from ..plugins import _METRIC_HOOKS
-from ..request_context import UNMATCHED_ROUTE, RequestState
+from ..request_context import _N_PLUS_ONE_MIN_REPEATS, UNMATCHED_ROUTE, RequestState
 from ..security import (
     SecurityPolicy,
     TrustedProxyPolicy,
@@ -25,10 +29,6 @@ from .headers import _get_header, _upsert_header
 from .ip import _IpResolver
 from .metrics import _MetricsRecorder
 
-# The same statement this many times in one request is usually a query per item
-# in a loop (N+1), which one query with a join or IN would replace.
-# ponytail: fixed threshold; make it a setting if it's too noisy or quiet for someone.
-_N_PLUS_ONE_MIN_REPEATS = 10
 _MAX_REPORTED_STATEMENTS = 1024
 # Metric labels take the method only from this set, as OpenTelemetry does, so a
 # client can't add a time series per made-up method.
@@ -36,6 +36,30 @@ _HTTP_METHODS = frozenset(
     {"GET", "HEAD", "POST", "PUT", "DELETE", "CONNECT", "OPTIONS", "TRACE", "PATCH"}
 )
 _CONTEXT_FILTERS = (RequestIdFilter(), TraceContextFilter(), LogSamplingFilter())
+
+
+def _ws_frame_bytes(message: Message) -> int:
+    data = message.get("bytes")
+    if isinstance(data, (bytes, bytearray)):
+        return len(data)
+    text = message.get("text")
+    return len(text.encode("utf-8")) if isinstance(text, str) else 0
+
+
+def _attach_state_fields(
+    event: dict[str, Any], route_template: str, request_state: RequestState
+) -> None:
+    if route_template != UNMATCHED_ROUTE:
+        event["http.route"] = route_template
+    if request_state.after_disconnect_calls:
+        event["after_disconnect_calls"] = dict(request_state.after_disconnect_calls)
+    if not request_state.closed:
+        request_state.check_conn_held_during_http()
+        if request_state.validation_errors:
+            event["validation_errors"] = list(request_state.validation_errors)
+        if request_state.observed_diagnostics:
+            event["diagnostics"] = sorted(request_state.observed_diagnostics)
+        event.update(request_state.summarize_calls())
 
 
 class RequestLoggingMiddleware:
@@ -68,9 +92,12 @@ class RequestLoggingMiddleware:
             metrics_backend=self.metrics_backend,
             logger=self.logger,
         )
-        self._reported_statements: dict[tuple[str, str, str], None] = {}
+        self._reported_statements: dict[tuple[str, ...], None] = {}
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] == "websocket":
+            await self._handle_websocket(scope, receive, send)
+            return
         if scope["type"] != "http":
             await self.app(scope, receive, send)
             return
@@ -105,6 +132,7 @@ class RequestLoggingMiddleware:
         first_body: float | None = None
         response_finished: float | None = None
         response_trailers = False
+        response_bytes = 0
         disconnected_at: float | None = None
 
         async def receive_wrapper() -> Message:
@@ -113,11 +141,13 @@ class RequestLoggingMiddleware:
             if (message["type"] == "http.disconnect" and disconnected_at is None
                     and response_finished is None):
                 disconnected_at = time.perf_counter()
+                request_state.disconnected = True
             request_body_capture.capture_from_message(message, "http.request")
             return message
 
         async def send_wrapper(message: Message) -> None:
-            nonlocal status_code, response_started, first_body, response_finished, response_trailers
+            nonlocal status_code, response_started, first_body, response_finished
+            nonlocal response_trailers, response_bytes
             if message["type"] == "http.response.start":
                 status_code = int(message.get("status", 500))
                 response_trailers = bool(message.get("trailers", False))
@@ -143,6 +173,8 @@ class RequestLoggingMiddleware:
             await send(message)
             if message["type"] == "http.response.start":
                 response_started = time.perf_counter()
+            if message["type"] == "http.response.body":
+                response_bytes += len(message.get("body", b""))
             first_chunk = (
                 first_body is None and message["type"] == "http.response.body"
                 and bool(message.get("body"))
@@ -204,6 +236,7 @@ class RequestLoggingMiddleware:
                     response_started=response_started,
                     first_body=first_body,
                     response_finished=response_finished,
+                    response_bytes=response_bytes,
                     disconnected_at=disconnected_at,
                     request_state=request_state,
                 )
@@ -226,10 +259,14 @@ class RequestLoggingMiddleware:
         response_started: float | None,
         first_body: float | None,
         response_finished: float | None,
+        response_bytes: int,
         disconnected_at: float | None,
         request_state: RequestState,
     ) -> None:
         app_finished = time.perf_counter()
+        block_start, block_end = last_loop_block_window()
+        if block_end > start and block_start < app_finished:
+            request_state.record_diagnostic_fact("event_loop.blocked")
         app_duration_seconds = max(0.0, app_finished - start)
         duration_seconds = max(
             0.0, (response_finished if response_finished is not None else app_finished) - start
@@ -252,8 +289,10 @@ class RequestLoggingMiddleware:
         if failed or app_duration_seconds * 1000 >= self.settings.log_slow_request_ms:
             keep_request_logs(failed=failed)
         # Building and redacting the event is the costliest step; skip it when
-        # the record would be dropped by the log level anyway.
-        if self.logger.isEnabledFor(level):
+        # the record would be dropped by the log level or sampling policy anyway.
+        if self.logger.isEnabledFor(level) and (
+            self.logger.handlers or will_write_request_log(level, request_state)
+        ):
             safe_event = self.event_builder.build(
                 method=method,
                 path=path,
@@ -282,8 +321,7 @@ class RequestLoggingMiddleware:
                     round(max(0.0, response_finished - first_body) * 1000, 3)
                     if response_finished is not None else None
                 )
-            if route_template != UNMATCHED_ROUTE:
-                safe_event["http.route"] = route_template
+            safe_event["response_bytes"] = response_bytes
             safe_event["response_completed"] = response_finished is not None
             safe_event["cancelled"] = cancelled
             safe_event["client_disconnected"] = disconnected_at is not None
@@ -291,8 +329,7 @@ class RequestLoggingMiddleware:
                 safe_event["after_disconnect_ms"] = round(
                     max(0.0, app_finished - disconnected_at) * 1000, 3
                 )
-            if not request_state.closed:
-                safe_event.update(request_state.summarize_calls())
+            _attach_state_fields(safe_event, route_template, request_state)
             self.logger.log(
                 level,
                 message,
@@ -301,13 +338,112 @@ class RequestLoggingMiddleware:
             )
 
         metric_method = method if method in _HTTP_METHODS else "_OTHER"
+        self._emit_request_diagnostics(metric_method, route_template, request_state)
+
+        if response_finished is None:
+            self._observe_response(scope, method, status_code, duration_seconds, request_state)
+
+    async def _handle_websocket(self, scope: Scope, receive: Receive, send: Send) -> None:
+        start = time.perf_counter()
+        raw_headers = scope.get("headers", [])
+        client_ip, trusted_source = self.ip_resolver.resolve(scope, raw_headers)
+        _request_id, request_state = self.context_manager.initialize(
+            scope, raw_headers, trusted_source
+        )
+        request_state.observer_logging = self.configure_logging
+        accepted = False
+        close_code: int | None = None
+        messages_received = messages_sent = bytes_received = bytes_sent = 0
+        captured_error: Exception | None = None
+
+        async def ws_receive() -> Message:
+            nonlocal close_code, messages_received, bytes_received
+            message = await receive()
+            msg_type = message["type"]
+            if msg_type == "websocket.receive":
+                messages_received += 1
+                bytes_received += _ws_frame_bytes(message)
+            elif msg_type == "websocket.disconnect":
+                close_code = int(message.get("code") or 1000)
+                request_state.disconnected = True
+            return message
+
+        async def ws_send(message: Message) -> None:
+            nonlocal accepted, close_code, messages_sent, bytes_sent
+            await send(message)
+            msg_type = message["type"]
+            if msg_type == "websocket.accept":
+                accepted = True
+            elif msg_type == "websocket.send":
+                messages_sent += 1
+                bytes_sent += _ws_frame_bytes(message)
+            elif msg_type == "websocket.close":
+                close_code = int(message.get("code") or 1000)
+
+        try:
+            check_pools()
+            await self.app(scope, ws_receive, ws_send)
+        except Exception as exc:
+            captured_error = exc
+            if close_code is None:
+                close_code = 1006
+            raise
+        finally:
+            try:
+                finished = time.perf_counter()
+                block_start, block_end = last_loop_block_window()
+                if block_end > start and block_start < finished:
+                    request_state.record_diagnostic_fact("event_loop.blocked")
+                route_template = _extract_route_template(scope, request_state)
+                if captured_error is not None:
+                    level, msg = logging.ERROR, "websocket.failed"
+                    keep_request_logs(failed=True)
+                elif not accepted:
+                    level, msg = logging.WARNING, "websocket.rejected"
+                else:
+                    level, msg = logging.INFO, "websocket.closed"
+                if self.logger.isEnabledFor(level):
+                    event: dict[str, Any] = {
+                        "path": scope.get("path", ""),
+                        "client_ip": client_ip,
+                        "accepted": accepted,
+                        "close_code": (
+                            close_code if close_code is not None else (1000 if accepted else 403)
+                        ),
+                        "duration_ms": round(max(0.0, finished - start) * 1000, 3),
+                        "messages_received": messages_received,
+                        "messages_sent": messages_sent,
+                        "bytes_received": bytes_received,
+                        "bytes_sent": bytes_sent,
+                    }
+                    _attach_state_fields(event, route_template, request_state)
+                    self.logger.log(
+                        level, msg, exc_info=captured_error, extra={"event": event}
+                    )
+                self._emit_request_diagnostics("WS", route_template, request_state)
+            finally:
+                self.context_manager.cleanup(request_state)
+
+    def _emit_request_diagnostics(
+        self, metric_method: str, route_template: str, request_state: RequestState
+    ) -> None:
         if request_state.statements:
             self._report_repeated_statement(
                 metric_method, route_template, request_state
             )
-
-        if response_finished is None:
-            self._observe_response(scope, method, status_code, duration_seconds, request_state)
+        if request_state.http_targets:
+            self._report_repeated_statement(
+                metric_method, route_template, request_state, kind="http"
+            )
+        held = request_state.check_conn_held_during_http()
+        if held is not None:
+            self._warn_once(
+                "db.connection_held_during_http",
+                metric_method,
+                route_template,
+                str(held["target"]),
+                held,
+            )
 
     def _observe_response(
         self, scope: Scope, method: str, status_code: int, duration_seconds: float,
@@ -330,37 +466,56 @@ class RequestLoggingMiddleware:
             )
 
     def _report_repeated_statement(
-        self, method: str, route: str, state: RequestState, *, warn: bool = True
+        self,
+        method: str,
+        route: str,
+        state: RequestState,
+        *,
+        warn: bool = True,
+        kind: CallKind = "db",
     ) -> None:
-        """Warn once per method, route and statement when a query runs once per item (N+1)."""
-        repeated = state.most_repeated_statement()
+        """Warn once per method, route and statement/target when a call runs once per item (N+1)."""
+        repeated = state.most_repeated_statement(kind)
         if repeated is None:
             return
-        statement, count = repeated
+        statement, count, origin = repeated
         if count < _N_PLUS_ONE_MIN_REPEATS:
             return
-        state.add_diagnostic("db.n_plus_one", {
-            "count": count, "threshold": _N_PLUS_ONE_MIN_REPEATS,
-            "statement_fingerprint": statement,
-        })
+        diagnostic = f"{kind}.n_plus_one"
+        fingerprint_key = "statement_fingerprint" if kind == "db" else "target_fingerprint"
+        if kind == "db":
+            state.add_diagnostic(diagnostic, {
+                "count": count, "threshold": _N_PLUS_ONE_MIN_REPEATS,
+                fingerprint_key: statement, **origin,
+            })
         if not warn:
             return
-        key = (method, route, statement)
+        self._warn_once(
+            diagnostic,
+            method,
+            route,
+            statement,
+            {fingerprint_key: statement, "count": count, **origin},
+        )
+
+    def _warn_once(
+        self,
+        diagnostic: str,
+        method: str,
+        route: str,
+        dedup_id: str,
+        details: dict[str, str | int],
+    ) -> None:
+        report_diagnostic(diagnostic, route)
+        key = (diagnostic, method, route, dedup_id)
         if key in self._reported_statements:
             return
         if len(self._reported_statements) >= _MAX_REPORTED_STATEMENTS:
             del self._reported_statements[next(iter(self._reported_statements))]
         self._reported_statements[key] = None
         self.logger.warning(
-            "db.n_plus_one",
-            extra={
-                "event": {
-                    "method": method,
-                    "route": route,
-                    "statement_fingerprint": statement,
-                    "count": count,
-                },
-            },
+            diagnostic,
+            extra={"event": {"method": method, "route": route, **details}},
         )
 
 __all__ = ["RequestLoggingMiddleware"]

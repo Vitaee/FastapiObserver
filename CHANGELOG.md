@@ -4,7 +4,16 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- The `db.n_plus_one` warning and its span event name the application code that ran the repeated statement: `code.file.path`, `code.line.number` and `code.function.name`, for sync and async SQLAlchemy engines. The stack is read once per repeated statement, when it reaches the threshold. SQL text is still not logged.
+- The warning also names the ORM relationship being loaded, as `relationship`, such as `Order.items`. That identifies lazy loads that run while FastAPI serializes the response, where no application code is on the stack. It uses SQLAlchemy's `do_orm_execute` event for every `Session` in the process.
+- Prometheus counters for the diagnostics, so they can be graphed and alerted on: `fastapiobserver_db_n_plus_one_total{route}`, `fastapiobserver_http_n_plus_one_total{route}`, `fastapiobserver_db_connection_held_during_http_total{route}`, `fastapiobserver_http_validation_errors_total{route,field}`, `fastapiobserver_db_pool_exhausted_total{engine}`, `fastapiobserver_threadpool_saturated_total` and `fastapiobserver_event_loop_blocked_total`. They count every occurrence, not only the rate-limited warnings, and are exported in multiprocess mode.
+- WebSocket session diagnostics (`websocket.closed`, `websocket.rejected`, `websocket.failed`) with `close_code`, `messages_sent`, `messages_received`, `bytes_sent`, `bytes_received`, `db`/`http` totals, and per-session `diagnostics`.
+- Zero-tracing request diagnostics: `event.diagnostics` list on affected requests, `422` `validation_errors` field locations and types (never raw input values), startup route checks (`route.shadowed`, `route.duplicate`), `http.timeout_missing` and `http.n_plus_one` warnings, `db.connection_held_during_http` (when a connection overlaps an outbound HTTP call and `conn_held_ms >= 10 * db.ms`), `response_bytes`, `after_disconnect_calls`, `error.fingerprint`, and URL credential stripping in exception messages and tracebacks.
+- `fastapiobserver_log_bytes_total{route}` counter tracking JSON log volume by route template, and terminal event short-circuiting when fast `INFO` requests are dropped by `OBS_LOG_SAMPLE_RATE`.
+
 ### Fixed
+- Logs are no longer lost after another logging configuration runs. `logging.config.dictConfig()` and `fileConfig()` close every existing handler, and this library's queue handler then refused every later record without counting it. That happened with `uvicorn.run(app)`, which configures uvicorn's logging after the app is imported: request lines and warnings stopped after startup. The [server guide](https://vitaee.github.io/FastapiObserver/servers/#uvicorn) shows how to keep uvicorn's own lines as JSON in that case.
 - Docs that no longer matched 2.3.0 are corrected:
   - the README's CPU cost (about 55 µs per request in 2.3.0, not 49 µs) and the benchmarks page, which now has the 2.3.0 figures and says which version its older table measured;
   - the supported versions in `SECURITY.md`;

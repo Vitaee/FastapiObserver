@@ -274,10 +274,52 @@
       }
     },
     {
+      "title": "Diagnostics: N+1 Queries, Blocked Event Loop, Full Pools",
+      "description": "How often each fastapi-observer diagnostic has fired since the service started: requests with a repeated SQL statement by route, blocks of the event loop, and requests that started while the database or thread pool was full.",
+      "type": "timeseries",
+      "gridPos": { "h": 9, "w": 24, "x": 0, "y": 27 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        {
+          "expr": "sum(fastapiobserver_db_n_plus_one_total{job=\"$service\"}) by (route)",
+          "legendFormat": "N+1 {{route}}",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(fastapiobserver_event_loop_blocked_total{job=\"$service\"})",
+          "legendFormat": "event loop blocked",
+          "refId": "B"
+        },
+        {
+          "expr": "sum(fastapiobserver_db_pool_exhausted_total{job=\"$service\"})",
+          "legendFormat": "database pool full",
+          "refId": "C"
+        },
+        {
+          "expr": "sum(fastapiobserver_threadpool_saturated_total{job=\"$service\"})",
+          "legendFormat": "thread pool full",
+          "refId": "D"
+        }
+      ],
+      "options": {
+        "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull"] },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "drawStyle": "line", "lineInterpolation": "stepAfter", "fillOpacity": 10, "lineWidth": 2, "showPoints": "never" },
+          "unit": "short",
+          "min": 0
+        },
+        "overrides": []
+      }
+    },
+    {
       "title": "API Logs",
       "description": "Live structured JSON logs from Loki.",
       "type": "logs",
-      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 27 },
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 36 },
       "datasource": { "type": "loki", "uid": "loki" },
       "targets": [
         {

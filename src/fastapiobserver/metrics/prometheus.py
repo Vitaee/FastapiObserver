@@ -17,6 +17,7 @@ from starlette.responses import Response
 from starlette.routing import Route
 
 from ..config import MetricsFormat
+from ..diagnostics import _listeners as _diagnostic_listeners
 from ..utils import normalize_path
 
 _LOGGER = logging.getLogger("fastapiobserver.metrics")
@@ -25,6 +26,45 @@ _HTTP_LABELS = ("service", "environment", "method", "path", "status_code")
 _FORCED_ACCEPT = {
     "openmetrics": "application/openmetrics-text",
     "prometheus": "text/plain",
+}
+# Diagnostic: its counter, help text and label(s). Real counters rather than the
+# collectors below, so they add up across workers in multiprocess mode.
+_DIAGNOSTIC_COUNTERS: dict[str, tuple[str, str, str | tuple[str, ...] | None]] = {
+    "db.n_plus_one": (
+        "fastapiobserver_db_n_plus_one_total",
+        "Requests in which one SQL statement ran 10 or more times, by route.",
+        "route",
+    ),
+    "http.n_plus_one": (
+        "fastapiobserver_http_n_plus_one_total",
+        "Requests in which one outbound HTTP target was called 10 or more times, by route.",
+        "route",
+    ),
+    "http.validation_error": (
+        "fastapiobserver_http_validation_errors_total",
+        "Request validation errors (HTTP 422), by route and field.",
+        ("route", "field"),
+    ),
+    "db.connection_held_during_http": (
+        "fastapiobserver_db_connection_held_during_http_total",
+        "Requests that made an outbound HTTP call while holding a SQLAlchemy connection, by route.",
+        "route",
+    ),
+    "db.pool_exhausted": (
+        "fastapiobserver_db_pool_exhausted_total",
+        "Requests that started while a SQLAlchemy pool had no free connection.",
+        "engine",
+    ),
+    "threadpool.saturated": (
+        "fastapiobserver_threadpool_saturated_total",
+        "Requests that started while every thread was busy and calls were waiting.",
+        None,
+    ),
+    "event_loop.blocked": (
+        "fastapiobserver_event_loop_blocked_total",
+        "Times the event loop was blocked for longer than the threshold.",
+        None,
+    ),
 }
 _SINK_COUNTERS = {
     "failures_total": "Total sink handler failures observed by circuit breakers.",
@@ -220,7 +260,8 @@ def _register_collectors() -> None:
             extra={
                 "event": {
                     "message": (
-                        "In multiprocess mode /metrics has request metrics only: the "
+                        "In multiprocess mode /metrics has request metrics and "
+                        "diagnostic counters only: the "
                         "log queue, log volume, sink, thread pool and database pool "
                         "metrics describe one worker, so they aren't exported. The "
                         "threadpool.saturated and db.pool_exhausted warnings still "
@@ -253,6 +294,7 @@ class PrometheusMetricsBackend:
     _LOCK = threading.Lock()
     _REQUEST_COUNT: Any = None
     _REQUEST_LATENCY: Any = None
+    _DIAGNOSTICS: dict[str, tuple[Any, bool]] = {}  # diagnostic: (counter, has a label)
 
     def __init__(
         self,
@@ -295,6 +337,29 @@ class PrometheusMetricsBackend:
                     _HTTP_LABELS,
                     buckets=(0.005, 0.01, 0.025, 0.05, 0.1, 0.3, 0.5, 1, 3, 5, 10),
                 )
+                for name, (metric, documentation, label) in _DIAGNOSTIC_COUNTERS.items():
+                    label_names = (
+                        list(label)
+                        if isinstance(label, tuple)
+                        else ([label] if label else [])
+                    )
+                    counter = prometheus_client.Counter(
+                        metric, documentation, label_names
+                    )
+                    cls._DIAGNOSTICS[name] = (counter, bool(label_names))
+                _diagnostic_listeners.append(cls._count_diagnostic)
+
+    @classmethod
+    def _count_diagnostic(
+        cls, name: str, label: str | tuple[str, ...], count: int
+    ) -> None:
+        counter, labelled = cls._DIAGNOSTICS.get(name, (None, False))
+        if counter is not None:
+            if labelled:
+                labels = label if isinstance(label, tuple) else (label,)
+                counter.labels(*labels).inc(count)
+            else:
+                counter.inc(count)
 
     def observe(
         self,

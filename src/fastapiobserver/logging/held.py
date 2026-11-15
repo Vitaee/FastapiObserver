@@ -14,7 +14,7 @@ from __future__ import annotations
 import hashlib
 import logging
 
-from ..request_context import RequestState, get_request_state
+from ..request_context import RequestState, get_request_id, get_request_state, get_trace_id
 from . import state
 
 # ponytail: fixed cap per request, newest kept; make it a setting if 200 isn't enough.
@@ -58,7 +58,9 @@ class HeldLogFilter(logging.Filter):
             request_state.hold_log(record, _MAX_HELD_RECORDS)
         return False
 
-    def _sampled(self, request_state: RequestState, record: logging.LogRecord) -> bool:
+    def _sampled(
+        self, request_state: RequestState, record: logging.LogRecord | None = None
+    ) -> bool:
         if self.sample_bound > _LOW_64_BITS:
             return True
         if request_state.sampled is None:
@@ -69,7 +71,15 @@ class HeldLogFilter(logging.Filter):
         return request_state.sampled
 
 
-def _sampling_bits(record: logging.LogRecord) -> int | None:
+def will_write_request_log(level: int, request_state: RequestState) -> bool:
+    """True when a terminal request log at *level* will pass HeldLogFilter."""
+    held = state._HELD_LOG_FILTER
+    if held is None or not request_state.observer_logging or state._QUEUE_LISTENER is None:
+        return True
+    return level >= held.level and (level >= logging.WARNING or held._sampled(request_state))
+
+
+def _sampling_bits(record: logging.LogRecord | None = None) -> int | None:
     """The 64 bits that decide whether a record's request is sampled.
 
     The low half of its trace ID, which OpenTelemetry's TraceIdRatioBased sampler
@@ -77,13 +87,13 @@ def _sampling_bits(record: logging.LogRecord) -> int | None:
     keeps the same requests. Without a trace ID, a hash of the request ID, which
     services forward to each other.
     """
-    trace_id = getattr(record, "trace_id", None)
+    trace_id = get_trace_id() if record is None else getattr(record, "trace_id", None)
     if isinstance(trace_id, str):
         try:
             return int(trace_id, 16) & _LOW_64_BITS
         except ValueError:
             pass
-    request_id = getattr(record, "request_id", None)
+    request_id = get_request_id() if record is None else getattr(record, "request_id", None)
     if not request_id:
         return None
     digest = hashlib.blake2b(str(request_id).encode(), digest_size=8).digest()

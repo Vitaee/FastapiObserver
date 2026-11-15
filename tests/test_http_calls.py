@@ -345,3 +345,121 @@ def test_http_counting_does_not_require_opentelemetry_instrumentation(monkeypatc
 
         event = _call(app, caplog)
     assert event["http"]["count"] == 1
+
+
+@pytest.mark.parametrize("library", ["httpx", "httpx2"])
+def test_repeated_http_calls_emit_n_plus_one_warning_and_metric(library, caplog):
+    http = pytest.importorskip(library)
+    prometheus_client = pytest.importorskip("prometheus_client")
+    app = FastAPI()
+
+    def respond(request):
+        return http.Response(200, json={"ok": True})
+
+    with http.Client(transport=http.MockTransport(respond)) as client:
+        instrument_httpx_client(client)
+
+        @app.get("/orders")
+        def list_orders():
+            for item_id in range(12):
+                client.get(f"https://user:secret@downstream.test/users/{item_id}?token=secret")
+            return {}
+
+        install_observability(app, ObservabilitySettings(), metrics_enabled=True)
+
+        def counted() -> float:
+            return (
+                prometheus_client.REGISTRY.get_sample_value(
+                    "fastapiobserver_http_n_plus_one_total", {"route": "/orders"}
+                )
+                or 0.0
+            )
+
+        before = counted()
+        with caplog.at_level(logging.WARNING, logger="fastapiobserver.middleware"):
+            test_client = TestClient(app)
+            assert test_client.get("/orders").status_code == 200
+            assert test_client.get("/orders").status_code == 200
+
+    warnings = [r.event for r in caplog.records if r.message == "http.n_plus_one"]
+    assert len(warnings) == 1
+    warning = warnings[0]
+    assert warning["method"] == "GET"
+    assert warning["route"] == "/orders"
+    assert warning["count"] == 12
+    assert warning["target"] == "GET downstream.test/users/:id"
+    assert len(warning["target_fingerprint"]) == 64
+    assert warning["code.function.name"].endswith("list_orders")
+    assert "secret" not in str(warning)
+    assert counted() - before == 2
+
+
+def test_missing_or_unlimited_timeouts_warn_once_per_library_and_host(caplog):
+    httpx = pytest.importorskip("httpx")
+    requests = pytest.importorskip("requests")
+
+    with caplog.at_level(logging.WARNING, logger="fastapiobserver.http_calls"):
+        with httpx.Client(
+            base_url="https://unlimited.test",
+            timeout=None,
+            transport=httpx.MockTransport(lambda _: httpx.Response(200)),
+        ) as client:
+            instrument_httpx_client(client)
+            client.get("/first")
+            client.get("/second")
+
+        with httpx.Client(
+            base_url="https://bounded.test",
+            timeout=5.0,
+            transport=httpx.MockTransport(lambda _: httpx.Response(200)),
+        ) as bounded_client:
+            instrument_httpx_client(bounded_client)
+            bounded_client.get("/ok")
+
+    httpx_warnings = [
+        r.event for r in caplog.records if r.message == "http.timeout_missing"
+    ]
+    assert httpx_warnings == [
+        {
+            "library": "httpx",
+            "host": "unlimited.test",
+            "unlimited": ["connect", "read", "write", "pool"],
+        }
+    ]
+
+    caplog.clear()
+
+    class Adapter(requests.adapters.BaseAdapter):
+        def send(self, request, **kwargs):
+            response = requests.Response()
+            response.request, response.status_code = request, 200
+            response._content, response._content_consumed = b"ok", True
+            return response
+
+        def close(self):
+            pass
+
+    instrument_requests_session()
+    with requests.Session() as session:
+        session.mount("https://", Adapter())
+        with caplog.at_level(logging.WARNING, logger="fastapiobserver.http_calls"):
+            session.get("https://bounded-req.test/items", timeout=3.0)
+            session.get("https://partial-req.test/items", timeout=(2.0, None))
+            session.get("https://no-timeout.test/items")
+            session.get("https://no-timeout.test/other")
+
+    req_warnings = [
+        r.event for r in caplog.records if r.message == "http.timeout_missing"
+    ]
+    assert req_warnings == [
+        {
+            "library": "requests",
+            "host": "partial-req.test",
+            "unlimited": ["read"],
+        },
+        {
+            "library": "requests",
+            "host": "no-timeout.test",
+            "unlimited": ["connect", "read"],
+        },
+    ]

@@ -16,6 +16,7 @@ import time
 import weakref
 from typing import Any
 
+from .diagnostics import report_diagnostic
 from .request_context import get_request_state
 
 _LOGGER = logging.getLogger("fastapiobserver.pools")
@@ -38,7 +39,10 @@ def watch_thread_pool() -> None:
 def watch_db_pool(engine: Any) -> None:
     """Watch a sync SQLAlchemy engine's pool, if it has a limit (``QueuePool``)."""
     if callable(getattr(engine.pool, "checkedout", None)):
-        _db_pools[engine] = engine.url.render_as_string(hide_password=True)
+        label = _db_pools[engine] = engine.url.render_as_string(hide_password=True)
+        # Start its counter at zero: a series that first appears at one shows no
+        # increase, and the first exhaustion would be missed by rate() and alerts.
+        report_diagnostic("db.pool_exhausted", label, 0)
 
 
 def thread_pool_usage() -> tuple[int, float, int] | None:
@@ -85,6 +89,7 @@ def _db_pool_limit(pool: Any) -> float:
 
 
 def _warn(message: str, pool: str, event: dict[str, Any]) -> None:
+    report_diagnostic(message, pool)
     state = get_request_state()
     if state is not None:
         # URLs, labels and credentials stay out of span attributes. Per-request
@@ -93,6 +98,7 @@ def _warn(message: str, pool: str, event: dict[str, Any]) -> None:
             "checked_out", "limit"
         )
         state.add_diagnostic(message, {key: event[key] for key in keys})
+        state.record_diagnostic_fact(message)
     now = time.monotonic()
     if now - _last_warned.get(pool, -math.inf) < _WARN_INTERVAL_SECONDS:
         return

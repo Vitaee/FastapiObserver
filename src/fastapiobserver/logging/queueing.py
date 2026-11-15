@@ -239,11 +239,18 @@ class OverflowPolicyQueueHandler(logging.handlers.QueueHandler):
         finally:
             self.release()
 
-    def close(self) -> None:
+    def stop_accepting(self) -> None:
+        """Refuse records from now on; this library's teardown calls it before
+        stopping the listener.
+
+        ``close()`` must not do this. ``logging.config.dictConfig()`` and
+        ``fileConfig()`` close every existing handler and leave it attached, as
+        ``uvicorn.run(app)`` does after the application was imported, and each
+        later record would be lost while the listener still runs.
+        """
         self.acquire()
         try:
             self._accepting = False
-            super().close()
         finally:
             self.release()
 

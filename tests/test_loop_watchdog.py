@@ -8,8 +8,10 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+import pytest
 
 from fastapiobserver import ObservabilitySettings, install_observability, observability_lifespan
+from fastapiobserver import diagnostics
 from fastapiobserver.logging import setup_logging, shutdown_logging
 
 
@@ -45,7 +47,11 @@ def _loop_blocked_records(app: FastAPI, *paths: str) -> list[logging.LogRecord]:
     return [r for r in collector.records if r.getMessage() == "event_loop.blocked"]
 
 
-def test_blocking_call_in_async_endpoint_is_logged_with_its_stack() -> None:
+def test_blocking_call_in_async_endpoint_is_logged_with_its_stack(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    reported: list[tuple[str, str]] = []
+    monkeypatch.setattr(diagnostics, "_listeners", [lambda *args: reported.append(args)])
     app = FastAPI()
     _add_blocking_route(app)
 
@@ -58,6 +64,7 @@ def test_blocking_call_in_async_endpoint_is_logged_with_its_stack() -> None:
     assert record.levelno == logging.WARNING
     assert record.event["blocked_ms"] >= 100  # type: ignore[attr-defined]
     assert "_block_the_loop" in record.event["stack"]  # type: ignore[attr-defined]
+    assert reported == [("event_loop.blocked", "", 1)]  # what the metrics backend counts
 
 
 def test_observability_lifespan_in_the_apps_own_lifespan_reports_a_block_once() -> None:

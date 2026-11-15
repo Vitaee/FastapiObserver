@@ -61,7 +61,7 @@ docker compose -f examples/full_stack/docker-compose.yml restart app-a
 |---|---|---|---|
 | Blocked event loop | `GET /lab/block` calls synchronous `time.sleep` inside `async def` | `event_loop.blocked`, with the blocking stack | `GET /slow` awaits `asyncio.sleep`, leaving the worker responsive |
 | Exhausted database pool | `GET /lab/db-pool` holds the only connection while another request arrives | `db.pool_exhausted`, with checked-out connections and pool limit | Release connections before unrelated I/O; size pools for actual concurrency |
-| N+1 queries | `GET /lab/n-plus-one` fetches IDs, then reads each item separately | `db.n_plus_one`; the request line has `event.db.count=11` | `GET /lab/batched` returns the same ten items in one query |
+| N+1 queries | `GET /lab/n-plus-one` fetches IDs, then reads each item separately | `db.n_plus_one`, with the file, line and function that ran the query; the request line has `event.db.count=11` | `GET /lab/batched` returns the same ten items in one query |
 | Slow downstream | `GET /lab/downstream?seconds=0.3&calls=2` makes two concurrent HTTP calls | `event.http.count=2`; `http.ms` sums both calls, while `duration_ms` measures the response | Set explicit downstream timeouts; check the downstream service |
 | Failure after response | `GET /lab/background?seconds=0.3&fail=true` sends 202 before failing | `request.failed` keeps status 202 and `response_completed=true`; `app_duration_ms` includes later work | Monitor background failures separately from HTTP response errors |
 
@@ -100,14 +100,20 @@ In **Explore → Prometheus**, inspect:
 fastapiobserver_db_pool_checked_out
 fastapiobserver_db_pool_limit
 
+# How often each diagnostic fired:
+fastapiobserver_db_n_plus_one_total
+fastapiobserver_event_loop_blocked_total
+fastapiobserver_db_pool_exhausted_total
+fastapiobserver_threadpool_saturated_total
+
 histogram_quantile(
   0.95,
   sum(rate(http_request_duration_seconds_bucket[5m])) by (le, service)
 )
 ```
 
-The **API Overview** dashboard shows request rates, latency, errors, CPU, memory
-and logs. Use its service dropdown to compare the three app instances.
+The **API Overview** dashboard shows request rates, latency, errors, CPU, memory,
+how often each diagnostic fired, and logs. Use its service dropdown to compare the three app instances.
 
 ## Cross-service correlation
 

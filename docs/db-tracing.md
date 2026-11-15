@@ -1,91 +1,56 @@
-# Database Tracing and SQLCommenter (SQLAlchemy)
+# Database Tracing and SQL Diagnostics (SQLAlchemy)
 
-This guide explains how to connect HTTP request traces to SQL query execution
-so application engineers and DBAs can debug the same incident with shared context.
+`fastapi-observer` provides zero-tracing SQLAlchemy diagnostics (`db.count`, `db.ms`,
+`conn_held_ms`, N+1 detection, pool exhaustion, and connection-hold-during-HTTP
+detection) whenever `db_engine` is passed to `install_observability()`, plus optional
+OpenTelemetry SQL spans and SQLCommenter trace injection.
 
-## Why Use Database Tracing
+## Query count and time on the request line
 
-Without SQL instrumentation, you can see slow API requests but cannot quickly answer:
-- which SQL statement caused the latency,
-- which request/trace triggered that query,
-- whether the issue is app logic, connection pool pressure, or database performance.
+Every HTTP and WebSocket log record counts database queries and instrumented
+outbound HTTP calls without requiring OpenTelemetry:
 
-With SQLAlchemy instrumentation enabled, each query is attached to the active request trace.
-With SQLCommenter enabled, trace metadata is also embedded directly in the SQL text.
+```json
+{"message": "request.completed", "event": {"path": "/orders", "duration_ms": 182.4, "db": {"count": 12, "ms": 140.3, "sqlalchemy": {"attempted": 12, "succeeded": 12, "failed": 0, "in_flight": 0, "conn_held_ms": 142.1}}, "http": {"count": 1, "ms": 31.0}}}
+```
 
-## Benefits
+- `db` counts queries on engines passed as `db_engine` (both `Engine` and `AsyncEngine`). Other database clients (such as Redis) are counted from sampled OpenTelemetry spans when tracing is enabled.
+- `http` counts clients registered with `instrument_httpx_client()` or `instrument_requests_session()` independently of tracing; see [outbound HTTP diagnostics](opentelemetry.md#outbound-http-diagnostics).
+- Engines passed as `db_engine` are also watched for pool saturation (`db.pool_exhausted`); see [full thread and database pools](logging.md#full-thread-and-database-pools).
 
-| Benefit | What you get |
-|---|---|
-| Request-to-query correlation | Link slow endpoints to concrete SQL statements in traces |
-| Better DBA collaboration | Query logs can carry trace context for cross-team debugging |
-| Multi-engine support | Instrument one engine or a list (read/write, shards, tenants) |
-| Async and sync coverage | Works for both `Engine` and `AsyncEngine` |
-| Controlled metadata | Choose which SQLCommenter fields are injected |
+### N+1 queries (`db.n_plus_one`)
 
-## Prerequisites
+When a statement executes 10 or more times in a single request, `fastapi-observer`
+adds `"db.n_plus_one"` to `event.diagnostics`, increments
+`fastapiobserver_db_n_plus_one_total{route}`, and logs a rate-limited warning
+once per `(method, route, statement_fingerprint)`:
 
-Install tracing extras:
+```json
+{"level": "WARNING", "message": "db.n_plus_one", "request_id": "...", "event": {"method": "GET", "route": "/orders", "statement_fingerprint": "<sha256>", "count": 12, "relationship": "Order.items", "code.file.path": "/app/orders.py", "code.line.number": 41, "code.function.name": "orders.list_orders"}}
+```
+
+- `statement_fingerprint` is a SHA-256 digest of the statement without logging raw SQL text or parameters (up to 128 distinct fingerprints per request and 1,024 warning keys per middleware instance).
+- `code.*` identifies the innermost application frame that triggered the 10th execution.
+- `relationship` names the SQLAlchemy ORM relationship (e.g. `Order.items`) when triggered by lazy or relationship loading, even if serialized after the route handler returned.
+
+### Connections held across outbound HTTP calls (`db.connection_held_during_http`)
+
+Holding a SQLAlchemy session/connection open while awaiting an external HTTP API
+pins a scarce pool connection for the duration of the network call. When an
+instrumented outbound HTTP call overlaps an open DB connection **and** total
+connection checkout time (`db.sqlalchemy.conn_held_ms`) is at least `10 × db.ms`
+(or the connection remains checked out at request end), `fastapi-observer`:
+1. Appends `"db.connection_held_during_http"` to the request's `event.diagnostics` list.
+2. Increments `fastapiobserver_db_connection_held_during_http_total{route}`.
+3. Emits a rate-limited `db.connection_held_during_http` warning once per `(method, route)` with `conn_held_ms` and `http_ms`.
+
+## OpenTelemetry SQL Spans and SQLCommenter
+
+To emit per-query OpenTelemetry spans and inject `traceparent` comments into SQL text:
 
 ```bash
 pip install "fastapi-observer[otel,otel-sqlalchemy]"
 ```
-
-Also install your SQLAlchemy drivers (for example `asyncpg`, `aiomysql`, `psycopg`).
-
-## How It Works
-
-When enabled:
-1. FastAPI request creates/joins an OpenTelemetry trace.
-2. SQLAlchemy instrumentation creates database spans for executed statements.
-3. SQLCommenter appends trace metadata to SQL text (if `enable_commenter=True`).
-4. You can correlate API latency, trace spans, and DB-side query logs.
-
-Example SQL comment shape:
-
-```sql
-SELECT * FROM users /*db_driver='asyncpg',traceparent='00-<trace-id>-<span-id>-01'*/
-```
-
-## Connection pool usage
-
-Engines passed as `db_engine` are also watched for a full connection pool, with or without tracing. A `db.pool_exhausted` warning is written when every connection is checked out, and with metrics on there are pool gauges (not in Prometheus multiprocess mode, where only the warning remains). See [full thread and database pools](logging.md#full-thread-and-database-pools).
-
-## Query count and time on the request line
-
-Each request line can count database queries and supported outbound HTTP calls
-without tracing:
-
-```json
-{"message": "request.completed", "event": {"path": "/orders", "duration_ms": 182.4, "db": {"count": 12, "ms": 140.3}, "http": {"count": 1, "ms": 31.0}}}
-```
-
-`db` counts completed queries on the engines passed as `db_engine`, from SQLAlchemy's successful `after_cursor_execute` events, so it works without tracing and on every request. Failed SQL executions do not currently add to these totals. Other database clients, such as Redis or a driver used directly, are counted from their OpenTelemetry spans, so only with tracing on and for sampled requests.
-
-`http` counts HTTPX/HTTPX2 clients configured with `instrument_httpx_client()`
-and Requests calls configured with `instrument_requests_session()`, including
-failures and timeout categories, independently of tracing. Their client spans
-do not add a second count. Other HTTP clients are counted from sampled spans.
-See [outbound HTTP diagnostics](opentelemetry.md#outbound-http-diagnostics).
-
-### N+1 queries
-
-When one statement runs 10 or more times in a request, usually a query per item in a loop, a warning names it. It's written once per method, route and statement in each process:
-
-```json
-{"level": "WARNING", "message": "db.n_plus_one", "request_id": "...", "event": {"method": "GET", "route": "/orders", "statement_fingerprint": "<sha256>", "count": 12}}
-```
-
-The warning retains and emits a SHA-256 fingerprint of the full statement,
-without SQL text. Parameterized statements group consistently; different inline
-literals produce different fingerprints. Each request retains at most 128
-fingerprints and each middleware instance retains at most 1,024 warning keys;
-total successful-query counts remain complete. A fingerprint is not
-anonymization. The `request_id` leads to that request's logs and available trace.
-
-## Recommended Setup (via `install_observability`)
-
-Use this path when you already initialize observability through the FastAPI facade.
 
 ```python
 from fastapiobserver import OTelSettings, install_observability
@@ -93,142 +58,49 @@ from sqlalchemy import create_engine
 
 engine = create_engine("postgresql://...")
 
-otel_settings = OTelSettings(enabled=True)
-
 install_observability(
     app,
     settings,
-    otel_settings=otel_settings,
-    db_engine=engine,
+    otel_settings=OTelSettings(enabled=True),
+    db_engine=engine,               # Single engine or list: [write_engine, read_engine]
+    db_commenter_enabled=True,      # Set False to keep SQL spans without SQL comments
 )
 ```
 
-Multiple engines:
+When `db_commenter_enabled=True`, executed statements include trace correlation comments:
+
+```sql
+SELECT * FROM users /*db_driver='asyncpg',traceparent='00-<trace-id>-<span-id>-01'*/
+```
+
+For standalone instrumentation outside `install_observability()`:
 
 ```python
-install_observability(
-    app,
-    settings,
-    otel_settings=otel_settings,
-    db_engine=[write_engine, read_engine],
+from fastapiobserver.db_tracing import (
+    instrument_sqlalchemy,
+    instrument_sqlalchemy_async,
+    uninstrument_sqlalchemy,
 )
-```
 
-Disable SQL comments but keep SQL spans:
-
-```python
-install_observability(
-    app,
-    settings,
-    otel_settings=otel_settings,
-    db_engine=engine,
-    db_commenter_enabled=False,
-)
-```
-
-Important behavior:
-- `db_engine` instrumentation runs only when `otel_settings.enabled=True`.
-- Engines are instrumented explicitly from the `db_engine` argument.
-- There is no automatic GC-based engine discovery.
-
-## Manual Instrumentation (standalone)
-
-Use manual instrumentation if you do not want to pass engines through `install_observability`.
-
-```python
-from fastapiobserver.db_tracing import instrument_sqlalchemy, instrument_sqlalchemy_async
-
-# Sync SQLAlchemy Engine
-instrument_sqlalchemy(engine)
-
-# AsyncEngine (internally instruments async_engine.sync_engine)
-instrument_sqlalchemy_async(async_engine)
-```
-
-Teardown helper:
-
-```python
-from fastapiobserver.db_tracing import uninstrument_sqlalchemy
-
-uninstrument_sqlalchemy()
-```
-
-## SQLCommenter Options
-
-Default options:
-
-```python
-{
-    "opentelemetry_values": True,
-    "db_driver": True,
-    "db_framework": False,
-}
-```
-
-These are the only keys OpenTelemetry's SQLCommenter supports.
-
-Custom options:
-
-```python
 instrument_sqlalchemy(
     engine,
     commenter_options={
         "opentelemetry_values": True,
-        "db_driver": False,
-        "db_framework": True,
+        "db_driver": True,
+        "db_framework": False,
     },
 )
 ```
 
-To instrument several engines, call `instrument_sqlalchemy()` once per engine (or pass a list as `db_engine` to `install_observability()`); every engine stays instrumented. The commenter options of the latest call apply to all of them.
-
-OpenTelemetry's SQLAlchemy instrumentation only supports the SQLAlchemy versions listed by `opentelemetry-instrumentation-sqlalchemy` (currently below 2.1). On other versions nothing is instrumented and fastapi-observer logs `db_tracing.not_instrumented` instead of `db_tracing.instrumented`.
-
-## Verification Checklist
-
-1. Start app with OTel enabled and DB instrumentation configured.
-2. Send traffic to endpoints that execute SQL.
-3. Confirm database spans appear in your tracing backend.
-4. Confirm SQL comments appear in DB logs or SQL echo output when commenter is enabled.
-5. Validate that the trace ID in SQL comments matches the corresponding request trace.
-
-Quick request example:
-
-```bash
-curl -X POST http://localhost:8000/users/alice
-curl http://localhost:8000/users
-```
-
-Runnable demo:
-- `examples/db_tracing_app.py`
-
-## Edge Cases and Failure Modes
+## Edge Cases and Security
 
 | Scenario | Behavior |
 |---|---|
-| Missing `otel-sqlalchemy` dependency | Raises clear runtime error with install hint |
-| `instrument_sqlalchemy_async` called with non-AsyncEngine | Raises `TypeError` (missing `sync_engine`) |
-| `db_engine` set but OTel disabled in `install_observability` | Instrumentation path is skipped |
-| `db_commenter_enabled=False` | DB spans still available; SQL comments disabled |
-| Request not sampled | SQLAlchemy queries on `db_engine` engines are still counted and checked for N+1; spans from other clients aren't |
-| SQLAlchemy 2.1 | OpenTelemetry's instrumentation supports SQLAlchemy before 2.1, so there are no query spans or SQL comments (`db_tracing.not_instrumented` is logged); query counts and N+1 still work |
-
-## Production Best Practices
-
-1. Instrument engines once at process startup, before serving high traffic.
-2. Keep SQLCommenter fields minimal to avoid noisy query text.
-3. Use parameterized queries everywhere to avoid leaking sensitive literals.
-4. Review `db.statement` exports in your tracing backend before production rollout.
-5. If SQL comments are not needed for your DBA workflow, disable commenter and rely on spans only.
-6. Roll out with canary traffic first and watch trace volume/cost impact.
-
-## Security Note
+| `db_engine` passed with OTel disabled | Native query counting, `conn_held_ms`, pool checks, and N+1 detection run; OTel span instrumentation is skipped |
+| Request not sampled by OTel or `OBS_LOG_SAMPLE_RATE` | Native SQLAlchemy metrics and anomaly counters still run on every request |
+| SQLAlchemy >= 2.1 | OTel's `opentelemetry-instrumentation-sqlalchemy` logs `db_tracing.not_instrumented`; native query counts and N+1 still work |
 
 > [!CAUTION]
-> `db.statement` span attributes from SQLAlchemy instrumentation are not scrubbed by
-> `fastapi-observer` security redaction. If queries contain inline sensitive values,
-> those values can be exported to tracing backends. Use parameterized statements and
-> enforce review of trace payloads in production. The `db.n_plus_one` log line
-> emits a SHA-256 statement fingerprint without retaining or emitting SQL text.
-
----
+> OpenTelemetry's SQLAlchemy span attributes (`db.statement`) are not scrubbed by
+> `fastapi-observer` log redaction. Always use bound SQL parameters rather than inline
+> literals. Native `db.n_plus_one` logs only emit a SHA-256 `statement_fingerprint`.

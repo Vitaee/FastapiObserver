@@ -17,6 +17,15 @@ Nothing to configure. `install_observability()` routes uvicorn's loggers into th
 uvicorn main:app --host 0.0.0.0 --port 8000
 ```
 
+Starting uvicorn from Python with an import string, `uvicorn.run("main:app")`, behaves the same.
+With the app object, uvicorn applies its own logging configuration after your app was imported, so
+its startup lines and its access line appear as plain text beside the JSON lines. Pass
+`log_config=None` to keep them in the JSON pipeline:
+
+```python
+uvicorn.run(app, host="0.0.0.0", port=8000, log_config=None)
+```
+
 ## gunicorn with `UvicornWorker`
 
 Request lines and your app's logs are JSON out of the box. Gunicorn's own lines (`Starting gunicorn`, `Booting worker`, signals) come from the master process, which never imports your app, so they stay plain text unless gunicorn is told to use the JSON formatter.
