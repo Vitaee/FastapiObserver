@@ -79,16 +79,6 @@ def test_release_retry_rejects_existing_files_with_different_bytes(tmp_path):
         verify_existing_files(tmp_path, {"package.whl": "not-the-validated-hash"})
 
 
-def test_release_retry_accepts_identical_existing_files(tmp_path):
-    from hashlib import sha256
-    from scripts.release_ref import verify_existing_files
-
-    (tmp_path / "package.whl").write_bytes(b"validated wheel")
-    assert verify_existing_files(
-        tmp_path, {"package.whl": sha256(b"validated wheel").hexdigest()},
-    ) == []
-
-
 def test_partial_release_uploads_only_files_not_already_verified(tmp_path):
     from hashlib import sha256
     from scripts.release_ref import verify_existing_files

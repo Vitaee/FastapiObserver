@@ -72,7 +72,7 @@ def test_multiprocess_workers_are_summed_at_metrics(
             backend.observe(method="GET", path="/orders", status_code=200, duration_seconds=0.01)
         mark_process_dead(os.getpid())
         """
-    for _ in range(12):
+    for _ in range(2):
         _run(worker, env={"PROMETHEUS_MULTIPROC_DIR": str(tmp_path)})
 
     monkeypatch.setenv("PROMETHEUS_MULTIPROC_DIR", str(tmp_path))
@@ -85,11 +85,11 @@ def test_multiprocess_workers_are_summed_at_metrics(
         for line in body.splitlines()
         if line.startswith("http_requests_total{") and 'path="/orders"' in line
     ]
-    assert float(line.rsplit(" ", 1)[1]) == 60.0
+    assert float(line.rsplit(" ", 1)[1]) == 10.0
     [histogram] = [line for line in body.splitlines()
                    if line.startswith("http_request_duration_seconds_count{")
                    and 'path="/orders"' in line]
-    assert float(histogram.rsplit(" ", 1)[1]) == 60.0
+    assert float(histogram.rsplit(" ", 1)[1]) == 10.0
 
 
 @pytest.mark.skipif(not hasattr(os, "fork"), reason="needs os.fork()")

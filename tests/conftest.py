@@ -15,8 +15,8 @@ from fastapiobserver.request_context import (
     clear_user_context,
 )
 from fastapiobserver.sinks import clear_sinks
+from tests.helpers import reset_otel_providers
 
-pytest_plugins = ("tests.conftest_otlp",)
 
 @pytest.fixture(autouse=True)
 def reset_global_state() -> typing.Generator[None, None, None]:
@@ -29,7 +29,7 @@ def reset_global_state() -> typing.Generator[None, None, None]:
     clear_trace_id()
     clear_span_id()
     clear_user_context()
-    _reset_otel_global_provider()
+    reset_otel_providers()
     textmap = _global_textmap()
     yield
     # Managed queues hold captured streams and SDK handlers from this test.
@@ -43,7 +43,7 @@ def reset_global_state() -> typing.Generator[None, None, None]:
     clear_trace_id()
     clear_span_id()
     clear_user_context()
-    _reset_otel_global_provider()
+    reset_otel_providers()
     root.setLevel(original_level)
 
 
@@ -55,24 +55,10 @@ def _global_textmap() -> typing.Any:
         return None
 
 
-def _reset_otel_global_provider() -> None:
-    """Shut down and unset the global tracer, logger and meter providers."""
-    for module_name, attr in (
-        ("opentelemetry.trace", "_TRACER_PROVIDER"),
-        ("opentelemetry._logs._internal", "_LOGGER_PROVIDER"),
-        ("opentelemetry.metrics._internal", "_METER_PROVIDER"),
-    ):
-        try:
-            module = importlib.import_module(module_name)
-        except Exception:
-            continue
-        provider = getattr(module, attr, None)
-        try:
-            if callable(getattr(provider, "shutdown", None)):
-                provider.shutdown()  # type: ignore[union-attr]
-        except Exception:
-            pass
-        setattr(module, attr, None)
-        set_once = getattr(module, f"{attr}_SET_ONCE", None)
-        if set_once is not None and hasattr(set_once, "_done"):
-            set_once._done = False
+@pytest.fixture
+def span_exporter(monkeypatch: pytest.MonkeyPatch) -> typing.Any:
+    in_memory = pytest.importorskip("opentelemetry.sdk.trace.export.in_memory_span_exporter")
+    tracing = importlib.import_module("fastapiobserver.otel.tracing")
+    exporter = in_memory.InMemorySpanExporter()
+    monkeypatch.setattr(tracing, "build_otlp_exporter", lambda *_: exporter)
+    return exporter

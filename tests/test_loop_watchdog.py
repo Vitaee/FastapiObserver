@@ -12,20 +12,12 @@ import pytest
 
 from fastapiobserver import ObservabilitySettings, install_observability, observability_lifespan
 from fastapiobserver import diagnostics
-from fastapiobserver.logging import setup_logging, shutdown_logging
-
-
-class _Collector(logging.Handler):
-    def __init__(self) -> None:
-        super().__init__()
-        self.records: list[logging.LogRecord] = []
-
-    def emit(self, record: logging.LogRecord) -> None:
-        self.records.append(record)
+from fastapiobserver.logging import shutdown_logging
+from tests.helpers import capture_logs
 
 
 def _block_the_loop() -> None:
-    time.sleep(0.4)
+    time.sleep(0.25)
 
 
 def _add_blocking_route(app: FastAPI) -> None:
@@ -38,8 +30,7 @@ def _add_blocking_route(app: FastAPI) -> None:
 def _loop_blocked_records(app: FastAPI, *paths: str) -> list[logging.LogRecord]:
     settings = ObservabilitySettings(loop_block_threshold_ms=100)
     install_observability(app, settings, metrics_enabled=False)
-    collector = _Collector()
-    setup_logging(settings, logs_mode="otlp", extra_handlers=[collector])
+    collector = capture_logs(settings)
     with TestClient(app) as client:  # the watchdog runs during the lifespan
         for path in paths:
             client.get(path)
@@ -57,7 +48,7 @@ def test_blocking_call_in_async_endpoint_is_logged_with_its_stack(
 
     @app.get("/awaiting")
     async def awaiting() -> dict[str, str]:
-        await asyncio.sleep(0.4)
+        await asyncio.sleep(0.25)
         return {}
 
     [record] = _loop_blocked_records(app, "/awaiting", "/blocking")

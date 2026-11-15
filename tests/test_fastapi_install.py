@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import io
 import json
+import sys
 
 import typing
 from typing import Any
@@ -20,6 +22,7 @@ from fastapiobserver import (
 )
 from fastapiobserver.metrics import register_metrics_backend, unregister_metrics_backend
 from fastapiobserver.middleware import RequestLoggingMiddleware
+from tests.helpers import run_lifespan
 
 
 def test_install_observability_drops_duplicate_uvicorn_access_log() -> None:
@@ -34,8 +37,11 @@ def test_install_observability_drops_duplicate_uvicorn_access_log() -> None:
     assert logging.getLogger("uvicorn.error").hasHandlers()
 
 
-def test_install_observability_with_metrics_enabled_requires_extra() -> None:
-    app = FastAPI()
+def test_install_observability_with_metrics_enabled_requires_extra(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("PROMETHEUS_MULTIPROC_DIR", raising=False)
+    monkeypatch.setitem(sys.modules, "prometheus_client", None)
     settings = ObservabilitySettings(
         app_name="test",
         service="svc",
@@ -43,13 +49,8 @@ def test_install_observability_with_metrics_enabled_requires_extra() -> None:
         metrics_enabled=True,
     )
 
-    try:
-        install_observability(app, settings)
-    except RuntimeError as exc:
-        assert "fastapi-observer[prometheus]" in str(exc)
-    else:
-        route_paths = [getattr(route, "path", None) for route in app.routes]
-        assert settings.metrics_path in route_paths
+    with pytest.raises(RuntimeError, match=r"fastapi-observer\[prometheus\]"):
+        install_observability(FastAPI(), settings)
 
 
 def test_install_observability_uses_registered_metrics_backend_from_settings() -> None:
@@ -107,57 +108,46 @@ def test_install_observability_uses_registered_metrics_backend_from_settings() -
 def test_install_observability_installs_otel_metrics_when_enabled(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    app = FastAPI()
-    settings = ObservabilitySettings(app_name="test", service="svc", environment="test")
-    calls: dict[str, object] = {}
+    metrics_api = pytest.importorskip("opentelemetry.metrics")
+    sdk_metrics = pytest.importorskip("opentelemetry.sdk.metrics")
+    sdk_export = pytest.importorskip("opentelemetry.sdk.metrics.export")
+    import fastapiobserver.otel.metrics as otel_metrics_module
 
-    def fake_install_otel_metrics(
-        settings_arg: ObservabilitySettings,
-        otel_metrics_settings_arg: OTelMetricsSettings,
-        *,
-        app: FastAPI | None = None,
-        otel_settings: object | None = None,
-    ) -> object:
-        calls["settings"] = settings_arg
-        calls["otel_metrics_settings"] = otel_metrics_settings_arg
-        calls["app"] = app
-        calls["otel_settings"] = otel_settings
-        return object()
-
-    monkeypatch.setattr(fastapi_module, "install_otel_metrics", fake_install_otel_metrics)
-
-    otel_metrics_settings = OTelMetricsSettings(
-        enabled=True,
-        otlp_endpoint="http://collector:4317",
-        protocol="grpc",
+    monkeypatch.setattr(
+        otel_metrics_module,
+        "build_otlp_exporter",
+        lambda *_: sdk_export.ConsoleMetricExporter(out=io.StringIO()),
     )
     install_observability(
-        app,
-        settings,
+        FastAPI(),
+        ObservabilitySettings(app_name="test", service="svc", environment="test"),
         metrics_enabled=False,
-        otel_metrics_settings=otel_metrics_settings,
+        otel_metrics_settings=OTelMetricsSettings(
+            enabled=True, otlp_endpoint="http://collector:4317", protocol="grpc"
+        ),
     )
 
-    assert calls["settings"] is settings
-    assert calls["otel_metrics_settings"] == otel_metrics_settings
-    assert calls["app"] is app
-    assert isinstance(calls["otel_settings"], fastapi_module.OTelSettings)
-    assert not calls["otel_settings"].enabled
+    assert isinstance(metrics_api.get_meter_provider(), sdk_metrics.MeterProvider)
 
 
-def test_custom_observability_lifespan_cleans_up_resources(
-    monkeypatch: pytest.MonkeyPatch,
+@pytest.mark.parametrize("fail", [False, True])
+def test_observability_lifespan_cleans_up_even_when_the_app_fails(
+    monkeypatch: pytest.MonkeyPatch, fail: bool
 ) -> None:
-    app = FastAPI()
-    mock_calls: list[int] = []
-    monkeypatch.setattr(fastapi_module, "flush_logging", lambda: mock_calls.append(1))
+    flushes: list[int] = []
+    monkeypatch.setattr(fastapi_module, "flush_logging", lambda: flushes.append(1))
 
-    async def _run_explicit_lifespan() -> None:
-        async with observability_lifespan(app):
-            pass
+    async def run() -> None:
+        async with observability_lifespan(FastAPI()):
+            if fail:
+                raise RuntimeError("Failed explicitly")
 
-    asyncio.run(_run_explicit_lifespan())
-    assert len(mock_calls) == 1
+    if fail:
+        with pytest.raises(RuntimeError, match="Failed explicitly"):
+            asyncio.run(run())
+    else:
+        asyncio.run(run())
+    assert flushes == [1]
 
 
 def test_cleanup_runs_once_per_lifespan_cycle_even_when_installed_twice(
@@ -168,18 +158,13 @@ def test_cleanup_runs_once_per_lifespan_cycle_even_when_installed_twice(
     mock_calls: list[int] = []
     monkeypatch.setattr(fastapi_module, "flush_logging", lambda: mock_calls.append(1))
 
-    async def _run_lifespan_cycle() -> None:
-        async with app.router.lifespan_context(app):
-            pass
-
     install_observability(app, settings, metrics_enabled=False)
     install_observability(app, settings, metrics_enabled=False)
-    assert app in fastapi_module._REGISTERED_APPS
-    asyncio.run(_run_lifespan_cycle())
+    run_lifespan(app)
     assert len(mock_calls) == 1
 
     install_observability(app, settings, metrics_enabled=False)
-    asyncio.run(_run_lifespan_cycle())
+    run_lifespan(app)
     assert len(mock_calls) == 2
 
 
@@ -264,30 +249,20 @@ def test_install_observability_forbids_string_db_engine() -> None:
 
 
 def test_auto_discover_catches_and_logs_otel_exclusion_errors(
-    caplog: pytest.LogCaptureFixture, 
-    monkeypatch: pytest.MonkeyPatch
+    caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    app = FastAPI()
-    settings = ObservabilitySettings(app_name="test", service="svc")
-    
-    try:
-        from fastapiobserver.otel import exclusions
-    except ImportError:
-        pytest.skip("OTel packages not installed")
+    from fastapiobserver.otel import exclusions
 
     def mock_update(*args: Any, **kwargs: Any) -> None:
         raise ValueError("Simulated update failure")
-        
+
     monkeypatch.setattr(exclusions, "update_otel_middleware_exclusions", mock_update)
-    
-    # We patch sys.modules to pretend 'fastapiobserver.otel.exclusions' is loaded 
-    # and has our mocked function since it's imported dynamically inside the function
-    import sys
-    monkeypatch.setitem(sys.modules, "fastapiobserver.otel.exclusions", exclusions)
 
     with caplog.at_level(logging.WARNING):
-        fastapi_module._auto_discover_excluded_routes(app, settings)
-        
+        fastapi_module._auto_discover_excluded_routes(
+            FastAPI(), ObservabilitySettings(app_name="test", service="svc")
+        )
+
     assert "observability.fastapi.otel_exclusion_update_failed" in caplog.text
 
 

@@ -4,8 +4,6 @@ import asyncio
 from contextvars import copy_context
 import importlib
 import logging
-import json
-import os
 from pathlib import Path
 import subprocess
 import sys
@@ -13,7 +11,6 @@ from concurrent.futures import ThreadPoolExecutor
 
 import httpx
 import pytest
-import fastapiobserver
 from sqlalchemy import create_engine, text
 
 from fastapiobserver import get_request_id, set_user_context
@@ -22,8 +19,9 @@ from fastapiobserver.propagation import instrument_httpx_client
 from fastapiobserver.request_context import (
     RequestState, get_request_state, get_user_context, set_request_id, set_request_state,
 )
-from fastapiobserver.logging import flush_logging, setup_logging
+from fastapiobserver.logging import flush_logging
 from fastapiobserver import ObservabilitySettings
+from tests.helpers import capture_logs, subprocess_env
 
 
 def observe(name, **kwargs):
@@ -208,16 +206,7 @@ def test_early_state_close_still_restores_the_surrounding_context():
 
 
 def test_sampling_and_failure_retention_use_the_existing_pipeline():
-    payloads = []
-
-    class Capture(logging.Handler):
-        def emit(self, record):
-            payloads.append(json.loads(self.format(record)))
-
-    setup_logging(
-        ObservabilitySettings(log_sample_rate=0, log_level_on_error="DEBUG"),
-        logs_mode="otlp", extra_handlers=[Capture()],
-    )
+    collector = capture_logs(ObservabilitySettings(log_sample_rate=0, log_level_on_error="DEBUG"))
     with observe("sampled.out"):
         logging.getLogger("application").info("successful.detail")
     with pytest.raises(ValueError):
@@ -225,7 +214,7 @@ def test_sampling_and_failure_retention_use_the_existing_pipeline():
             logging.getLogger("application").debug("held.detail")
             raise ValueError("application failure")
     assert flush_logging()
-    messages = [p["message"] for p in payloads]
+    messages = [p["message"] for p in collector.payloads]
     assert messages == ["held.detail", "operation.failed"]
 
 
@@ -306,16 +295,21 @@ def test_async_sqlalchemy_queries_work_without_an_application(caplog):
     assert record.event["db"]["count"] == 1
 
 
-@pytest.mark.parametrize("ratio", [0.0, 0.1, 1.0])
-def test_existing_tracing_bridges_do_not_change_native_operation_totals(ratio):
+def test_existing_tracing_bridges_do_not_change_native_operation_totals():
     # Global providers/instrumentors need the same fresh-process isolation as
     # the standalone application examples, especially under randomized ordering.
+    script = """
+import runpy, sys
+from tests.helpers import reset_otel_providers
+check = runpy.run_path(sys.argv[1])["_check_trace_totals"]
+for ratio in (0.0, 0.1, 1.0):
+    reset_otel_providers()
+    check(ratio)
+"""
     result = subprocess.run(
-        [sys.executable, "-c",
-         "import runpy,sys; runpy.run_path(sys.argv[1])['_check_trace_totals'](float(sys.argv[2]))",
-         str(Path(__file__).resolve()), str(ratio)],
-        capture_output=True, text=True, timeout=15,
-        env={**os.environ, "PYTHONPATH": str(Path(fastapiobserver.__file__).resolve().parents[1])},
+        [sys.executable, "-c", script, str(Path(__file__).resolve())],
+        capture_output=True, text=True, timeout=15, cwd=Path(__file__).resolve().parents[1],
+        env=subprocess_env(),
     )
     assert result.returncode == 0, result.stderr
 

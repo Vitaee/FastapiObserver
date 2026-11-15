@@ -1,44 +1,28 @@
 # 0016: Prove Python operations through existing seams
 
-**Status:** accepted for the opt-in experiment · **Reviewed:** 2026-11-04
+**Status:** accepted, for the opt-in experiment · **Reviewed:** 2026-11-04
 
 ## Context
 
-SQLAlchemy and HTTP helpers already count native calls without tracing, but
-their shared state belongs to FastAPI requests. The maintainer requested a
-Python-only proof while preserving existing FastAPI behavior and one release
-distribution. Extracting a second logging/telemetry pipeline would duplicate
-redaction, correlation, lifecycle and count ownership.
+The SQLAlchemy and HTTP helpers already count calls without tracing, but they store the counts on a FastAPI request's state. A job, a CLI command or a message handler outside a request got nothing. A second logging and telemetry pipeline for that code would repeat redaction, correlation, lifecycle and call counting.
 
 ## Decision
 
-- Add `fastapiobserver.experimental.observe_operation` using the existing
-  shared state and client hooks. Keep all 27 stable root exports unchanged.
-- Support sync/async and nested scopes with ContextVar token restoration.
-  Child counts are exclusive; closed experimental state rejects late writes
-  and releases totals, fingerprints, held logs and user context.
-- Borrow logging, clients and providers. Terminal records capture correlation
-  before queues; the application owns handlers, sanitization and final flush.
-- Load framework root exports lazily and treat plugin framework annotations as
-  type-only imports. Keep current installation dependencies and fork-reset paths.
-- Release as an alpha in the existing distribution. Separate package naming,
-  broad adapters and the portable contract remain later decisions.
+- `fastapiobserver.experimental.observe_operation()` reuses the request state and the client hooks ([`experimental.py`](https://github.com/Vitaee/FastapiObserver/blob/v2.3.0/src/fastapiobserver/experimental.py)). The 27 root exports stay as they are.
+- It works with `with` and `async with`, and nests. Each scope resets its context variables with their tokens on exit. A child's counts are its own. A closed operation refuses late writes and drops its totals, fingerprints, held records and user context.
+- It borrows logging, clients and providers. The terminal record gets its correlation fields before any queue. The application owns handlers, sanitizing and the final flush.
+- Root exports that need FastAPI load on first access, and the plugin module imports framework types for type checking only. Installation dependencies and the fork-reset module paths stay the same.
+- It ships as an alpha in the existing `fastapi-observer` distribution. A separate package name, more adapters and a portable contract are later decisions.
 
 ## Evidence
 
-`test_release_compatibility.py` compares public interfaces, configuration and
-representative FastAPI output with a fixture from the v2.2.1 tag.
-`test_core_imports.py` rejects framework imports and runs the real SQLite/HTTP
-example. `test_experimental_operations.py` exercises nesting, threads, concurrent
-tasks, cancellation, late completion, log sampling/failures and native counts at
-trace sampling ratios 0/0.1/1. The existing production gates remain required.
+- [`test_release_compatibility.py`](https://github.com/Vitaee/FastapiObserver/blob/v2.3.0/tests/test_release_compatibility.py) compares the public interface, configuration and representative FastAPI output with a fixture taken from the `v2.2.1` tag.
+- [`test_core_imports.py`](https://github.com/Vitaee/FastapiObserver/blob/v2.3.0/tests/test_core_imports.py): `test_experimental_operation_never_imports_frameworks_or_optional_clients` fails if an operation imports a framework or an optional client, and `test_python_operation_example_uses_real_sql_and_loopback_http_without_frameworks` runs the SQLite and HTTP example.
+- [`test_experimental_operations.py`](https://github.com/Vitaee/FastapiObserver/blob/v2.3.0/tests/test_experimental_operations.py) covers nesting, threads, concurrent tasks, cancellation, late completion, log sampling and failures. `test_existing_tracing_bridges_do_not_change_native_operation_totals` runs at trace sampling ratios 0, 0.1 and 1.
 
 ## What it cost
 
-The generic operation still reuses an internally request-named state rather
-than moving every module before it has a second real consumer. Framework-free
-installation is deferred; normal installs retain the FastAPI dependencies.
-Operation schema 0.1.0 is experimental. Automatic slow/N+1 diagnostics and a
-portable lifecycle/provider API are outside this first proof. The bundled
-application validates compatibility; independent deployed-app validation is
-not claimed.
+- Operations reuse `RequestState`, which is named for requests. Moving every module waits for a second real consumer.
+- A normal install still pulls in FastAPI and Starlette.
+- The operation schema, `0.1.0`, is experimental. Operations get no slow-request promotion, no N+1 warnings and no lifecycle or provider API.
+- The bundled example is the only application validated.

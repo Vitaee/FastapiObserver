@@ -5,7 +5,6 @@ import hmac
 
 import pytest
 
-from fastapiobserver import security
 from fastapiobserver.security import SecurityPolicy, sanitize_event
 
 
@@ -48,13 +47,17 @@ def test_gdpr_preset_hashes_pii_fields() -> None:
         "email": "name@example.com",
         "phone": "+1234567890",
         "address": "Main street",
+        "client_ip": "203.0.113.42",
+        "nested": {"client_ip": "10.0.0.1"},
+        "method": "GET",
     }
 
     sanitized = sanitize_event(payload, policy)
 
-    assert sanitized["email"].startswith("hmac-sha256:")
-    assert sanitized["phone"].startswith("hmac-sha256:")
-    assert sanitized["address"].startswith("hmac-sha256:")
+    for value in (sanitized["email"], sanitized["phone"], sanitized["address"],
+                  sanitized["client_ip"], sanitized["nested"]["client_ip"]):
+        assert value.startswith("hmac-sha256:")
+    assert sanitized["method"] == "GET"
 
 
 def test_preset_can_be_overridden_by_env(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -66,12 +69,6 @@ def test_preset_can_be_overridden_by_env(monkeypatch: pytest.MonkeyPatch) -> Non
 
     assert policy.redaction_mode == "mask"
     assert policy.redacted_fields == ("password",)
-
-
-def test_preset_constants_are_available_from_the_security_module() -> None:
-    assert "strict" in security.SECURITY_POLICY_PRESETS
-    assert security.PCI_REDACTED_FIELDS
-    assert security.GDPR_REDACTED_FIELDS
 
 
 def test_hash_mode_is_keyed_so_values_cannot_be_recovered_by_guessing(

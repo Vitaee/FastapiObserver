@@ -165,10 +165,7 @@ def test_aggregate_overflow_cannot_corrupt_existing_totals():
 
 @pytest.mark.skipif(not hasattr(os, "fork"), reason="POSIX fork contract")
 def test_inherited_handle_rejects_completion_before_touching_its_parent_lock():
-    import subprocess
-    import sys
-    from pathlib import Path
-    import fastapiobserver
+    from tests.helpers import run_python
 
     # Fork in a fresh single-threaded process, retaining a locked parent handle.
     script = """
@@ -185,8 +182,5 @@ with observe_operation('parent') as operation:
     assert os.waitstatus_to_exitcode(status) == 0
     assert handle.finish()
 """
-    result = subprocess.run(
-        [sys.executable, "-c", script], capture_output=True, text=True, timeout=10,
-        env={**os.environ, "PYTHONPATH": str(Path(fastapiobserver.__file__).resolve().parents[1])},
-    )
+    result = run_python(script)
     assert result.returncode == 0, result.stderr

@@ -15,14 +15,10 @@ With the default pipeline, `OBS_LOG_LEVEL=WARNING` or higher hides it.
 
 ### Keep application-owned logging
 
-Pass `install_observability(app, configure_logging=False)` to retain existing
-handlers, filters, formatters, levels, sanitization and log export. This is an
-installer option, not an environment variable or an `ObservabilitySettings`
-field. The application's logging configuration then controls output; the
-library does not install its queue, sampling, sinks or OTLP log handler.
-In `observability.configured`, `configure_logging` is `false` and unapplied
-pipeline settings are `null`. Request metrics and optional tracing remain
-independent. See [application-owned logging](logging.md#application-owned-logging).
+`configure_logging=False` is an argument of `install_observability()`, not a
+setting. With it, `observability.configured` shows `"configure_logging": false`
+and `null` for the logging settings it leaves alone. See
+[application-owned logging](logging.md#application-owned-logging).
 
 ### Environment Profiles (`OBS_PROFILE`)
 
@@ -109,7 +105,7 @@ The library's own switches:
 | Variable | Default | Description |
 |---|---|---|
 | `OBS_OTEL_ENABLED` | `false` | Enable tracing |
-| `OBS_OTEL_EXCLUDED_URLS` | auto-derived | Comma-separated patterns, in OpenTelemetry's format, for requests not to trace. Empty traces everything |
+| `OBS_OTEL_EXCLUDED_URLS` | auto-derived | Comma-separated regular expressions, in OpenTelemetry's format, for requests not to trace. Unset, the metrics path, `OBS_METRICS_EXCLUDE_PATHS`, the control endpoint, FastAPI's docs routes and routes with `include_in_schema=False` are excluded, each matched as a whole path. Setting this, or OpenTelemetry's `OTEL_PYTHON_FASTAPI_EXCLUDED_URLS`, replaces that list; entries are searched anywhere in the URL, so anchor them (`^/health$`). Empty traces everything |
 | `OBS_OTEL_LOGS_ENABLED` | `false` | Enable OTLP log export |
 | `OBS_OTEL_LOGS_MODE` | `local_json` | `local_json`, `otlp`, `both` |
 | `OBS_OTEL_METRICS_ENABLED` | `false` | Enable OTLP metrics export |

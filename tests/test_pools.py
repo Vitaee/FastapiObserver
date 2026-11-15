@@ -127,3 +127,14 @@ def test_a_full_database_pool_is_reported(caplog: pytest.LogCaptureFixture) -> N
     assert 'fastapiobserver_db_pool_checked_out{engine="postgresql://app@db/orders"} 3.0' in metrics
     assert 'fastapiobserver_db_pool_limit{engine="postgresql://app@db/orders"} 3.0' in metrics
     assert _counted("fastapiobserver_db_pool_exhausted_total", **exhausted) - counted == 2
+
+
+def test_threadpool_gauges_wait_for_an_app_to_start(monkeypatch: pytest.MonkeyPatch) -> None:
+    from fastapiobserver.metrics import build_metrics_backend
+
+    monkeypatch.delenv("PROMETHEUS_MULTIPROC_DIR", raising=False)
+    monkeypatch.setattr(pools, "_thread_limiter", None)
+    build_metrics_backend(True)
+
+    assert pools.thread_pool_usage() is None
+    assert "fastapiobserver_threadpool_busy" not in prometheus_client.generate_latest().decode()

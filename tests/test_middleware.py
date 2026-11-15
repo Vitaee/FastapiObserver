@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 from fastapi import FastAPI, Response
 from fastapi.testclient import TestClient
@@ -108,18 +109,13 @@ def test_middleware_classifies_unhandled_exception(caplog) -> None:
     ],
 )
 def test_unhandled_exception_marks_the_server_span_once(
-    monkeypatch: pytest.MonkeyPatch,
+    span_exporter: Any,
     telemetry: dict[str, bool],
     events: list[str],
     error_type: str | None,
 ) -> None:
-    in_memory = pytest.importorskip("opentelemetry.sdk.trace.export.in_memory_span_exporter")
-    import fastapiobserver.otel.tracing as otel_tracing_module
     from fastapiobserver import OTelSettings
     from fastapiobserver.otel.native import native_telemetry_config
-
-    exporter = in_memory.InMemorySpanExporter()
-    monkeypatch.setattr(otel_tracing_module, "build_otlp_exporter", lambda *_: exporter)
 
     app = FastAPI(telemetry=telemetry)  # type: ignore[arg-type]
     if telemetry.get("tracing", True) and native_telemetry_config(app) is None:
@@ -142,7 +138,7 @@ def test_unhandled_exception_marks_the_server_span_once(
     otel_trace = pytest.importorskip("opentelemetry.trace")
     otel_trace.get_tracer_provider().force_flush()
     [server_span] = [
-        span for span in exporter.get_finished_spans() if span.kind.name == "SERVER"
+        span for span in span_exporter.get_finished_spans() if span.kind.name == "SERVER"
     ]
     assert [event.name for event in server_span.events] == events
     assert server_span.status.status_code.name == "ERROR"
@@ -155,33 +151,6 @@ def test_extract_scope_client_ip_contract() -> None:
     assert _extract_scope_client_ip({"client": ("192.168.1.1", 1234)}) == "192.168.1.1"
     assert _extract_scope_client_ip({"client": None}) is None
     assert _extract_scope_client_ip({}) is None
-
-def test_resolve_request_id_contract() -> None:
-    from fastapiobserver.middleware import _resolve_request_id
-    import uuid
-
-    # Generated if false
-    req_id = _resolve_request_id(None, False)
-    assert isinstance(uuid.UUID(req_id), uuid.UUID)
-
-    # Trusted candidate returns itself
-    req_id = _resolve_request_id("custom-id", True)
-    assert req_id == "custom-id"
-
-    # Untrusted candidate generates
-    req_id = _resolve_request_id("custom-id", False)
-    assert isinstance(uuid.UUID(req_id), uuid.UUID)
-
-def test_extract_route_template_contract() -> None:
-    from fastapiobserver.middleware import _extract_route_template
-
-    assert _extract_route_template({}) == "<unmatched>"
-
-    scope = {
-        "endpoint": lambda: None,
-        "route": type("Route", (), {"path": "/users/{user_id}"})(),
-    }
-    assert _extract_route_template(scope) == "/users/{user_id}"
 
 
 def test_cancelled_request_is_logged_as_cancelled_not_as_a_server_error(caplog) -> None:
@@ -220,45 +189,3 @@ def test_cancelled_request_is_logged_as_cancelled_not_as_a_server_error(caplog) 
         ("request.cancelled", logging.WARNING, 499),
         ("request.cancelled", logging.WARNING, 200),
     ]
-
-
-def test_captured_bodies_have_sensitive_values_redacted(caplog) -> None:
-    from fastapiobserver import SecurityPolicy
-
-    app = FastAPI()
-
-    @app.post("/login")
-    def login(credentials: dict[str, str]) -> dict[str, str]:
-        return {"token": "abc.def.ghi", "user": credentials["username"]}
-
-    install_observability(
-        app,
-        ObservabilitySettings(app_name="test", service="svc", environment="test"),
-        security_policy=SecurityPolicy(log_request_body=True, log_response_body=True),
-        metrics_enabled=False,
-    )
-    with caplog.at_level(logging.INFO, logger="fastapiobserver.middleware"):
-        TestClient(app).post("/login", json={"username": "ada", "password": "hunter2"})
-
-    event = next(r.event for r in caplog.records if "request_body" in getattr(r, "event", {}))
-    assert event["request_body"] == '{"username":"ada","password":"***"}'
-    assert event["response_body"] == '{"token":"***","user":"ada"}'
-
-
-@pytest.mark.parametrize(
-    ("body", "expected"),
-    [
-        ('{"access_token": "abc.de', '***'),  # cut off by max_body_length: mask the whole body
-        ("username=ada&password=hunter2&x=1", "username=ada&password=***&x=1"),
-        (
-            '{"user":{"secret":7},"items":[{"token":"t"}]}',
-            '{"user":{"secret":"***"},"items":[{"token":"***"}]}',
-        ),
-        ('{"note":"no secrets, 10:00"}', '{"note":"no secrets, 10:00"}'),
-    ],
-)
-def test_redact_body_handles_cut_off_form_and_nested_bodies(body: str, expected: str) -> None:
-    from fastapiobserver import SecurityPolicy
-    from fastapiobserver.security.redaction import redact_body
-
-    assert redact_body(body, SecurityPolicy()) == expected

@@ -8,9 +8,8 @@ uv run uvicorn examples.basic_app:app --reload
 curl http://localhost:8000/items/42
 ```
 
-`install_observability()` manages logging and its lifespan by default. Pass
-`configure_logging=False` to retain application-owned logging. Settings come from
-`OBS_*` and the standard `OTEL_*` variables; see [configuration](../docs/configuration.md).
+Settings come from `OBS_*` and the standard `OTEL_*` variables; see
+[configuration](../docs/configuration.md).
 
 | Example | Try | Demonstrates |
 |---|---|---|
@@ -28,46 +27,18 @@ The database example uses an in-memory SQLite database and closes it at shutdown
 `DATABASE_URL` can select another async SQLAlchemy driver. Its query counts work
 without tracing; SQL spans require a supported instrumentation version.
 
-For a Python operation without a web application, run
-`python examples/python_operation.py` with SQLAlchemy and HTTPX installed. It
-performs real SQLite queries and loopback HTTP, forwards correlation, and emits
-an experimental operation summary through the existing JSON logging pipeline.
-See [experimental operations](../docs/experimental-core.md).
-`python examples/callback_operation.py` demonstrates an explicit custom-client
-completion handle across an executor callback, using only standard-library
-SQLite and the existing logging pipeline.
+Scripts without a web app:
 
-## Reproduce and diagnose failures
+- `python examples/python_operation.py` (needs SQLAlchemy and HTTPX) and
+  `python examples/callback_operation.py`: [experimental operations](../docs/experimental-core.md).
+- `python examples/query_budget.py`: an engine-scoped SQL query budget with
+  `assert_query_budget()`, including failed executions and an over-budget assertion.
 
-The [full-stack demo](full_stack/README.md) runs three copies of one app alongside
-Grafana, Prometheus, Loki and Tempo. Its failure lab deliberately blocks the event
-loop, occupies a database pool and runs N+1 queries, then shows the corresponding
-warnings and a batched-query alternative.
+Larger examples:
 
-```bash
-docker compose -f examples/full_stack/docker-compose.yml up --build -d --wait
-python3 examples/full_stack/failure_lab.py
-```
-
-Open [Grafana](http://localhost:3000); no login is required for this local demo.
-The driver uses Python's standard library. Each scenario can also be run on its
-own with `--scenario event-loop`, `db-pool` or `n-plus-one`.
-
-To run the app without Docker or a telemetry backend:
-
-```bash
-OBS_METRICS_ENABLED=true OBS_LOOP_BLOCK_THRESHOLD_MS=100 \
-  uv run uvicorn examples.full_stack.app:app --host 127.0.0.1 --port 8000
-# In another terminal:
-python3 examples/full_stack/failure_lab.py
-```
-
-Other deployment examples:
-
-`python examples/query_budget.py` demonstrates an engine-scoped native SQL
-budget, including failed executions and an over-budget assertion. It requires
-SQLAlchemy and no pytest plugin, framework or exporter.
-
+- [Full stack](full_stack/README.md): three app instances with Grafana,
+  Prometheus, Loki and Tempo, and a failure lab for blocked event loops, full
+  database pools and N+1 queries.
 - [Kubernetes](k8s/README.md): Kustomize manifests for the app and telemetry backends.
 - [Time saved](time_saved/README.md): the same app configured by hand and with this library.
 - [Migration](migration_example/migration_made.md): replacing an existing logging setup.

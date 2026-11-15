@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 import json
+import logging
 from urllib.parse import parse_qsl
 
 import pytest
 from pydantic import SecretStr
 
-from fastapiobserver.security import SecurityPolicy, sanitize_event
-from fastapiobserver.security.redaction import redact_body
+from fastapiobserver import ObservabilitySettings, StructuredJsonFormatter
+from fastapiobserver.middleware.events import _RequestEventBuilder, _sanitize_exception_message
+from fastapiobserver.security import SecurityPolicy, sanitize_event, strip_url_credentials
+from fastapiobserver.security.redaction import MAX_SANITIZE_DEPTH, redact_body
 
 
 def test_sanitize_event_masks_default_sensitive_fields() -> None:
@@ -114,12 +117,10 @@ def test_an_event_key_allowlist_filters_the_event_not_the_records_own_fields() -
 def test_request_lines_keep_their_fields_with_an_event_key_allowlist(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    import json
-
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
 
-    from fastapiobserver import ObservabilitySettings, install_observability
+    from fastapiobserver import install_observability
     from fastapiobserver.logging import flush_logging
 
     app = FastAPI()
@@ -141,8 +142,6 @@ def test_request_lines_keep_their_fields_with_an_event_key_allowlist(
 
 
 def test_otlp_attributes_keep_the_records_fields_with_an_event_key_allowlist() -> None:
-    import logging
-
     from fastapiobserver.otel.logs import _sanitize_record_custom_attributes
 
     record = logging.makeLogRecord(
@@ -211,6 +210,7 @@ def test_encoded_body_keys_follow_the_redaction_mode(body: str, mode: str) -> No
         '{"password":"secret=unfinished',
         '\ufeff{"password":"secret"}',
         "plain secret text",
+        '{"access_token": "abc.de',
     ],
 )
 def test_body_redaction_masks_bodies_it_cannot_safely_inspect(body: str) -> None:
@@ -242,3 +242,89 @@ def test_event_allowlist_does_not_remove_body_fields() -> None:
     result = redact_body(r'{"name":"ada","pass\u0077ord":"secret"}', policy)
 
     assert json.loads(result) == {"name": "ada", "password": "***"}
+
+
+@pytest.mark.parametrize(
+    ("body", "expected"),
+    [
+        ("username=ada&password=hunter2&x=1", "username=ada&password=***&x=1"),
+        (
+            '{"user":{"secret":7},"items":[{"token":"t"}]}',
+            '{"user":{"secret":"***"},"items":[{"token":"***"}]}',
+        ),
+        ('{"note":"no secrets, 10:00"}', '{"note":"no secrets, 10:00"}'),
+    ],
+)
+def test_body_redaction_keeps_the_original_layout(body: str, expected: str) -> None:
+    assert redact_body(body, SecurityPolicy()) == expected
+
+
+def test_sanitize_event_masks_data_beyond_depth_limit() -> None:
+    deep_dict: dict = {"password": "secret"}
+    deep_list: list = [{"password": "secret"}]
+    for _ in range(MAX_SANITIZE_DEPTH + 20):
+        deep_dict = {"nested": deep_dict}
+        deep_list = [deep_list]
+
+    result = sanitize_event({"dict": deep_dict, "list": deep_list}, SecurityPolicy())
+
+    assert "secret" not in repr(result)
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        (
+            "Cannot connect to postgres://admin:s3cret@db.example.com:5432/prod",
+            "Cannot connect to postgres://***:***@db.example.com:5432/prod",
+        ),
+        (
+            "DB: postgres://u1:p1@host1/db Cache: redis://u2:p2@host2/0",
+            "DB: postgres://***:***@host1/db Cache: redis://***:***@host2/0",
+        ),
+        ("redis://:s3cret@cache:6379/0", "redis://***:***@cache:6379/0"),
+        ("Connection refused on port 8080", "Connection refused on port 8080"),
+        (
+            'GET http://api:8080/users failed\n    @app.get("/users")',
+            'GET http://api:8080/users failed\n    @app.get("/users")',
+        ),
+    ],
+)
+def test_url_credentials_are_stripped_from_text(text: str, expected: str) -> None:
+    assert strip_url_credentials(text) == expected
+
+
+def test_exception_messages_are_stripped_and_truncated() -> None:
+    assert len(_sanitize_exception_message("x" * 1000, max_length=256)) == 256
+    event = _RequestEventBuilder(SecurityPolicy()).build(
+        method="GET",
+        path="/test",
+        status_code=500,
+        duration_seconds=0.1,
+        client_ip=None,
+        request_body=None,
+        response_body=None,
+        error_type="server_error",
+        exception=ConnectionError("Failed: postgres://admin:secret123@db.prod.internal:5432/mydb"),
+    )
+    assert event["exception_message"] == "Failed: postgres://***:***@db.prod.internal:5432/mydb"
+
+
+def test_formatter_strips_credentials_from_error() -> None:
+    formatter = StructuredJsonFormatter(
+        ObservabilitySettings(app_name="t", service="t", environment="t")
+    )
+    try:
+        raise ConnectionError("could not connect to postgresql://admin:hunter2@db/app")
+    except ConnectionError as error:
+        record = logging.LogRecord(
+            "t", logging.ERROR, __file__, 1, "db.failed", None,
+            (type(error), error, error.__traceback__),
+        )
+
+    line = formatter.format(record)
+
+    assert "hunter2" not in line
+    error_payload = json.loads(line)["error"]
+    assert error_payload["message"] == "could not connect to postgresql://***:***@db/app"
+    assert "postgresql://***:***@db/app" in error_payload["stacktrace"]

@@ -3,8 +3,6 @@ FastAPI's own log export out of the way of redaction."""
 
 from __future__ import annotations
 
-import json
-import logging
 from typing import Any
 
 from fastapi import FastAPI
@@ -17,22 +15,12 @@ from fastapiobserver import (
     OTelSettings,
     install_observability,
 )
-from fastapiobserver.logging import setup_logging, shutdown_logging
+from fastapiobserver.logging import shutdown_logging
 import fastapiobserver.otel.logs as otel_logs_module
-import fastapiobserver.otel.tracing as otel_tracing_module
+from tests.helpers import capture_logs
 
 pytest.importorskip("fastapi.telemetry")
 trace_api = pytest.importorskip("opentelemetry.trace")
-in_memory_spans = pytest.importorskip("opentelemetry.sdk.trace.export.in_memory_span_exporter")
-
-
-class _Collector(logging.Handler):
-    def __init__(self) -> None:
-        super().__init__()
-        self.payloads: list[dict[str, Any]] = []
-
-    def emit(self, record: logging.LogRecord) -> None:
-        self.payloads.append(json.loads(self.format(record)))
 
 
 def _server_spans(exporter: Any) -> list[Any]:
@@ -40,9 +28,7 @@ def _server_spans(exporter: Any) -> list[Any]:
     return [s for s in exporter.get_finished_spans() if s.kind == trace_api.SpanKind.SERVER]
 
 
-def test_requests_are_traced_by_fastapi_itself(monkeypatch: pytest.MonkeyPatch) -> None:
-    exporter = in_memory_spans.InMemorySpanExporter()
-    monkeypatch.setattr(otel_tracing_module, "build_otlp_exporter", lambda *_: exporter)
+def test_requests_are_traced_by_fastapi_itself(span_exporter: Any) -> None:
     settings = ObservabilitySettings()
     app = FastAPI()
 
@@ -59,14 +45,13 @@ def test_requests_are_traced_by_fastapi_itself(monkeypatch: pytest.MonkeyPatch) 
         return {}
 
     install_observability(app, settings, otel_settings=OTelSettings(enabled=True))
-    collector = _Collector()
-    setup_logging(settings, logs_mode="otlp", extra_handlers=[collector])
+    collector = capture_logs(settings)
     with TestClient(app) as client:  # the lifespan adds hidden routes to the exclusions
         for path in ("/orders/1", "/healthz", "/internal"):
             client.get(path)
     shutdown_logging()
 
-    [span] = _server_spans(exporter)  # excluded and hidden routes aren't traced
+    [span] = _server_spans(span_exporter)  # excluded and hidden routes aren't traced
     assert span.instrumentation_scope.name == "fastapi"
     assert span.name == "GET /orders/{order_id}"
     [completed] = [
@@ -75,13 +60,10 @@ def test_requests_are_traced_by_fastapi_itself(monkeypatch: pytest.MonkeyPatch) 
         if p["message"] == "request.completed" and p["event"]["path"] == "/orders/1"
     ]
     assert completed["trace_id"] == f"{span.context.trace_id:032x}"
+    assert completed["span_id"] == f"{span.context.span_id:016x}"
 
 
-def test_instrumentation_traces_when_fastapi_tracing_is_off(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    exporter = in_memory_spans.InMemorySpanExporter()
-    monkeypatch.setattr(otel_tracing_module, "build_otlp_exporter", lambda *_: exporter)
+def test_instrumentation_traces_when_fastapi_tracing_is_off(span_exporter: Any) -> None:
     app = FastAPI(telemetry={"tracing": False})  # as on FastAPI before 0.142
 
     @app.get("/orders/{order_id}")
@@ -92,23 +74,18 @@ def test_instrumentation_traces_when_fastapi_tracing_is_off(
     TestClient(app).get("/orders/1")
     shutdown_logging()
 
-    [span] = _server_spans(exporter)
+    [span] = _server_spans(span_exporter)
     assert span.instrumentation_scope.name == "opentelemetry.instrumentation.fastapi"
 
 
 @pytest.mark.parametrize("tracing", [False, True])
 def test_fastapi_does_not_export_its_own_logs_past_redaction(
-    monkeypatch: pytest.MonkeyPatch, tracing: bool
+    monkeypatch: pytest.MonkeyPatch, span_exporter: Any, tracing: bool
 ) -> None:
     in_memory_logs = pytest.importorskip("opentelemetry.sdk._logs.export")
     logs_api = pytest.importorskip("opentelemetry._logs")
     exported = in_memory_logs.InMemoryLogRecordExporter()
     monkeypatch.setattr(otel_logs_module, "build_otlp_exporter", lambda *_: exported)
-    monkeypatch.setattr(
-        otel_tracing_module,
-        "build_otlp_exporter",
-        lambda *_: in_memory_spans.InMemorySpanExporter(),
-    )
     app = FastAPI()
 
     @app.get("/boom")

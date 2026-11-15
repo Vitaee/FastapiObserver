@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 import warnings
@@ -19,15 +18,7 @@ from fastapiobserver.otel import OTelLogsSettings
 from fastapiobserver.otel.logs import _SanitizingOTLPLogHandler
 from fastapiobserver.security import SecurityPolicy
 from fastapiobserver.config import ObservabilitySettings
-
-
-class _CollectingHandler(logging.Handler):
-    def __init__(self) -> None:
-        super().__init__()
-        self.records: list[logging.LogRecord] = []
-
-    def emit(self, record: logging.LogRecord) -> None:
-        self.records.append(record)
+from tests.helpers import Collector, run_lifespan
 
 
 def test_otlp_mode_requires_handler(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -45,7 +36,7 @@ def test_otlp_mode_requires_handler(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_sanitizing_otlp_handler_sanitizes_custom_attributes() -> None:
-    collector = _CollectingHandler()
+    collector = Collector()
     policy = SecurityPolicy()
     handler = _SanitizingOTLPLogHandler(
         collector,
@@ -160,14 +151,6 @@ def _install_otlp_logs_app(monkeypatch: pytest.MonkeyPatch, app: FastAPI) -> Any
     return exporter
 
 
-def _run_lifespan(app: FastAPI) -> None:
-    async def _cycle() -> None:
-        async with app.router.lifespan_context(app):
-            pass
-
-    asyncio.run(_cycle())
-
-
 def test_otlp_logs_are_redacted_without_deprecated_or_root_handler(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -184,7 +167,7 @@ def test_otlp_logs_are_redacted_without_deprecated_or_root_handler(
     )
 
     logging.getLogger("demo").warning("login", extra={"password": "secret"})
-    _run_lifespan(app)
+    run_lifespan(app)
 
     [exported] = [
         item
@@ -204,7 +187,7 @@ def test_otlp_logs_strip_credentials_from_exceptions(
         raise ConnectionError("could not connect to postgresql://admin:hunter2@db/app")
     except ConnectionError:
         logging.getLogger("demo").exception("db.failed")
-    _run_lifespan(app)
+    run_lifespan(app)
 
     [exported] = [
         item.log_record
@@ -232,7 +215,7 @@ def test_logs_from_app_shutdown_reach_otlp_before_provider_shutdown(
     app = FastAPI(lifespan=lifespan)
     exporter = _install_otlp_logs_app(monkeypatch, app)
 
-    _run_lifespan(app)
+    run_lifespan(app)
 
     bodies = [str(item.log_record.body) for item in exporter.get_finished_logs()]
     assert any("app.stopping" in body for body in bodies)
@@ -248,7 +231,7 @@ def test_otlp_logs_carry_the_trace_of_the_span_they_were_written_in(
     tracer = sdk_trace.TracerProvider().get_tracer("test")
     with tracer.start_as_current_span("work") as span:
         logging.getLogger("demo").warning("inside.span")
-    _run_lifespan(app)
+    run_lifespan(app)
 
     [exported] = [
         item.log_record

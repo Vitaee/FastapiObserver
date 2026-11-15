@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import threading
 import time
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -8,58 +10,47 @@ import pytest
 
 from fastapiobserver import OTelSettings, ObservabilitySettings, install_observability
 
-from tests.conftest_otlp import OtlpCollector
 
-
-def test_spans_are_exported_to_otlp_collector(
-    otlp_collector: OtlpCollector,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    pytest.importorskip("opentelemetry.trace")
+def test_spans_are_exported_to_an_otlp_http_collector() -> None:
     trace_api = pytest.importorskip("opentelemetry.trace")
     pytest.importorskip("opentelemetry.exporter.otlp.proto.http.trace_exporter")
+    received: list[tuple[str, bytes]] = []
 
-    # Force a clean provider so this test does not depend on test execution order.
-    if hasattr(trace_api, "_TRACER_PROVIDER"):
-        trace_api._TRACER_PROVIDER = None  # type: ignore[attr-defined]
-    set_once = getattr(trace_api, "_TRACER_PROVIDER_SET_ONCE", None)
-    if set_once is not None and hasattr(set_once, "_done"):
-        set_once._done = False  # type: ignore[attr-defined]
+    class Collector(BaseHTTPRequestHandler):
+        def do_POST(self) -> None:  # noqa: N802
+            received.append((self.path, self.rfile.read(int(self.headers["content-length"]))))
+            self.send_response(200)
+            self.end_headers()
 
-    app = FastAPI()
+        def log_message(self, *_args: object) -> None:
+            pass
 
-    @app.get("/ping")
-    def ping() -> dict[str, bool]:
-        return {"ok": True}
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Collector)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        app = FastAPI()
 
-    install_observability(
-        app,
-        ObservabilitySettings(app_name="orders-api", service="orders", environment="test"),
-        metrics_enabled=False,
-        otel_settings=OTelSettings(
-            enabled=True,
-            service_name="orders",
-            service_version="1.0.0",
-            environment="test",
-            protocol="http/protobuf",
-            otlp_endpoint=otlp_collector.endpoint,
-        ),
-    )
+        @app.get("/ping")
+        def ping() -> dict[str, bool]:
+            return {"ok": True}
 
-    provider = trace_api.get_tracer_provider()
-    if not hasattr(provider, "add_span_processor"):
-        pytest.skip("Active tracer provider does not support span processors")
+        install_observability(
+            app,
+            ObservabilitySettings(app_name="orders-api", service="orders", environment="test"),
+            metrics_enabled=False,
+            otel_settings=OTelSettings(
+                enabled=True,
+                protocol="http/protobuf",
+                otlp_endpoint=f"http://127.0.0.1:{server.server_port}",
+            ),
+        )
+        assert TestClient(app).get("/ping").status_code == 200
+        trace_api.get_tracer_provider().force_flush()
+        deadline = time.monotonic() + 3
+        while not received and time.monotonic() < deadline:
+            time.sleep(0.05)
+    finally:
+        server.shutdown()
+        server.server_close()
 
-    response = TestClient(app).get("/ping")
-    assert response.status_code == 200
-
-    if hasattr(provider, "force_flush"):
-        provider.force_flush()
-
-    deadline = time.time() + 3.0
-    while time.time() < deadline and otlp_collector.span_count == 0:
-        time.sleep(0.05)
-
-    assert otlp_collector.span_count > 0
-    assert any(path.endswith("/v1/traces") for path in otlp_collector.paths)
-    assert any("ping" in span.name.lower() for span in otlp_collector.get_spans())
+    assert any(path == "/v1/traces" and b"/ping" in body for path, body in received)

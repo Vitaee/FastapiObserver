@@ -2,10 +2,7 @@
 
 `fastapi-observer` runs inside your app, so it works the same under any ASGI server: one JSON line per request and your own `logging` calls as JSON. What differs is the server's own log lines (startup, workers, signals). This page shows how to get those as JSON too, so every line from the process has the same shape and service fields.
 
-The examples below use library-owned logging. With `configure_logging=False`,
-existing server handlers, levels and access-log routing are preserved; keep the
-application's approved formatter and sanitizer instead. See
-[application-owned logging](logging.md#application-owned-logging).
+The examples below use the default logging pipeline. For `configure_logging=False`, see [application-owned logging](logging.md#application-owned-logging).
 
 The server configs below build `fastapiobserver.StructuredJsonFormatter` by name. Without arguments it reads the same environment variables as `install_observability()` (`OBS_APP_NAME`, `OBS_SERVICE_NAME`, `OBS_ENVIRONMENT`, `OBS_APP_VERSION`, redaction settings), so server lines carry the same fields as request lines. `OBS_PROFILE` defaults aren't applied here, so set the variables themselves (for example `OBS_REDACTION_PRESET`) if server lines must be redacted the same way.
 
@@ -28,7 +25,7 @@ uvicorn.run(app, host="0.0.0.0", port=8000, log_config=None)
 
 ## gunicorn with `UvicornWorker`
 
-Request lines and your app's logs are JSON out of the box. Gunicorn's own lines (`Starting gunicorn`, `Booting worker`, signals) come from the master process, which never imports your app, so they stay plain text unless gunicorn is told to use the JSON formatter.
+Request lines and your app's logs are JSON by default. Gunicorn's own lines (`Starting gunicorn`, `Booting worker`, signals) come from the master process, which never imports your app, so they stay plain text unless gunicorn is told to use the JSON formatter.
 
 Put this in `gunicorn.conf.py`. Gunicorn loads that file from the working directory automatically, or pass it with `-c`:
 
@@ -58,11 +55,32 @@ gunicorn -c gunicorn.conf.py -k uvicorn.workers.UvicornWorker -w 4 main:app
 
 Leave the root logger without handlers: in each worker, `install_observability()` attaches its own queue handler there, and a second one would print app logs twice. Keep gunicorn's access log off (the default); `request.completed` already covers it.
 
-For Prometheus metrics with several workers, see [multi-worker gunicorn](advanced.md#multi-worker-gunicorn).
+### Several workers and `--preload`
+
+With `--preload`, Gunicorn imports your app and runs `install_observability()` in the master process before forking workers. Each worker gets its own log queue and listener thread after the fork, as described under [the log pipeline](architecture.md#the-log-pipeline). The event-loop watchdog and thread-pool watcher start in each worker's ASGI lifespan. With `--preload` and OTLP export enabled, prefer `OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf` over gRPC channels created pre-fork.
+
+### Prometheus multiprocess mode
+
+Configure a shared directory before starting Gunicorn workers:
+
+```bash
+export PROMETHEUS_MULTIPROC_DIR=/tmp/prometheus-metrics
+rm -rf "$PROMETHEUS_MULTIPROC_DIR" && mkdir -p "$PROMETHEUS_MULTIPROC_DIR"
+```
+
+```python
+# gunicorn.conf.py
+from fastapiobserver import mark_prometheus_process_dead
+
+def child_exit(server, worker):
+    mark_prometheus_process_dead(worker.pid)
+```
+
+In multiprocess mode, `/metrics` exports request metrics and the diagnostic counters, but not the per-process gauges. See [metrics](advanced.md#metrics).
 
 ## Granian
 
-Request lines and your app's logs are JSON out of the box. Granian's own lines (`Starting granian`, `Spawning worker`) stay plain text unless you pass a log config.
+Request lines and your app's logs are JSON by default. Granian's own lines (`Starting granian`, `Spawning worker`) stay plain text unless you pass a log config.
 
 Save this as `granian-log.json`:
 
@@ -91,10 +109,12 @@ Keep Granian's access log off (`--no-access-log`, the default); `request.complet
 
 `request.client_disconnected` means the application received `http.disconnect`
 before the response finished. `event.after_disconnect_ms` measures how long it
-continued afterward. The middleware only observes the application's own reads;
-it adds no body reader. If the application never reads after the client leaves,
-the disconnect may remain unobserved. A disconnect received after completion is
-not an abandoned request.
+continued afterward, and `event.after_disconnect_calls` (`{"db": N, "http": M}`)
+counts the queries and outbound calls it started after the client left. The
+middleware only observes the application's own reads; it adds no body reader.
+If the application never reads after the client leaves, the disconnect may
+remain unobserved. A disconnect received after completion is not an abandoned
+request.
 
 Exceptions and cancellation keep their existing event names, with independent
 `event.cancelled` and `event.client_disconnected` fields. Cancellation alone does
@@ -105,7 +125,7 @@ The server owns signals and graceful request draining. Configure its graceful
 timeout and give the process supervisor enough additional time for logging and
 configured exporter timeouts. CI exercises Uvicorn SIGTERM during ordinary,
 streaming and background work; its test budgets are in the
-[deployment guide](deployment.md#release-validation-budgets).
+[release budgets](contributing.md#release-validation-budgets).
 
 ## Checking the result
 

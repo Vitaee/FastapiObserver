@@ -1,47 +1,26 @@
-# 0019 — Measure ASGI sends and annotate existing server spans
+# 0019: Measure ASGI sends and annotate existing server spans
 
-**Status:** Accepted
-
-**Date:** 5 November 2026
+**Status:** accepted · **Reviewed:** 2026-11-05
 
 ## Context
 
-Request duration already stops at the final successful body/trailers send while
-application duration includes background work. A long stream still needs to
-distinguish delayed headers, delayed first content and time spent streaming.
-Existing N+1 and pool warnings also lack a per-request trace breadcrumb when
-their process-wide log rate limit has already been reached.
+`duration_ms` already stops at the final successful body or trailers send, and `app_duration_ms` includes background work. A long stream still could not tell slow headers from a slow first chunk or a slow stream. The N+1 and pool warnings are rate-limited per process, so once the limit was reached a request's trace had no sign of them.
 
 ## Decision
 
-Add response-start and first nonempty body elapsed times, measured after the
-corresponding ASGI send returns. Stream duration runs from that first body send
-through response completion, including trailers. Empty or incomplete responses
-have no completed stream duration. These are server observations, not proof of
-client receipt; no extra ASGI messages or timing histograms are needed.
-
-Reuse the request's captured recording server span for three fixed diagnostic
-event types. Admit each type once per request, independently of log rate limits.
-Use only numeric capacity/count fields and the existing SHA-256 SQL fingerprint;
-exclude pool URLs and SQL text. Never create providers, tracers or child spans.
-SDK errors are contained and SDK calls run outside the aggregation lock.
-
-Emit the N+1 snapshot before sending the final body, since ASGI tracing can end
-the server span inside that send. Finalization may record an interruption or
-later queries only while the borrowed span is still recording. Consequently the
-trace event's count can precede the final log's totals. Pool events describe a
-capacity snapshot, not request wait time or causal latency attribution.
+- Add `response_start_ms` and `first_body_ms`, measured when the ASGI `send` of `http.response.start` and of the first nonempty body returns. `stream_duration_ms` runs from that first body send to response completion, trailers included. Empty or incomplete responses have no `stream_duration_ms`. These are server-side times, not client receipt. No extra ASGI messages are read and no histograms are added.
+- Add three fixed event types to the request's existing recording server span: `fastapiobserver.db.n_plus_one`, `fastapiobserver.threadpool.saturated` and `fastapiobserver.db.pool_exhausted`. Each is added at most once per request, whatever the log rate limit. Attributes are counts, capacities and the existing SHA-256 SQL fingerprint; pool URLs and SQL text are left out. No provider, tracer or child span is created. SDK errors are caught, and SDK calls run outside the aggregation lock.
+- Add the N+1 event before the final body is sent, because ASGI tracing can end the server span inside that send. Later queries or an interruption are added only while the borrowed span is still recording.
 
 ## Evidence
 
-The frozen 2.2.1 comparison excludes exactly the new timing fields. Deterministic
-ASGI timing tests, real-server shutdown/stream tests and native SQL/SDK tests check
-the additions. The existing paired CPU harness compares both stable and prior
-alpha sources; runtime and backend gates remain required.
+- The 2.2.1 compatibility probe leaves out exactly the three timing fields.
+- [`test_response_timing.py`](https://github.com/Vitaee/FastapiObserver/blob/v2.3.0/tests/test_response_timing.py): `test_stream_timing_uses_successful_nonempty_sends`, `test_empty_response_has_no_body_or_stream_timing` and `test_failure_before_headers_leaves_timings_unknown`.
+- [`test_diagnostic_spans.py`](https://github.com/Vitaee/FastapiObserver/blob/v2.3.0/tests/test_diagnostic_spans.py): `test_only_three_fixed_event_types_are_admitted_under_concurrent_calls`, `test_n_plus_one_reaches_each_server_span_before_transport_ends_it` and `test_pool_events_are_bounded_private_and_independent_of_log_rate_limit`.
+- Real-server shutdown and streaming cases run in [`test_production_runtime.py`](https://github.com/Vitaee/FastapiObserver/blob/v2.3.0/tests/test_production_runtime.py). Release validation compared CPU per request with 2.2.1 and the previous alpha using the paired harness.
 
 ## What it cost
 
-Three timing fields and a lazy, three-entry deduplication set add bounded work.
-Existing request/count/metric meanings, warning limits, sampling and provider
-ownership remain unchanged. Redaction and application sanitizer paths stay in
-place; redundant mapping copies/runtime typing checks are removed.
+- Three timing fields and a three-entry set, created lazily, add a little work per request.
+- The span event's count can be lower than the final log line's totals, since the event is added before the last body is sent.
+- Pool events are capacity snapshots, not measured wait time or the cause of latency.

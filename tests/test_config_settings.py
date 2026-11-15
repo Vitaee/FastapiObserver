@@ -5,7 +5,7 @@ from pydantic import ValidationError
 
 from fastapiobserver.config import ObservabilitySettings
 from fastapiobserver.control_plane import RuntimeControlSettings
-from fastapiobserver.otel import OTelSettings
+from fastapiobserver.otel import OTelLogsSettings, OTelMetricsSettings, OTelSettings
 from fastapiobserver.security import SecurityPolicy, TrustedProxyPolicy
 
 
@@ -116,10 +116,80 @@ def test_otel_service_name_names_the_service_everywhere(monkeypatch: pytest.Monk
     assert ObservabilitySettings().service == "orders-api"
 
 
-def test_sdk_disabled_turns_tracing_off(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("OBS_OTEL_ENABLED", "true")
+@pytest.fixture
+def clean_otel_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    for name in (
+        "OBS_OTEL_LOGS_ENABLED", "OBS_OTEL_LOGS_MODE", "OBS_OTEL_METRICS_ENABLED",
+        "OTEL_EXPORTER_OTLP_LOGS_PROTOCOL", "OTEL_EXPORTER_OTLP_METRICS_PROTOCOL",
+        "OTEL_EXPORTER_OTLP_PROTOCOL", "OTEL_METRIC_EXPORT_INTERVAL", "OTEL_SDK_DISABLED",
+    ):
+        monkeypatch.delenv(name, raising=False)
+
+
+@pytest.mark.parametrize(
+    ("settings_class", "enabled_variable"),
+    [
+        (OTelSettings, "OBS_OTEL_ENABLED"),
+        (OTelLogsSettings, "OBS_OTEL_LOGS_ENABLED"),
+        (OTelMetricsSettings, "OBS_OTEL_METRICS_ENABLED"),
+    ],
+)
+def test_sdk_disabled_turns_export_off(
+    monkeypatch: pytest.MonkeyPatch, settings_class, enabled_variable: str
+) -> None:
+    monkeypatch.setenv(enabled_variable, "true")
     monkeypatch.setenv("OTEL_SDK_DISABLED", "true")
-    assert OTelSettings.from_env().enabled is False
+    assert settings_class.from_env().enabled is False
+
+
+@pytest.mark.parametrize(
+    ("settings_class", "signal_variable"),
+    [
+        (OTelLogsSettings, "OTEL_EXPORTER_OTLP_LOGS_PROTOCOL"),
+        (OTelMetricsSettings, "OTEL_EXPORTER_OTLP_METRICS_PROTOCOL"),
+    ],
+)
+def test_signal_protocol_falls_back_to_the_shared_one(
+    clean_otel_env: None, monkeypatch: pytest.MonkeyPatch, settings_class, signal_variable: str
+) -> None:
+    assert settings_class.from_env().protocol == "grpc"
+    monkeypatch.setenv("OTEL_EXPORTER_OTLP_PROTOCOL", "http/protobuf")
+    assert settings_class.from_env().protocol == "http/protobuf"
+    monkeypatch.setenv(signal_variable, "grpc")
+    assert settings_class.from_env().protocol == "grpc"
+
+
+def test_otel_logs_settings_from_env(
+    clean_otel_env: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    defaults = OTelLogsSettings.from_env()
+    assert defaults.enabled is False
+    assert defaults.logs_mode == "local_json"
+    assert defaults.otlp_endpoint is None  # the exporter reads the endpoint variables
+
+    monkeypatch.setenv("OBS_OTEL_LOGS_ENABLED", "true")
+    monkeypatch.setenv("OBS_OTEL_LOGS_MODE", "both")
+    settings = OTelLogsSettings.from_env()
+    assert settings.enabled is True
+    assert settings.logs_mode == "both"
+
+    monkeypatch.setenv("OBS_OTEL_LOGS_MODE", "invalid_mode")
+    assert OTelLogsSettings.from_env().logs_mode == "local_json"
+
+
+def test_otel_metrics_settings_from_env(
+    clean_otel_env: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    defaults = OTelMetricsSettings.from_env()
+    assert defaults.enabled is False
+    assert defaults.otlp_endpoint is None
+    assert defaults.export_interval_millis == 60_000
+
+    monkeypatch.setenv("OBS_OTEL_METRICS_ENABLED", "true")
+    monkeypatch.setenv("OTEL_METRIC_EXPORT_INTERVAL", "5000")
+    settings = OTelMetricsSettings.from_env()
+    assert settings.enabled is True
+    assert settings.export_interval_millis == 5000
 
 
 def test_otel_settings_reject_invalid_protocol() -> None:

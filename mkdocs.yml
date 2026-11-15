@@ -59,13 +59,10 @@ nav:
       - Plugins: plugins.md
   - Operations:
       - Architecture: architecture.md
-      - Compatibility Baseline: baseline.md
       - Experimental Python Operations: experimental-core.md
-      - Draft Operation Contract: operation-contract.md
       - Roadmap: roadmap.md
       - Production Deployment: deployment.md
       - Kubernetes: kubernetes.md
-      - Performance Tuning: tuning.md
       - Advanced Operations: advanced.md
       - Benchmarks: benchmarks.md
   - Design decisions:
@@ -89,4 +86,6 @@ nav:
       - 0017 Call start ownership: decisions/0017-record-calls-against-their-start-owner.md
       - 0018 Additive diagnostic metadata: decisions/0018-additive-diagnostic-metadata.md
       - 0019 Stream timing and diagnostic events: decisions/0019-stream-timing-and-diagnostic-events.md
-  - Contributing: contributing.md
+  - Contributing:
+      - Maintenance & Contributing: contributing.md
+      - Compatibility Baseline: baseline.md

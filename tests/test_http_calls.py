@@ -20,7 +20,6 @@ from fastapiobserver.propagation import (
     uninstrument_requests_session,
 )
 from fastapiobserver.request_context import get_request_state
-import fastapiobserver.otel.tracing as tracing
 
 
 @pytest.fixture(autouse=True)
@@ -136,11 +135,9 @@ def test_async_httpx_stream_errors_count_once(library, caplog):
 @pytest.mark.parametrize("library", ["httpx", "httpx2"])
 @pytest.mark.parametrize("sampling_ratio", [0.0, 1.0])
 def test_async_calls_and_http_errors_count_with_tracing(
-    library, caplog, monkeypatch, sampling_ratio
+    library, caplog, span_exporter, sampling_ratio
 ):
     http = pytest.importorskip(library)
-    exporter = pytest.importorskip("opentelemetry.sdk.trace.export.in_memory_span_exporter")
-    monkeypatch.setattr(tracing, "build_otlp_exporter", lambda *_: exporter.InMemorySpanExporter())
     app = FastAPI()
 
     async def respond(request):
@@ -218,11 +215,9 @@ def test_cancelled_async_call_propagates_and_is_counted(caplog):
     assert event["http"]["errors"] == {"cancelled": 1}
 
 
-def test_manually_traced_call_counts_once(caplog, monkeypatch):
+def test_manually_traced_call_counts_once(caplog, span_exporter):
     http = pytest.importorskip("httpx2")
     trace = pytest.importorskip("opentelemetry.trace")
-    exporter = pytest.importorskip("opentelemetry.sdk.trace.export.in_memory_span_exporter")
-    monkeypatch.setattr(tracing, "build_otlp_exporter", lambda *_: exporter.InMemorySpanExporter())
     app = FastAPI()
     with http.Client(transport=http.MockTransport(lambda _: http.Response(200))) as client:
         instrument_httpx_client(client)
@@ -284,10 +279,8 @@ def test_requests_streams_count_consumption_and_read_timeouts(fail, caplog):
 
 
 @pytest.mark.parametrize("traced", [False, True])
-def test_requests_redirects_and_failures_count_once(traced, caplog, monkeypatch):
+def test_requests_redirects_and_failures_count_once(traced, caplog, span_exporter):
     requests = pytest.importorskip("requests")
-    exporter = pytest.importorskip("opentelemetry.sdk.trace.export.in_memory_span_exporter")
-    monkeypatch.setattr(tracing, "build_otlp_exporter", lambda *_: exporter.InMemorySpanExporter())
     app = FastAPI()
 
     class Adapter(requests.adapters.BaseAdapter):

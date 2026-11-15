@@ -1,10 +1,5 @@
 # Database Tracing and SQL Diagnostics (SQLAlchemy)
 
-`fastapi-observer` provides zero-tracing SQLAlchemy diagnostics (`db.count`, `db.ms`,
-`conn_held_ms`, N+1 detection, pool exhaustion, and connection-hold-during-HTTP
-detection) whenever `db_engine` is passed to `install_observability()`, plus optional
-OpenTelemetry SQL spans and SQLCommenter trace injection.
-
 ## Query count and time on the request line
 
 Every HTTP and WebSocket log record counts database queries and instrumented
@@ -17,6 +12,19 @@ outbound HTTP calls without requiring OpenTelemetry:
 - `db` counts queries on engines passed as `db_engine` (both `Engine` and `AsyncEngine`). Other database clients (such as Redis) are counted from sampled OpenTelemetry spans when tracing is enabled.
 - `http` counts clients registered with `instrument_httpx_client()` or `instrument_requests_session()` independently of tracing; see [outbound HTTP diagnostics](opentelemetry.md#outbound-http-diagnostics).
 - Engines passed as `db_engine` are also watched for pool saturation (`db.pool_exhausted`); see [full thread and database pools](logging.md#full-thread-and-database-pools).
+
+### SQL execution detail
+
+`db.count` and `db.ms` count successful executions. `db.sqlalchemy` also counts
+failures:
+
+```json
+{"db": {"count": 2, "ms": 4.2, "sqlalchemy": {"attempted": 3, "succeeded": 2, "failed": 1, "in_flight": 0, "failed_ms": 1.1, "conn_held_ms": 48.5, "errors": {"execution_error": 1}}}}
+```
+
+- `attempted = succeeded + failed + in_flight`, from `before_cursor_execute`, `after_cursor_execute` and `handle_error`.
+- `conn_held_ms` is the total time connections were checked out of the engine's pool during the request (`checkout` to `checkin`).
+- `errors` uses three categories: `integrity_error`, `disconnect` and `execution_error`. No SQL text, parameters or connection URLs are included.
 
 ### N+1 queries (`db.n_plus_one`)
 

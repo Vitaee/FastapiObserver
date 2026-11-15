@@ -157,25 +157,13 @@ def test_detaching_native_hooks_cannot_produce_a_false_passing_budget():
 
 
 def test_query_budget_example_needs_no_framework_or_exporter():
-    import os
     from pathlib import Path
-    import subprocess
-    import sys
-    import fastapiobserver
-    root = Path(__file__).resolve().parents[1]
-    script = """
-import importlib.abc,runpy,sys
-class Forbidden(importlib.abc.MetaPathFinder):
-    def find_spec(self,fullname,path=None,target=None):
-        if fullname.split('.')[0] in {'fastapi','starlette','opentelemetry'}:
-            raise AssertionError('Unexpected import: '+fullname)
-sys.meta_path.insert(0,Forbidden())
-runpy.run_path(sys.argv[1],run_name='__main__')
-"""
-    result = subprocess.run(
-        [sys.executable, "-c", script, str(root / "examples/query_budget.py")],
-        capture_output=True, text=True, timeout=15,
-        env={**os.environ, "PYTHONPATH": str(Path(fastapiobserver.__file__).resolve().parents[1])},
+
+    from tests.helpers import RUN_EXAMPLE, run_python
+
+    example = Path(__file__).resolve().parents[1] / "examples/query_budget.py"
+    result = run_python(
+        RUN_EXAMPLE, str(example), forbidden=("fastapi", "starlette", "opentelemetry")
     )
     assert result.returncode == 0, result.stderr
     assert result.stdout.splitlines() == [

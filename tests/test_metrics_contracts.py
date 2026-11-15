@@ -79,25 +79,6 @@ def test_multiprocess_mode_warns_that_process_stats_are_not_exported(
     assert "metrics.multiprocess.process_stats_unavailable" in caplog.messages
 
 
-def test_metrics_build_backend_contract() -> None:
-    from fastapiobserver.metrics import (
-        NoopMetricsBackend,
-        PrometheusMetricsBackend,
-        build_metrics_backend,
-    )
-
-    noop = build_metrics_backend(enabled=False)
-    assert isinstance(noop, NoopMetricsBackend)
-
-    prom = build_metrics_backend(enabled=True, backend="prometheus")
-    assert isinstance(prom, PrometheusMetricsBackend)
-    assert prom.service == "api"
-    assert prom.environment == "development"
-
-    with pytest.raises(ValueError, match="Unknown metrics backend"):
-        build_metrics_backend(enabled=True, backend="nonexistent")
-
-
 def test_prometheus_multiprocess_validation_contract(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -132,6 +113,10 @@ def test_mark_prometheus_process_dead_removes_live_gauge_files(
     dead_gauge.write_bytes(b"")
     other_worker = tmp_path / "gauge_liveall_9999.db"
     other_worker.write_bytes(b"")
+    monkeypatch.delenv("PROMETHEUS_MULTIPROC_DIR", raising=False)
+    mark_prometheus_process_dead(4321)
+    assert dead_gauge.exists()
+
     monkeypatch.setenv("PROMETHEUS_MULTIPROC_DIR", str(tmp_path))
 
     mark_prometheus_process_dead(4321)

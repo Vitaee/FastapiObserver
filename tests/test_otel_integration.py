@@ -16,20 +16,19 @@ import fastapiobserver.otel as otel_module
 import fastapiobserver.otel.resource as otel_resource_module
 
 
-def test_install_otel_missing_dependency_raises(monkeypatch: pytest.MonkeyPatch) -> None:
-    original_lazy_import = otel_resource_module.lazy_import
+def _without_opentelemetry(monkeypatch: pytest.MonkeyPatch) -> None:
+    lazy_import = otel_resource_module.lazy_import
 
-    def fake_lazy_import(
-        module_path: str,
-        attr: str | None = None,
-        *,
-        package_hint: str | None = None,
-    ):
+    def fake_lazy_import(module_path: str, attr: str | None = None, *, package_hint=None):
         if module_path.startswith("opentelemetry"):
             raise RuntimeError("missing dependency")
-        return original_lazy_import(module_path, attr=attr, package_hint=package_hint)
+        return lazy_import(module_path, attr=attr, package_hint=package_hint)
 
     monkeypatch.setattr(otel_resource_module, "lazy_import", fake_lazy_import)
+
+
+def test_install_otel_missing_dependency_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+    _without_opentelemetry(monkeypatch)
 
     with pytest.raises(RuntimeError, match=r"pip install fastapi-observer\[otel\]"):
         install_otel(
@@ -42,25 +41,12 @@ def test_install_otel_missing_dependency_raises(monkeypatch: pytest.MonkeyPatch)
 def test_install_otel_metrics_missing_dependency_returns_none(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    original_lazy_import = otel_resource_module.lazy_import
+    _without_opentelemetry(monkeypatch)
 
-    def fake_lazy_import(
-        module_path: str,
-        attr: str | None = None,
-        *,
-        package_hint: str | None = None,
-    ):
-        if module_path.startswith("opentelemetry"):
-            raise RuntimeError("missing dependency")
-        return original_lazy_import(module_path, attr=attr, package_hint=package_hint)
-
-    monkeypatch.setattr(otel_resource_module, "lazy_import", fake_lazy_import)
-
-    handler = install_otel_metrics(
+    assert install_otel_metrics(
         ObservabilitySettings(),
         OTelMetricsSettings(enabled=True, protocol="grpc"),
-    )
-    assert handler is None
+    ) is None
 
 
 def test_trace_sampling_ratio_is_clamped() -> None:
@@ -69,24 +55,7 @@ def test_trace_sampling_ratio_is_clamped() -> None:
     assert set_trace_sampling_ratio(0.33) == 0.33
 
 
-def test_create_otel_resource_when_dependency_available() -> None:
-    pytest.importorskip("opentelemetry.sdk.resources")
-
-    resource = create_otel_resource(
-        ObservabilitySettings(app_name="orders", service="orders", version="2.0.0"),
-        OTelSettings(
-            enabled=True,
-            service_name="orders-api",
-            service_version="2.0.0",
-            environment="production",
-        ),
-    )
-
-    assert resource.attributes["service.name"] == "orders-api"
-    assert resource.attributes["service.version"] == "2.0.0"
-
-
-def test_create_otel_resource_merges_extra_attributes() -> None:
+def test_create_otel_resource_names_the_service_and_merges_extra_attributes() -> None:
     pytest.importorskip("opentelemetry.sdk.resources")
 
     resource = create_otel_resource(
@@ -103,6 +72,8 @@ def test_create_otel_resource_merges_extra_attributes() -> None:
         ),
     )
 
+    assert resource.attributes["service.name"] == "orders-api"
+    assert resource.attributes["service.version"] == "2.0.0"
     assert resource.attributes["k8s.namespace"] == "prod"
     assert resource.attributes["service.namespace"] == "platform"
 
@@ -123,52 +94,33 @@ def test_otel_settings_parse_extra_resource_attributes_from_env(
     }
 
 
-def test_normalize_http_otlp_endpoint_adds_default_trace_path() -> None:
-    normalized = otel_module.normalize_otlp_endpoint(
-        "http://127.0.0.1:4318",
-        "http/protobuf",
-    )
-    assert normalized == "http://127.0.0.1:4318/v1/traces"
+@pytest.mark.parametrize(
+    ("normalize", "endpoint", "protocol", "expected"),
+    [
+        (otel_module.normalize_otlp_endpoint, "http://127.0.0.1:4318", "http/protobuf",
+         "http://127.0.0.1:4318/v1/traces"),
+        (otel_module.normalize_otlp_endpoint, "http://127.0.0.1:4318/custom/path",
+         "http/protobuf", "http://127.0.0.1:4318/custom/path"),
+        (otel_module.normalize_otlp_endpoint, "http://127.0.0.1:4317", "grpc",
+         "http://127.0.0.1:4317"),
+        (otel_module.normalize_otlp_metrics_endpoint, "http://127.0.0.1:4318", "http/protobuf",
+         "http://127.0.0.1:4318/v1/metrics"),
+    ],
+)
+def test_otlp_endpoint_normalization(normalize, endpoint, protocol, expected) -> None:
+    assert normalize(endpoint, protocol) == expected
 
 
-def test_normalize_http_otlp_endpoint_keeps_explicit_path() -> None:
-    normalized = otel_module.normalize_otlp_endpoint(
-        "http://127.0.0.1:4318/custom/path",
-        "http/protobuf",
-    )
-    assert normalized == "http://127.0.0.1:4318/custom/path"
-
-
-def test_normalize_grpc_otlp_endpoint_rejects_http_trace_path() -> None:
-    with pytest.raises(ValueError, match=r"must not include '/v1/traces'"):
-        otel_module.normalize_otlp_endpoint(
-            "http://127.0.0.1:4317/v1/traces",
-            "grpc",
-        )
-
-
-def test_normalize_grpc_otlp_endpoint_keeps_valid_endpoint() -> None:
-    normalized = otel_module.normalize_otlp_endpoint(
-        "http://127.0.0.1:4317",
-        "grpc",
-    )
-    assert normalized == "http://127.0.0.1:4317"
-
-
-def test_normalize_http_otlp_metrics_endpoint_adds_default_metrics_path() -> None:
-    normalized = otel_module.normalize_otlp_metrics_endpoint(
-        "http://127.0.0.1:4318",
-        "http/protobuf",
-    )
-    assert normalized == "http://127.0.0.1:4318/v1/metrics"
-
-
-def test_normalize_grpc_otlp_metrics_endpoint_rejects_http_metrics_path() -> None:
-    with pytest.raises(ValueError, match=r"must not include '/v1/metrics'"):
-        otel_module.normalize_otlp_metrics_endpoint(
-            "http://127.0.0.1:4317/v1/metrics",
-            "grpc",
-        )
+@pytest.mark.parametrize(
+    ("normalize", "path"),
+    [
+        (otel_module.normalize_otlp_endpoint, "/v1/traces"),
+        (otel_module.normalize_otlp_metrics_endpoint, "/v1/metrics"),
+    ],
+)
+def test_grpc_otlp_endpoint_rejects_an_http_signal_path(normalize, path) -> None:
+    with pytest.raises(ValueError, match=f"must not include '{path}'"):
+        normalize(f"http://127.0.0.1:4317{path}", "grpc")
 
 
 def test_http_logs_endpoint_gets_default_logs_path() -> None:
@@ -208,18 +160,13 @@ def test_install_otel_metrics_replaces_default_proxy_provider(
     assert metrics_api.get_meter_provider() is provider
 
 
-def test_hidden_routes_added_after_install_are_not_traced(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    in_memory = pytest.importorskip("opentelemetry.sdk.trace.export.in_memory_span_exporter")
+def test_hidden_routes_added_after_install_are_not_traced(span_exporter) -> None:
+    import logging
+
     from fastapi.testclient import TestClient
     from opentelemetry import trace as trace_api
 
     from fastapiobserver import install_observability
-    import fastapiobserver.otel.tracing as otel_tracing_module
-
-    exporter = in_memory.InMemorySpanExporter()
-    monkeypatch.setattr(otel_tracing_module, "build_otlp_exporter", lambda *_: exporter)
 
     app = FastAPI()
     install_observability(
@@ -227,6 +174,12 @@ def test_hidden_routes_added_after_install_are_not_traced(
         ObservabilitySettings(app_name="test", service="svc"),
         metrics_enabled=False,
         otel_settings=OTelSettings(enabled=True),
+    )
+    # OTel's LoggingInstrumentor would add its own root handler that bypasses
+    # the queue and redaction; tracing must not install one.
+    assert not any(
+        type(handler).__module__.startswith("opentelemetry")
+        for handler in logging.getLogger().handlers
     )
 
     @app.get("/visible")
@@ -242,7 +195,7 @@ def test_hidden_routes_added_after_install_are_not_traced(
         assert client.get("/internal").status_code == 200
         trace_api.get_tracer_provider().force_flush()
 
-    server_spans = [s.name for s in exporter.get_finished_spans() if s.kind.name == "SERVER"]
+    server_spans = [s.name for s in span_exporter.get_finished_spans() if s.kind.name == "SERVER"]
     assert server_spans == ["GET /visible"]
 
 
