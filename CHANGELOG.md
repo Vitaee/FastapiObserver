@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [2.4.0] - 2026-11-16
+
 ### Added
 - The `db.n_plus_one` warning and its span event name the application code that ran the repeated statement: `code.file.path`, `code.line.number` and `code.function.name`, for sync and async SQLAlchemy engines. The stack is read once per repeated statement, when it reaches the threshold. SQL text is still not logged.
 - The warning also names the ORM relationship being loaded, as `relationship`, such as `Order.items`. That identifies lazy loads that run while FastAPI serializes the response, where no application code is on the stack. It uses SQLAlchemy's `do_orm_execute` event for every `Session` in the process.
