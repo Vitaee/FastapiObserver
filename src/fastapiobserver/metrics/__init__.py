@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-import re
 from typing import Callable, Protocol
 
 from fastapi import FastAPI
 
 from ..config import MetricsFormat
+from ..utils import collapse_dynamic_segments
 from .prometheus import (
     PrometheusMetricsBackend,
     _build_prometheus_metrics_backend,
@@ -52,22 +52,6 @@ class NoopMetricsBackend:
         duration_seconds: float,
     ) -> None:
         return None
-
-
-# Each matches a whole segment only, so `/auth/2fa` stays as it is.
-_UUID_RE = re.compile(
-    r"/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}"
-    r"(?=/|$)"
-)
-_NUMBER_RE = re.compile(r"/\d+(?=/|$)")
-_HEX_RE = re.compile(r"/[0-9a-fA-F]{16,}(?=/|$)")
-
-
-def collapse_dynamic_segments(path: str) -> str:
-    """Replace dynamic path segments with ``/:id`` to control label cardinality."""
-    normalized = _UUID_RE.sub("/:id", path)
-    normalized = _HEX_RE.sub("/:id", normalized)
-    return _NUMBER_RE.sub("/:id", normalized)
 
 
 _BACKEND_FACTORIES: dict[str, MetricsBackendFactory] = {}

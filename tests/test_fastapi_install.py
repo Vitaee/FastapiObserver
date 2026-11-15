@@ -22,17 +22,6 @@ from fastapiobserver.metrics import register_metrics_backend, unregister_metrics
 from fastapiobserver.middleware import RequestLoggingMiddleware
 
 
-def test_install_observability_adds_request_logging_middleware_once() -> None:
-    app = FastAPI()
-    settings = ObservabilitySettings(app_name="test", service="svc", environment="test")
-
-    install_observability(app, settings, metrics_enabled=False)
-    install_observability(app, settings, metrics_enabled=False)
-
-    count = sum(1 for item in app.user_middleware if item.cls is RequestLoggingMiddleware)
-    assert count == 1
-
-
 def test_install_observability_drops_duplicate_uvicorn_access_log() -> None:
     install_observability(
         FastAPI(),
@@ -156,47 +145,13 @@ def test_install_observability_installs_otel_metrics_when_enabled(
     assert not calls["otel_settings"].enabled
 
 
-def test_install_observability_registers_logging_shutdown_hook_once(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    app = FastAPI()
-    settings = ObservabilitySettings(app_name="test", service="svc", environment="test")
-
-    mock_calls = []
-
-    def mock_shutdown() -> None:
-        mock_calls.append(1)
-
-    monkeypatch.setattr(fastapi_module, "flush_logging", mock_shutdown)
-
-    install_observability(app, settings, metrics_enabled=False)
-    install_observability(app, settings, metrics_enabled=False)
-
-    assert app in fastapi_module._REGISTERED_APPS
-    
-    # Verify the shutdown hook actively works when application teardown runs
-    async def _run_lifespan() -> None:
-        async with app.router.lifespan_context(app):
-            pass
-
-    asyncio.run(_run_lifespan())
-        
-    assert len(mock_calls) == 1
-
-
 def test_custom_observability_lifespan_cleans_up_resources(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     app = FastAPI()
-    
-    # We will track calls to flush_logging
-    mock_calls = []
+    mock_calls: list[int] = []
+    monkeypatch.setattr(fastapi_module, "flush_logging", lambda: mock_calls.append(1))
 
-    def mock_shutdown() -> None:
-        mock_calls.append(1)
-
-    monkeypatch.setattr(fastapi_module, "flush_logging", mock_shutdown)
-    
     async def _run_explicit_lifespan() -> None:
         async with observability_lifespan(app):
             pass
@@ -205,82 +160,64 @@ def test_custom_observability_lifespan_cleans_up_resources(
     assert len(mock_calls) == 1
 
 
-def test_cleanup_runs_again_after_reinstall(
+def test_cleanup_runs_once_per_lifespan_cycle_even_when_installed_twice(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     app = FastAPI()
     settings = ObservabilitySettings(app_name="test", service="svc", environment="test")
     mock_calls: list[int] = []
-
-    def mock_shutdown() -> None:
-        mock_calls.append(1)
-
-    monkeypatch.setattr(fastapi_module, "flush_logging", mock_shutdown)
+    monkeypatch.setattr(fastapi_module, "flush_logging", lambda: mock_calls.append(1))
 
     async def _run_lifespan_cycle() -> None:
         async with app.router.lifespan_context(app):
             pass
 
     install_observability(app, settings, metrics_enabled=False)
+    install_observability(app, settings, metrics_enabled=False)
+    assert app in fastapi_module._REGISTERED_APPS
     asyncio.run(_run_lifespan_cycle())
+    assert len(mock_calls) == 1
 
     install_observability(app, settings, metrics_enabled=False)
     asyncio.run(_run_lifespan_cycle())
-
     assert len(mock_calls) == 2
 
 
-def test_auto_discover_excluded_routes() -> None:
+def test_auto_discover_excluded_routes_and_parameterized_paths() -> None:
     app = FastAPI()
-    
+
     @app.get("/visible")
     def visible():
         pass
-        
+
     @app.get("/hidden", include_in_schema=False)
     def hidden():
         pass
-        
+
+    @app.get("/hidden/{item_id}", include_in_schema=False)
+    def hidden_item(item_id: int):
+        return item_id
+
     @app.get("/docs")
     def docs():
         pass
-        
+
     settings = ObservabilitySettings(
         app_name="test",
         service="svc",
         metrics_exclude_paths=("/metrics",),
     )
-    
+
     fastapi_module.install_observability(app, settings, metrics_enabled=False)
     fastapi_module._auto_discover_excluded_routes(app, settings)
-    
-    # Check that /hidden and /docs were dynamically added to the exclude tuple
+
     excluded_urls = app.state._observability_state.excluded_urls
-    
     assert "/metrics" in excluded_urls
     assert "/hidden" in excluded_urls
-    assert "/docs" in excluded_urls
-    assert "/visible" not in excluded_urls
-
-
-def test_auto_discover_excluded_routes_normalizes_parameterized_paths() -> None:
-    app = FastAPI()
-
-    @app.get("/hidden/{item_id}", include_in_schema=False)
-    def hidden(item_id: int):
-        return item_id
-
-    settings = ObservabilitySettings(
-        app_name="test",
-        service="svc",
-        metrics_exclude_paths=("/metrics",),
-    )
-
-    fastapi_module.install_observability(app, settings, metrics_enabled=False)
-    fastapi_module._auto_discover_excluded_routes(app, settings)
-    excluded_urls = app.state._observability_state.excluded_urls
     assert "/hidden/{item_id}" in excluded_urls
     assert "/hidden/:id" in excluded_urls
+    assert "/docs" in excluded_urls
+    assert "/visible" not in excluded_urls
 
 
 def test_auto_discover_updates_active_otel_exclusion_list() -> None:
@@ -425,3 +362,4 @@ def test_second_install_changes_nothing(caplog: pytest.LogCaptureFixture) -> Non
     assert "observability.already_installed" in caplog.messages
     assert app.state._observability_state.settings is first
     assert app.routes == routes  # no second /metrics
+    assert sum(1 for item in app.user_middleware if item.cls is RequestLoggingMiddleware) == 1

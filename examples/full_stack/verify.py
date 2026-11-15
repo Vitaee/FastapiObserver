@@ -78,6 +78,7 @@ def verify(args: argparse.Namespace) -> None:
         errors={"read_timeout": 1},
     )
     call("status", "/lab/downstream?failure=true", 502, count=1, errors={"http_5xx": 1})
+    call("invalid", "/items/not-an-int", 422)
     call("background", "/lab/background?seconds=0.2&fail=true", 202)
     # The second request's span still gets the diagnostic after log rate limiting.
     for number in range(2):
@@ -122,12 +123,19 @@ def verify(args: argparse.Namespace) -> None:
             assert event["http"].get("errors", {}) == wanted.get("errors", {}), record
         if "db_count" in wanted:
             assert event["db"]["count"] == wanted["db_count"], record
+            assert event["db"]["sqlalchemy"]["conn_held_ms"] >= 0, record
         if args.no_tracing:
             assert not record.get("trace_id"), record
     background = records[f"{prefix}-background"]
     assert background["message"] == "request.failed", background
     assert background["event"]["app_duration_ms"] - background["event"]["duration_ms"] >= 150
     assert records[broken_id]["message"] == "request.failed"
+    assert records[f"{prefix}-invalid"]["event"]["validation_errors"] == [
+        {"loc": "path.item_id", "type": "int_parsing"}
+    ]
+    assert records[f"{prefix}-nplus-0"]["event"]["diagnostics"] == ["db.n_plus_one"]
+    assert records[f"{prefix}-nplus-1"]["event"]["diagnostics"] == ["db.n_plus_one"]
+    assert records[f"{prefix}-stream"]["event"]["response_bytes"] == len(b"first\nlast\n")
     assert records[f"{prefix}-slow"]["event"]["http"]["ms"] >= 300
     assert records[f"{prefix}-stream"]["event"]["duration_ms"] >= 150
     assert records[f"{prefix}-stream"]["event"]["stream_duration_ms"] >= 150
@@ -142,7 +150,26 @@ def verify(args: argparse.Namespace) -> None:
         payload = json.loads(fetch(f"http://localhost:9090/api/v1/query?{query}")[1])
         return any(float(point["value"][1]) >= 1 for point in payload["data"]["result"])
 
+    def n_plus_one_counted() -> bool:
+        query = urlencode(
+            {"query": 'fastapiobserver_db_n_plus_one_total{job="app-a",route="/lab/n-plus-one"}'}
+        )
+        payload = json.loads(fetch(f"http://localhost:9090/api/v1/query?{query}")[1])
+        return any(float(point["value"][1]) >= 2 for point in payload["data"]["result"])
+
+    def validation_error_counted() -> bool:
+        query = urlencode(
+            {
+                "query": 'fastapiobserver_http_validation_errors_total{job="app-a",'
+                'route="/items/{item_id}",field="path.item_id"}'
+            }
+        )
+        payload = json.loads(fetch(f"http://localhost:9090/api/v1/query?{query}")[1])
+        return any(float(point["value"][1]) >= 1 for point in payload["data"]["result"])
+
     wait_for(prometheus_ready, "the completed background response in Prometheus")
+    wait_for(n_plus_one_counted, "both N+1 requests counted in Prometheus")
+    wait_for(validation_error_counted, "the 422 validation error counted in Prometheus")
     if not args.no_tracing:
         trace_id = records[f"{prefix}-chain"]["trace_id"]
 
@@ -171,6 +198,7 @@ def verify(args: argparse.Namespace) -> None:
                     return False
                 assert {attr["key"] for attr in diagnostics[0]["attributes"]} == {
                     "count", "threshold", "statement_fingerprint",
+                    "code.file.path", "code.line.number", "code.function.name",
                 }
             return True
 

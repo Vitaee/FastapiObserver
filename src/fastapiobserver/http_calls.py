@@ -3,20 +3,28 @@
 from __future__ import annotations
 
 import inspect
+import logging
 import sys
+import threading
 from collections.abc import AsyncIterator, Callable, Iterator
 from contextvars import ContextVar
 from dataclasses import dataclass
 from functools import cache, wraps
 from types import ModuleType
 from typing import Any
+from urllib.parse import urlsplit
 
 from .core.recording import CallHandle
 from .request_context import RequestState, get_request_state
+from .utils import collapse_dynamic_segments, normalize_path
 
+_LOGGER = logging.getLogger("fastapiobserver.http_calls")
 _ACTIVE_CLIENT: ContextVar[object | None] = ContextVar("observed_http_client", default=None)
 _COUNTER = "_fastapiobserver_http_calls"
 _GLOBAL_SENDS: dict[type[Any], tuple[str, Callable[..., Any], Callable[..., Any]]] = {}
+_MAX_WARNED_TIMEOUTS = 256
+_TIMEOUT_LOCK = threading.Lock()
+_warned_timeouts: dict[tuple[str, str], None] = {}
 
 
 def _error_category(error: BaseException, library: ModuleType) -> str:
@@ -48,6 +56,7 @@ def _error_category(error: BaseException, library: ModuleType) -> str:
 class _Call:
     recorder: CallHandle
     library: ModuleType
+    target: str | None = None
     status: int = 0
 
     def finish(self, error: BaseException | None = None) -> None:
@@ -56,7 +65,75 @@ class _Call:
             if error is not None
             else ("http_5xx" if self.status >= 500 else "http_4xx" if self.status >= 400 else None)
         )
-        self.recorder.finish(error=category)
+        self.recorder.finish(
+            error=category,
+            statement=self.target,
+            relationship=self.target[:200] if self.target else None,
+        )
+
+
+def _http_target(request: Any) -> tuple[str, str | None]:
+    try:
+        method = (getattr(request, "method", None) or "GET").upper()
+        url = getattr(request, "url", None)
+        if isinstance(url, str):
+            parts = urlsplit(url)
+            host = (parts.hostname or "").lower()
+            port = parts.port
+            path = parts.path or "/"
+        else:
+            host = (getattr(url, "host", None) or "").lower()
+            port = getattr(url, "port", None)
+            path = getattr(url, "path", None) or "/"
+        if not host:
+            return "", None
+        netloc = f"{host}:{port}" if port not in (None, 80, 443) else host
+        collapsed = collapse_dynamic_segments(normalize_path(path))
+        return netloc, f"{method} {netloc}{collapsed}"
+    except Exception:
+        return "", None
+
+
+def _unlimited_httpx_phases(timeout: Any) -> tuple[str, ...]:
+    if timeout is None:
+        return ("connect", "read", "write", "pool")
+    phases = timeout if isinstance(timeout, dict) else getattr(timeout, "as_dict", lambda: {})()
+    return tuple(name for name, val in phases.items() if val is None)
+
+
+def _unlimited_requests_phases(timeout: Any) -> tuple[str, ...]:
+    if timeout is None:
+        return ("connect", "read")
+    if isinstance(timeout, tuple):
+        connect, read = (timeout + (None, None))[:2]
+        return tuple(
+            name for name, val in (("connect", connect), ("read", read)) if val is None
+        )
+    return ()
+
+
+def _warn_missing_timeout(
+    library_name: str, host: str, unlimited: tuple[str, ...]
+) -> None:
+    if not unlimited:
+        return
+    key = (library_name, host)
+    with _TIMEOUT_LOCK:
+        if key in _warned_timeouts:
+            return
+        if len(_warned_timeouts) >= _MAX_WARNED_TIMEOUTS:
+            del _warned_timeouts[next(iter(_warned_timeouts))]
+        _warned_timeouts[key] = None
+    _LOGGER.warning(
+        "http.timeout_missing",
+        extra={
+            "event": {
+                "library": library_name,
+                "host": host or None,
+                "unlimited": list(unlimited),
+            },
+        },
+    )
 
 
 def is_counted_http_span(state: RequestState, span_id: int | None) -> bool:
@@ -180,14 +257,33 @@ def _wrap_send(
         owner = client if client is not None else args[0]
         request = kwargs["request"] if "request" in kwargs else args[int(client is None)]
         forward(request.headers)
+        if _ACTIVE_CLIENT.get() is owner:
+            return owner, None
+        host, target = _http_target(request)
+        if library.__name__ == "requests":
+            unlimited = _unlimited_requests_phases(
+                kwargs.get("timeout", getattr(owner, "timeout", None))
+            )
+        else:
+            extensions = getattr(request, "extensions", None)
+            ext_timeout = extensions.get("timeout") if isinstance(extensions, dict) else None
+            unlimited = _unlimited_httpx_phases(
+                ext_timeout if ext_timeout is not None else getattr(owner, "timeout", None)
+            )
+        _warn_missing_timeout(library.__name__, host, unlimited)
         state = get_request_state()
         # Requests follows redirects through Session.send again. Also covers a
         # client instrumented both individually and globally, without losing calls
         # made by other clients in a request hook.
-        if state is None or _ACTIVE_CLIENT.get() is owner:
+        if state is None:
             return owner, None
+        state.on_http_start(target)
         _mark_current_span(state)
-        return owner, _Call(CallHandle(state, "http", source=library.__name__), library)
+        return owner, _Call(
+            CallHandle(state, "http", source=library.__name__),
+            library,
+            target=target,
+        )
 
     @wraps(original)
     def send(*args: Any, **kwargs: Any) -> Any:
@@ -228,6 +324,12 @@ def _wrap_send(
 
 def count_client_calls(client: Any, library: ModuleType, forward: Callable[[Any], None]) -> None:
     if not getattr(vars(client).get("send"), _COUNTER, False):
+        base_host = (getattr(getattr(client, "base_url", None), "host", None) or "").lower()
+        _warn_missing_timeout(
+            library.__name__,
+            base_host,
+            _unlimited_httpx_phases(getattr(client, "timeout", ...)),
+        )
         client.send = _wrap_send(client.send, library, forward, client)
 
 
@@ -242,6 +344,9 @@ def count_global_calls(
 
 
 def uncount_global_calls(*libraries: str) -> None:
+    with _TIMEOUT_LOCK:
+        for key in [k for k in _warned_timeouts if k[0] in libraries]:
+            del _warned_timeouts[key]
     for client_type, (name, original, wrapper) in list(_GLOBAL_SENDS.items()):
         if name in libraries:
             if client_type.send is wrapper:

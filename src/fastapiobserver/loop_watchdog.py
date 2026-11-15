@@ -15,9 +15,17 @@ import threading
 import time
 import traceback
 
+from .diagnostics import report_diagnostic
+
 _LOGGER = logging.getLogger("fastapiobserver.event_loop")
 # Innermost frames only; the outer ones are the server and the middleware.
 _STACK_LIMIT = 30
+_last_block_window: tuple[float, float] = (0.0, 0.0)
+
+
+def last_loop_block_window() -> tuple[float, float]:
+    """The monotonic perf_counter (start, end) window of the most recent loop block."""
+    return _last_block_window
 
 
 class EventLoopWatchdog:
@@ -32,6 +40,7 @@ class EventLoopWatchdog:
         self._loop_thread_id = threading.get_ident()
         self._threshold = threshold_seconds
         self._sent_at: float | None = None  # when the unanswered callback was sent
+        self._reported_start: float | None = None
         self._stopped = threading.Event()
         self._thread = threading.Thread(
             target=self._watch, name="fastapiobserver-loop-watchdog", daemon=True
@@ -42,9 +51,14 @@ class EventLoopWatchdog:
 
     def stop(self) -> None:
         self._stopped.set()
+        self._reported_start = None
         self._thread.join(timeout=1.0)
 
     def _answer(self) -> None:
+        global _last_block_window
+        if self._reported_start is not None:
+            _last_block_window = (self._reported_start, time.perf_counter())
+            self._reported_start = None
         self._sent_at = None
 
     def _watch(self) -> None:
@@ -63,6 +77,11 @@ class EventLoopWatchdog:
                 self._report(time.monotonic() - sent_at)
 
     def _report(self, blocked_seconds: float) -> None:
+        global _last_block_window
+        now = time.perf_counter()
+        self._reported_start = now - blocked_seconds
+        _last_block_window = (self._reported_start, now)
+        report_diagnostic("event_loop.blocked")
         frame = sys._current_frames().get(self._loop_thread_id)
         stack = "".join(traceback.format_stack(frame, limit=_STACK_LIMIT)) if frame else None
         _LOGGER.warning(
@@ -74,4 +93,4 @@ class EventLoopWatchdog:
         )
 
 
-__all__ = ["EventLoopWatchdog"]
+__all__ = ["EventLoopWatchdog", "last_loop_block_window"]

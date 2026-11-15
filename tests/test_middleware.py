@@ -10,11 +10,11 @@ from fastapiobserver import ObservabilitySettings, install_observability
 from fastapiobserver.request_context import get_request_id
 
 
-def test_middleware_sets_response_request_id_header() -> None:
+def test_middleware_sets_request_id_header_and_logs_path_without_query_string(caplog) -> None:
     app = FastAPI()
 
-    @app.get("/id")
-    def read_id() -> dict[str, str | None]:
+    @app.get("/search")
+    def search() -> dict[str, str | None]:
         return {"request_id": get_request_id()}
 
     install_observability(
@@ -23,42 +23,20 @@ def test_middleware_sets_response_request_id_header() -> None:
         metrics_enabled=False,
     )
 
-    client = TestClient(app)
-    response = client.get("/id")
-
-    assert response.status_code == 200
-    assert "x-request-id" in response.headers
-    assert response.headers["x-request-id"] == response.json()["request_id"]
-
-
-def test_middleware_logs_path_without_query_string(caplog) -> None:
-    app = FastAPI()
-
-    @app.get("/search")
-    def search() -> dict[str, bool]:
-        return {"ok": True}
-
-    install_observability(
-        app,
-        ObservabilitySettings(app_name="test", service="svc", environment="test"),
-        metrics_enabled=False,
-    )
-
-    client = TestClient(app)
     with caplog.at_level(logging.INFO, logger="fastapiobserver.middleware"):
-        response = client.get("/search?token=secret")
+        response = TestClient(app).get("/search?token=secret")
 
     assert response.status_code == 200
-    request_logs = [
-        record
-        for record in caplog.records
-        if record.name == "fastapiobserver.middleware" and hasattr(record, "event")
+    assert response.headers["x-request-id"] == response.json()["request_id"]
+    [record] = [
+        r for r in caplog.records
+        if r.name == "fastapiobserver.middleware" and hasattr(r, "event")
     ]
-    assert request_logs
-    assert request_logs[-1].event["path"] == "/search"
-    assert request_logs[-1].event["url.path"] == "/search"
-    assert request_logs[-1].event["http.request.method"] == "GET"
-    assert request_logs[-1].event["http.response.status_code"] == 200
+    assert record.event["path"] == "/search"
+    assert record.event["url.path"] == "/search"
+    assert record.event["http.request.method"] == "GET"
+    assert record.event["http.response.status_code"] == 200
+    assert "secret" not in str(record.event)
 
 
 def test_middleware_classifies_server_error_response(caplog) -> None:

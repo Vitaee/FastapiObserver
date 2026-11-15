@@ -34,7 +34,7 @@ def validate_call(kind: str, seconds: float, error: str | None = None) -> None:
 def record_completed_call(
     owner: RequestState | None, kind: CallKind, seconds: float,
     statement: str | None = None, *, error: str | None = None,
-    source: str = "manual", started: bool = False,
+    source: str = "manual", started: bool = False, relationship: str | None = None,
 ) -> bool:
     """Reject malformed adapter input without changing application outcomes."""
     if owner is None or not isinstance(source, str) or source not in _SOURCES:
@@ -45,7 +45,10 @@ def record_completed_call(
         validate_call(kind, seconds, error)
     except (TypeError, ValueError, OverflowError):
         return False
-    return owner._record_call(kind, seconds, statement, error=error, source=source, started=started)
+    return owner._record_call(
+        kind, seconds, statement, error=error, source=source, started=started,
+        relationship=relationship if isinstance(relationship, str) else None,
+    )
 
 
 class CallOwner:
@@ -79,7 +82,10 @@ class CallHandle:
         self._lock = threading.Lock()
         self._finished = False
 
-    def finish(self, *, error: str | None = None, statement: str | None = None) -> bool:
+    def finish(
+        self, *, error: str | None = None, statement: str | None = None,
+        relationship: str | None = None,
+    ) -> bool:
         # Check before locking: an inherited lock may belong to a vanished
         # parent thread. A parent-process call cannot complete in the child.
         token = self._owner() if self._owner is not None else None
@@ -93,6 +99,7 @@ class CallHandle:
         return record_completed_call(
             owner, self._kind, max(0.0, time.perf_counter() - self._started),
             statement, error=error, source=self._source, started=True,
+            relationship=relationship,
         )
 
 

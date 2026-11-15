@@ -29,9 +29,22 @@ from dataclasses import asdict, dataclass
 from typing import Any
 
 from fastapi import FastAPI
+from pydantic import BaseModel
+from sqlalchemy import create_engine, text
+from sqlalchemy.pool import StaticPool
 
-from fastapiobserver import ObservabilitySettings, install_observability
-from fastapiobserver.logging import get_log_queue_stats, setup_logging, shutdown_logging
+from fastapiobserver import (
+    ObservabilitySettings,
+    install_observability,
+    instrument_httpx_client,
+    set_user_context,
+)
+from fastapiobserver.logging import (
+    flush_logging,
+    get_log_queue_stats,
+    setup_logging,
+    shutdown_logging,
+)
 import fastapiobserver.logging.state as logging_state
 
 try:
@@ -117,17 +130,29 @@ def _build_settings(
     queue_size: int = 128,
     overflow_policy: str = "drop_oldest",
     block_timeout_seconds: float = 0.001,
+    log_level: str = "INFO",
+    metrics_enabled: bool = True,
 ) -> ObservabilitySettings:
     return ObservabilitySettings(
         app_name=app_name,
         service="runtime-stress",
         environment="test",
-        metrics_enabled=False,
-        log_level="WARNING",
+        metrics_enabled=metrics_enabled,
+        log_level=log_level,  # type: ignore[arg-type]
         log_queue_max_size=queue_size,
         log_queue_overflow_policy=overflow_policy,  # type: ignore[arg-type]
         log_queue_block_timeout_seconds=block_timeout_seconds,
     )
+
+
+def _silence_managed_sinks(devnull: Any) -> None:
+    """Route managed sink stream writes to devnull while keeping full JSON formatting."""
+    for handler in logging_state._MANAGED_OUTPUT_HANDLERS:
+        if hasattr(handler, "stream"):
+            handler.stream = devnull
+        delegate = getattr(handler, "_delegate", None)
+        if delegate is not None and hasattr(delegate, "stream"):
+            delegate.stream = devnull
 
 
 def _logging_state_clean() -> tuple[bool, str]:
@@ -155,9 +180,9 @@ def _logging_running_once() -> tuple[bool, str]:
 
 
 def _log_runtime_noise_reduction() -> None:
-    """Keep stress harness output concise in CI logs."""
+    """Silence test-client HTTP debug logs without suppressing fastapiobserver logs."""
     logging.getLogger("httpx2").setLevel(logging.WARNING)
-    logging.getLogger("fastapiobserver.middleware").setLevel(logging.WARNING)
+    logging.getLogger("fastapiobserver.middleware").setLevel(logging.INFO)
 
 
 def _run_sync_check(
@@ -209,80 +234,206 @@ async def _run_async_check(
 
 
 async def _check_lifecycle_churn(iterations: int) -> tuple[str, dict[str, Any]]:
-    settings = _build_settings(app_name="stress-lifecycle", queue_size=128)
+    settings = _build_settings(app_name="stress-lifecycle", queue_size=512)
+    logger = logging.getLogger("stress.lifecycle")
+    total_enqueued = 0
 
-    for i in range(iterations):
-        app = FastAPI()
-        install_observability(app, settings, metrics_enabled=False)
-        async with app.router.lifespan_context(app):
-            pass
-        running_once, reason = _logging_running_once()
-        if not running_once:
-            raise RuntimeError(f"lifecycle_leak iteration={i} reason={reason}")
+    with open(os.devnull, "w", encoding="utf-8") as devnull:
+        for i in range(iterations):
+            app = FastAPI()
+            install_observability(app, settings, metrics_enabled=True)
+            async with app.router.lifespan_context(app):
+                _silence_managed_sinks(devnull)
+                logger.info(
+                    "lifecycle.active",
+                    extra={"event": {"iteration": i, "password": "secret"}},
+                )
+            running_once, reason = _logging_running_once()
+            if not running_once:
+                raise RuntimeError(f"lifecycle_leak iteration={i} reason={reason}")
+            iter_enqueued = int(get_log_queue_stats().get("enqueued_total", 0))
+            if iter_enqueued < 1:
+                raise RuntimeError(f"expected enqueued_total>=1 at iteration={i}")
+            total_enqueued += iter_enqueued
 
-    shutdown_logging()
-    return f"iterations={iterations}", {"iterations": iterations}
+        flush_logging()
+        shutdown_logging()
+
+    return f"iterations={iterations} enqueued={total_enqueued}", {
+        "iterations": iterations,
+        "enqueued_total": total_enqueued,
+    }
 
 
 async def _check_same_app_reinstall(cycles: int) -> tuple[str, dict[str, Any]]:
     app = FastAPI()
-    settings = _build_settings(app_name="stress-reinstall", queue_size=96)
+    engine = create_engine(
+        "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
+    )
+    settings = _build_settings(app_name="stress-reinstall", queue_size=256)
 
-    for i in range(cycles):
-        install_observability(app, settings, metrics_enabled=False)
-        count = 0
-        for middleware in app.user_middleware:
-            if getattr(middleware.cls, "__name__", "") == "RequestLoggingMiddleware":
-                count += 1
-        if count != 1:
-            raise RuntimeError(
-                f"request_logging_middleware_count={count} cycle={i}"
+    with open(os.devnull, "w", encoding="utf-8") as devnull:
+        for i in range(cycles):
+            install_observability(app, settings, metrics_enabled=True, db_engine=engine)
+            count = sum(
+                1
+                for middleware in app.user_middleware
+                if getattr(middleware.cls, "__name__", "") == "RequestLoggingMiddleware"
             )
-        async with app.router.lifespan_context(app):
-            pass
+            if count != 1:
+                raise RuntimeError(
+                    f"request_logging_middleware_count={count} cycle={i}"
+                )
+            async with app.router.lifespan_context(app):
+                _silence_managed_sinks(devnull)
+        shutdown_logging()
 
+    engine.dispose()
     return f"cycles={cycles}", {"cycles": cycles}
+
+
+class _StressOrderItem(BaseModel):
+    sku: str
+    qty: int
+
+
+class _StressOrderPayload(BaseModel):
+    items: list[_StressOrderItem]
 
 
 async def _check_request_stress(
     request_count: int,
     request_concurrency: int,
 ) -> tuple[str, dict[str, Any]]:
+    engine = create_engine(
+        "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
+    )
+
+    async def _mock_upstream(request: httpx2.Request) -> httpx2.Response:
+        if "slow" in str(request.url):
+            await asyncio.sleep(0.002)
+        return httpx2.Response(200, json={"ok": True})
+
+    outbound = httpx2.AsyncClient(
+        transport=httpx2.MockTransport(_mock_upstream), timeout=5.0
+    )
+    instrument_httpx_client(outbound)
+
     app = FastAPI()
 
-    @app.get("/items/{item_id}")
-    async def items(item_id: int) -> dict[str, int]:
+    @app.get("/work/{item_id}")
+    async def work_route(item_id: int) -> dict[str, int]:
+        set_user_context({"user_id": item_id, "password": "redact-me"})
+        with engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+        await outbound.get(f"https://api.internal/orders/{item_id}")
         return {"id": item_id}
 
-    settings = _build_settings(app_name="stress-requests", queue_size=32)
-    install_observability(app, settings, metrics_enabled=False)
+    @app.post("/validate")
+    async def validate_route(payload: _StressOrderPayload) -> dict[str, int]:
+        return {"count": len(payload.items)}
 
-    transport = httpx2.ASGITransport(app=app)
+    @app.get("/pathology/{item_id}")
+    async def pathology_route(item_id: int) -> dict[str, int]:
+        # Triggers N+1 SQL (>=10 repeats) + DB connection held >=10x query time during HTTP
+        with engine.connect() as conn:
+            for _ in range(10):
+                conn.execute(text("SELECT 1"))
+            await outbound.get(f"https://api.internal/slow/{item_id}")
+        return {"id": item_id}
 
-    async with app.router.lifespan_context(app):
-        async with httpx2.AsyncClient(transport=transport, base_url="http://test") as client:
-            semaphore = asyncio.Semaphore(request_concurrency)
+    @app.get("/fail/{item_id}")
+    async def fail_route(item_id: int) -> dict[str, int]:
+        raise RuntimeError(
+            f"postgres://admin:supersecret@db.internal:5432/orders failure on {item_id}"
+        )
 
-            async def _request(i: int) -> int:
-                async with semaphore:
-                    response = await client.get(f"/items/{i}")
-                    return response.status_code
+    settings = _build_settings(
+        app_name="stress-requests",
+        queue_size=max(request_count * 3, 4096),
+        log_level="INFO",
+        metrics_enabled=True,
+    )
+    latencies_ms: list[float] = []
+    with open(os.devnull, "w", encoding="utf-8") as devnull:
+        install_observability(app, settings, metrics_enabled=True, db_engine=engine)
+        _silence_managed_sinks(devnull)
+        transport = httpx2.ASGITransport(app=app, raise_app_exceptions=False)
+        async with app.router.lifespan_context(app):
+            _silence_managed_sinks(devnull)
+            async with httpx2.AsyncClient(
+                transport=transport, base_url="http://test"
+            ) as client:
+                semaphore = asyncio.Semaphore(request_concurrency)
 
-            statuses = await asyncio.gather(*(_request(i) for i in range(request_count)))
+                async def _request(i: int) -> int:
+                    bucket = i % 4
+                    async with semaphore:
+                        t0 = time.perf_counter()
+                        if bucket == 0:
+                            resp = await client.get(f"/work/{i}")
+                        elif bucket == 1:
+                            resp = await client.post(
+                                "/validate",
+                                json={"items": [{"sku": "A1", "qty": "invalid-int"}]},
+                            )
+                        elif bucket == 2:
+                            resp = await client.get(f"/pathology/{i}")
+                        else:
+                            resp = await client.get(f"/fail/{i}")
+                        latencies_ms.append((time.perf_counter() - t0) * 1000.0)
+                        return resp.status_code
 
-    non_200 = sum(1 for status_code in statuses if status_code != 200)
-    queue_stats = dict(get_log_queue_stats())
-    shutdown_logging()
+                statuses = await asyncio.gather(
+                    *(_request(i) for i in range(request_count))
+                )
+            flush_logging()
+            queue_stats = dict(get_log_queue_stats())
+            shutdown_logging()
 
-    if non_200:
-        raise RuntimeError(f"non_200_responses={non_200}")
+    await outbound.aclose()
+    engine.dispose()
+
+    expected_200 = sum(1 for i in range(request_count) if i % 4 in (0, 2))
+    expected_422 = sum(1 for i in range(request_count) if i % 4 == 1)
+    expected_500 = sum(1 for i in range(request_count) if i % 4 == 3)
+    actual_200 = statuses.count(200)
+    actual_422 = statuses.count(422)
+    actual_500 = statuses.count(500)
+
+    if (actual_200, actual_422, actual_500) != (
+        expected_200,
+        expected_422,
+        expected_500,
+    ):
+        raise RuntimeError(
+            f"status_mismatch got={(actual_200, actual_422, actual_500)} "
+            f"expected={(expected_200, expected_422, expected_500)}"
+        )
+
+    enqueued_total = int(queue_stats.get("enqueued_total", 0))
+    dropped_total = int(queue_stats.get("dropped_total", 0))
+    if enqueued_total < request_count:
+        raise RuntimeError(
+            f"expected enqueued_total>={request_count}, got={enqueued_total}"
+        )
+    if dropped_total > 0:
+        raise RuntimeError(f"unexpected dropped_total={dropped_total}")
+
+    latencies_ms.sort()
+    p50_ms = round(latencies_ms[int(len(latencies_ms) * 0.50)], 3)
+    p95_ms = round(latencies_ms[int(len(latencies_ms) * 0.95)], 3)
+    p99_ms = round(latencies_ms[int(len(latencies_ms) * 0.99)], 3)
 
     return (
-        f"requests={request_count} non_200=0 dropped_total={queue_stats.get('dropped_total', 0)}",
+        f"requests={request_count} (200={actual_200}, 422={actual_422}, 500={actual_500}) "
+        f"enqueued={enqueued_total} dropped={dropped_total} "
+        f"p50_ms={p50_ms} p95_ms={p95_ms} p99_ms={p99_ms}",
         {
             "requests": request_count,
             "concurrency": request_concurrency,
-            "non_200": non_200,
+            "statuses": {"200": actual_200, "422": actual_422, "500": actual_500},
+            "latency_ms": {"p50": p50_ms, "p95": p95_ms, "p99": p99_ms},
             "queue_stats": queue_stats,
         },
     )

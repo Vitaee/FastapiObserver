@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import asyncio
 import json
+import linecache
 import logging
 from typing import Any
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 import pytest
 
@@ -242,6 +243,7 @@ def test_request_line_has_db_and_http_totals_and_n_plus_one_is_reported_once(
     assert first["db"]["ms"] >= 0
     [warning] = [p for p in collector.payloads if p["message"] == "db.n_plus_one"]
     assert warning["level"] == "WARNING"
+    assert _pop_location(warning["event"])[0] == "list_orders"
     assert warning["event"] == {
         "method": "GET",
         "route": "/orders",
@@ -274,6 +276,13 @@ def test_log_bytes_are_counted_once_per_line_by_route_and_exported() -> None:
     assert get_log_bytes_by_route()[route] - before == sum(len(line) for line in request_lines)
     output = prometheus_client.generate_latest().decode()
     assert f'fastapiobserver_log_bytes_total{{route="{route}"}}' in output
+
+
+def _pop_location(event: dict[str, Any]) -> tuple[str, str]:
+    """Remove the code location; return its function and the source line it names."""
+    path, line = event.pop("code.file.path"), event.pop("code.line.number")
+    function = event.pop("code.function.name").rsplit(".", 1)[-1]
+    return function, linecache.getline(path, line).strip()
 
 
 def _n_plus_one_app(engine: Any, *, async_engine: bool = False) -> FastAPI:
@@ -326,10 +335,35 @@ def test_sqlalchemy_queries_are_counted_and_n_plus_one_reported_without_tracing(
 
     assert first["db"]["count"] == 12
     assert first["db"]["ms"] > 0
+    assert _pop_location(warnings[0]) == (
+        "list_orders", 'conn.execute(text("SELECT :order_id"), {"order_id": order_id})'
+    )
     assert warnings == [{
         "method": "GET", "route": "/orders", "count": 12,
         "statement_fingerprint": "66cbb3a40d4bbd150b75825ad291a6545399f3098fc1079e4d8b5bb061a6a481",
     }]
+
+
+def test_requests_with_an_n_plus_one_are_counted_by_route() -> None:
+    prometheus_client = pytest.importorskip("prometheus_client")
+    sqlalchemy = pytest.importorskip("sqlalchemy")
+    engine = sqlalchemy.create_engine("sqlite://")
+    app = _n_plus_one_app(engine)
+    install_observability(app, ObservabilitySettings(), metrics_enabled=True, db_engine=engine)
+
+    def counted() -> float:
+        return prometheus_client.REGISTRY.get_sample_value(
+            "fastapiobserver_db_n_plus_one_total", {"route": "/orders"}
+        ) or 0.0
+
+    before = counted()
+    client = TestClient(app)
+    client.get("/orders")
+    client.get("/orders")
+    shutdown_logging()
+
+    # The warning is written once per statement; the counter has each request.
+    assert counted() - before == 2
 
 
 def test_async_sqlalchemy_queries_are_counted_without_tracing() -> None:
@@ -346,6 +380,77 @@ def test_async_sqlalchemy_queries_are_counted_without_tracing() -> None:
 
     assert first["db"]["count"] == 12
     assert [w["count"] for w in warnings] == [12]
+    # The driver runs in a greenlet; the location is the awaiting application line.
+    assert _pop_location(warnings[0]) == (
+        "list_orders_async",
+        'await conn.execute(text("SELECT :order_id"), {"order_id": order_id})',
+    )
+
+
+def test_n_plus_one_from_response_serialization_names_the_relationship_and_no_wrapper() -> None:
+    """Lazy loads run from FastAPI's serializer, with no application code inside the
+    route: the warning names the relationship. An application middleware around the
+    request is not where they ran."""
+    sqlalchemy = pytest.importorskip("sqlalchemy")
+    from pydantic import BaseModel, ConfigDict
+    from sqlalchemy import orm
+    from sqlalchemy.pool import StaticPool
+
+    Base = orm.declarative_base()
+
+    class Order(Base):
+        __tablename__ = "orders"
+        id = sqlalchemy.Column(sqlalchemy.Integer, primary_key=True)
+        items = orm.relationship("Item")
+
+    class Item(Base):
+        __tablename__ = "items"
+        id = sqlalchemy.Column(sqlalchemy.Integer, primary_key=True)
+        order_id = sqlalchemy.Column(sqlalchemy.ForeignKey("orders.id"))
+
+    class ItemOut(BaseModel):
+        model_config = ConfigDict(from_attributes=True)
+        id: int
+
+    class OrderOut(BaseModel):
+        model_config = ConfigDict(from_attributes=True)
+        items: list[ItemOut]
+
+    engine = sqlalchemy.create_engine(
+        "sqlite://", poolclass=StaticPool, connect_args={"check_same_thread": False}
+    )
+    Base.metadata.create_all(engine)
+    with orm.Session(engine) as session:
+        session.add_all([Order(items=[Item()]) for _ in range(12)])
+        session.commit()
+
+    class Wrapper:
+        def __init__(self, app: Any) -> None:
+            self.app = app
+
+        async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
+            await self.app(scope, receive, send)
+
+    app = FastAPI()
+    app.add_middleware(Wrapper)
+
+    def get_session() -> Any:
+        with orm.Session(engine) as session:
+            yield session  # Open until the response is sent, as lazy loads need.
+
+    @app.get("/orders", response_model=list[OrderOut])
+    async def list_orders(session: Any = Depends(get_session)) -> Any:
+        return session.scalars(sqlalchemy.select(Order)).all()
+
+    first, warnings = _request_db_totals_and_warnings(
+        app, ObservabilitySettings(), db_engine=engine
+    )
+
+    assert first["db"]["count"] == 13
+    assert warnings == [{
+        "method": "GET", "route": "/orders", "count": 12, "relationship": "Order.items",
+        "statement_fingerprint": warnings[0]["statement_fingerprint"],
+    }]
 
 
 def test_sqlalchemy_queries_count_once_with_tracing_on(

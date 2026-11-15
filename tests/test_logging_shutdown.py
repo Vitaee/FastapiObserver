@@ -234,3 +234,32 @@ shutdown_logging()
     )
 
     assert completed.returncode == 0, completed.stderr
+
+
+def test_logging_survives_another_configuration_closing_every_handler() -> None:
+    """dictConfig() and fileConfig() close every existing handler and leave it
+    attached. uvicorn.run(app) does so after the application was imported."""
+    import logging.config
+
+    class Sink(logging.Handler):
+        def __init__(self) -> None:
+            super().__init__()
+            self.messages: list[str] = []
+
+        def emit(self, record: logging.LogRecord) -> None:
+            self.messages.append(record.getMessage())
+
+    sink = Sink()
+    setup_logging(ObservabilitySettings(), logs_mode="otlp", extra_handlers=[sink])
+    producer = next(h for h in logging.getLogger().handlers if h in state._MANAGED_HANDLERS)
+    try:
+        logging.config.dictConfig({"version": 1, "disable_existing_loggers": False})
+        logging.getLogger("tests.shutdown").warning("after another configuration")
+        assert flush_logging(timeout_seconds=2)
+        assert sink.messages == ["after another configuration"]
+    finally:
+        shutdown_logging()
+
+    # This library's own teardown still refuses records: nothing reads the queue.
+    producer.handle(logging.makeLogRecord({"msg": "after teardown"}))
+    assert producer.queue.empty()

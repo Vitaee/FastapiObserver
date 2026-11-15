@@ -2,8 +2,12 @@ from __future__ import annotations
 
 import logging
 import math
+import os
+import sys
+import sysconfig
 import threading
 from hashlib import sha256
+from types import FrameType
 from collections import deque
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
@@ -11,7 +15,7 @@ from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import Any
 
-from .core.recording import CallOwner
+from .core.recording import CallKind, CallOwner
 __all__ = [
     "UNMATCHED_ROUTE",
     "RequestState",
@@ -48,6 +52,61 @@ UNMATCHED_ROUTE = "<unmatched>"
 _MAX_REQUEST_STATEMENTS = 128
 _MAX_ERROR_CATEGORIES = 32
 _DIAGNOSTICS = frozenset({"db.n_plus_one", "threadpool.saturated", "db.pool_exhausted"})
+# The same statement this many times in one request is usually a query per item
+# in a loop (N+1), which one query with a join or IN would replace.
+# ponytail: fixed threshold; make it a setting if it's too noisy or quiet for someone.
+_N_PLUS_ONE_MIN_REPEATS = 10
+_LIBRARY_DIRS = (
+    "<",  # frozen modules and code compiled from strings
+    os.path.dirname(os.path.abspath(__file__)),
+    sysconfig.get_path("stdlib"),
+    sysconfig.get_path("platstdlib"),
+)
+# Past the router or the event loop, application frames wrap or serve the request,
+# such as an ASGI middleware or the script that started the server. Queries with
+# no application code inside, such as relationships lazy-loaded while the response
+# is serialized, get no location rather than one of those.
+_REQUEST_BOUNDARIES = tuple(os.sep + os.path.join(*parts) for parts in (
+    ("fastapi", "routing.py"), ("starlette", "routing.py"),
+    ("asyncio", "base_events.py"), ("asyncio", "runners.py"),
+))
+
+
+# ponytail: an application installed into site-packages gets no location; add a
+# setting naming its packages if someone deploys that way.
+def _app_code_location() -> dict[str, str | int] | None:
+    """The innermost running line outside this package, the standard library and
+    installed packages: for a query, the application line that ran it."""
+    try:
+        frame: FrameType | None = sys._getframe(1)
+        greenlet = sys.modules.get("greenlet")
+        current = greenlet.getcurrent() if greenlet is not None else None
+        while True:
+            while frame is not None:
+                code = frame.f_code
+                filename = code.co_filename
+                if filename.endswith(_REQUEST_BOUNDARIES):
+                    return None
+                if not (filename.startswith(_LIBRARY_DIRS) or "site-packages" in filename
+                        or "dist-packages" in filename):
+                    module = frame.f_globals.get("__name__")
+                    return {
+                        "code.file.path": filename,
+                        "code.line.number": frame.f_lineno,
+                        "code.function.name": (
+                            f"{module}.{code.co_qualname}" if module else code.co_qualname
+                        ),
+                    }
+                frame = frame.f_back
+            # SQLAlchemy's async engines run the driver in a greenlet whose own
+            # frames end inside SQLAlchemy; the awaiting code is on its parent's.
+            current = getattr(current, "parent", None)
+            if current is None:
+                return None
+            frame = current.gr_frame
+    except Exception:
+        # A diagnostic must never fail the query it describes.
+        return None
 
 
 def _add_error(errors: dict[str, int], error: str) -> None:
@@ -62,14 +121,20 @@ class SQLExecutions:
     succeeded: int = 0
     failed: int = 0
     failed_seconds: float = 0.0
+    conn_held_seconds: float = 0.0
     errors: dict[str, int] = field(default_factory=dict)
 
     def summary(self) -> dict[str, Any]:
-        return {"attempted": self.attempted, "succeeded": self.succeeded,
-                "failed": self.failed,
-                "in_flight": self.attempted - self.succeeded - self.failed,
-                "failed_ms": round(self.failed_seconds * 1000, 3),
-                "errors": dict(self.errors)}
+        result: dict[str, Any] = {
+            "attempted": self.attempted, "succeeded": self.succeeded,
+            "failed": self.failed,
+            "in_flight": self.attempted - self.succeeded - self.failed,
+            "failed_ms": round(self.failed_seconds * 1000, 3),
+            "errors": dict(self.errors),
+        }
+        if self.conn_held_seconds > 0:
+            result["conn_held_ms"] = round(self.conn_held_seconds * 1000, 3)
+        return result
 
 
 @dataclass(eq=False, slots=True, weakref_slot=True)
@@ -104,6 +169,16 @@ class RequestState:
     dropped_spans: int = 0
     observer_logging: bool = False
     retention_reason: str | None = None
+    # fingerprint -> the application code and ORM relationship that ran it, for
+    # statements repeated enough
+    statement_origins: dict[str, dict[str, str | int]] = field(default_factory=dict)
+    http_targets: dict[str, int] = field(default_factory=dict)
+    validation_errors: list[dict[str, str]] | None = None
+    active_db_connections: int = 0
+    conn_held_during_http: dict[str, str | int] | None = None
+    observed_diagnostics: set[str] | None = None
+    disconnected: bool = False
+    after_disconnect_calls: dict[str, int] | None = None
     _diagnostics: set[str] | None = field(default=None, repr=False)
     _call_owner_token: CallOwner | None = field(default=None, repr=False)
 
@@ -130,6 +205,7 @@ class RequestState:
     def _record_call(
         self, kind: str, seconds: float, statement: str | None = None, *,
         error: str | None = None, source: str = "manual", started: bool = False,
+        relationship: str | None = None,
     ) -> bool:
         with _CALLS_LOCK:
             if self.closed:
@@ -156,17 +232,100 @@ class RequestState:
             if source == "sqlalchemy" and self.sql is not None:
                 self.sql.succeeded += 1
             self._complete_call(kind, source, started)
+            repeated = None
+            targets = self.statements if kind == "db" else self.http_targets
             if statement:
                 # SQL is never retained in request state or emitted by N+1 warnings.
                 fingerprint = sha256(statement.encode("utf-8", errors="replace")).hexdigest()
-                if fingerprint in self.statements or len(self.statements) < _MAX_REQUEST_STATEMENTS:
-                    self.statements[fingerprint] = self.statements.get(fingerprint, 0) + 1
-            return True
+                if fingerprint in targets or len(targets) < _MAX_REQUEST_STATEMENTS:
+                    count = targets[fingerprint] = targets.get(fingerprint, 0) + 1
+                    if count == _N_PLUS_ONE_MIN_REPEATS:
+                        repeated = fingerprint
+                        if self.observed_diagnostics is None:
+                            self.observed_diagnostics = set()
+                        self.observed_diagnostics.add(f"{kind}.n_plus_one")
+        if repeated is not None:
+            # Walk the stack once, when a statement first looks like N+1, so other
+            # queries pay nothing; outside the lock every request shares.
+            origin = _app_code_location() or {}
+            if relationship is not None:
+                origin["relationship" if kind == "db" else "target"] = relationship
+            if origin:
+                with _CALLS_LOCK:
+                    if not self.closed:
+                        self.statement_origins[repeated] = origin
+        return True
 
     def _complete_call(self, kind: str, source: str, started: bool) -> None:
         self.call_sources.setdefault(kind, set()).add(source)
         if started:
             self.pending_calls[kind] = max(0, self.pending_calls.get(kind, 0) - 1)
+        if self.disconnected:
+            if self.after_disconnect_calls is None:
+                self.after_disconnect_calls = {}
+            self.after_disconnect_calls[kind] = self.after_disconnect_calls.get(kind, 0) + 1
+
+    def record_diagnostic_fact(self, name: str) -> None:
+        with _CALLS_LOCK:
+            if not self.closed:
+                if self.observed_diagnostics is None:
+                    self.observed_diagnostics = set()
+                self.observed_diagnostics.add(name)
+
+    def on_db_checkout(self) -> None:
+        with _CALLS_LOCK:
+            if not self.closed:
+                if self.sql is None:
+                    self.sql = SQLExecutions()
+                self.active_db_connections += 1
+
+    def on_db_checkin(self, held_seconds: float) -> None:
+        with _CALLS_LOCK:
+            if self.closed:
+                return
+            self.active_db_connections = max(0, self.active_db_connections - 1)
+            if self.sql is not None:
+                total = self.sql.conn_held_seconds + max(0.0, held_seconds)
+                if math.isfinite(total * 1000):
+                    self.sql.conn_held_seconds = total
+
+    def on_http_start(self, target: str | None) -> None:
+        if self.active_db_connections <= 0 or self.conn_held_during_http is not None:
+            return
+        with _CALLS_LOCK:
+            if (
+                self.closed
+                or self.active_db_connections <= 0
+                or self.conn_held_during_http is not None
+            ):
+                return
+            self.conn_held_during_http = {
+                "target": target[:200] if target else "<unknown>"
+            }
+        origin = _app_code_location()
+        if origin:
+            with _CALLS_LOCK:
+                if not self.closed and self.conn_held_during_http is not None:
+                    self.conn_held_during_http.update(origin)
+
+    def check_conn_held_during_http(self) -> dict[str, str | int] | None:
+        if self.conn_held_during_http is None:
+            return None
+        with _CALLS_LOCK:
+            if self.closed or self.conn_held_during_http is None:
+                return None
+            db_seconds = self.calls.get("db", (0.0, 0.0))[1]
+            if (
+                self.active_db_connections <= 0
+                and self.sql is not None
+                and self.sql.conn_held_seconds < db_seconds * 10.0
+            ):
+                self.conn_held_during_http = None
+                return None
+            if self.observed_diagnostics is None:
+                self.observed_diagnostics = set()
+            self.observed_diagnostics.add("db.connection_held_during_http")
+            return self.conn_held_during_http
 
     def drop_span(self) -> None:
         with _CALLS_LOCK:
@@ -200,9 +359,15 @@ class RequestState:
             # Diagnostics must never replace an application result or exception.
             pass
 
-    def most_repeated_statement(self) -> tuple[str, int] | None:
+    def most_repeated_statement(
+        self, kind: CallKind = "db"
+    ) -> tuple[str, int, dict[str, str | int]] | None:
+        """Its fingerprint, count and, once repeated enough, what is known of its origin:
+        the application code location and the ORM relationship or HTTP target."""
         with _CALLS_LOCK:
-            return max(self.statements.items(), key=lambda item: item[1], default=None)
+            targets = self.statements if kind == "db" else self.http_targets
+            top = max(targets.items(), key=lambda item: item[1], default=None)
+            return None if top is None else (*top, self.statement_origins.get(top[0], {}))
 
     def _observation(self) -> dict[str, Any]:
         if not self.call_sources and not self.dropped_spans:
@@ -243,6 +408,14 @@ class RequestState:
         self.closed = True
         self.calls, self.call_errors = {}, {}
         self.statements.clear()
+        self.statement_origins.clear()
+        self.http_targets.clear()
+        self.validation_errors = None
+        self.active_db_connections = 0
+        self.conn_held_during_http = None
+        self.observed_diagnostics = None
+        self.disconnected = False
+        self.after_disconnect_calls = None
         self.http_span_ids.clear()
         self.held_logs = None
         self.user_context = None

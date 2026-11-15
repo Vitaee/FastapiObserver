@@ -74,6 +74,8 @@ def _teardown_handlers_locked(suppress_errors: bool = True) -> None:
     for handler in list(state._MANAGED_HANDLERS):
         root_logger.removeHandler(handler)
         try:
+            if isinstance(handler, OverflowPolicyQueueHandler):
+                handler.stop_accepting()
             handler.close()
         except Exception as exc:
             if not suppress_errors:

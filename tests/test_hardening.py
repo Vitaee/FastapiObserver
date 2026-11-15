@@ -1,5 +1,6 @@
 """Regression proofs for diagnostic privacy and bounded state."""
 
+import asyncio
 import io
 import json
 import logging
@@ -85,6 +86,20 @@ def test_query_diagnostics_retain_only_bounded_fingerprints(caplog):
                 "GET", "/report", RequestState({}, statements={f"{number:064x}": 12})
             )
     assert len(middleware._reported_statements) <= 1_024
+
+
+def test_code_location_stops_at_the_event_loop_instead_of_naming_what_started_it():
+    state = RequestState({})
+
+    async def serve():
+        loop = asyncio.get_running_loop()
+        for _ in range(12):  # Run by the loop, with no application code inside.
+            loop.call_soon(state.add_call, "db", 0.001, "SELECT 1")
+        await asyncio.sleep(0)
+
+    asyncio.run(serve())  # This frame stands for the script that started the server.
+    assert list(state.statements.values()) == [12]
+    assert state.statement_origins == {}
 
 
 def test_queue_preparation_failure_does_not_dump_original_arguments():

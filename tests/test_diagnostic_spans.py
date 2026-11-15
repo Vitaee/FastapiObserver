@@ -80,6 +80,8 @@ def test_n_plus_one_reaches_each_server_span_before_transport_ends_it(
         assert dict(event.attributes) == {
             "count": 12, "threshold": 10,
             "statement_fingerprint": sha256(statement.encode()).hexdigest(),
+            "code.file.path": __file__, "code.line.number": app.__code__.co_firstlineno + 3,
+            "code.function.name": f"{__name__}.{app.__qualname__}",
         }
         assert "private" not in str(event.attributes)
 
