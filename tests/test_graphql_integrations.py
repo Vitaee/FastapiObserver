@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+from typing import Any
 
 import pytest
 import strawberry
@@ -79,16 +80,12 @@ def test_the_current_span_is_named_after_the_operation() -> None:
     ids=["fastapi-tracing", "instrumentation"],
 )
 def test_the_request_span_is_named_after_the_operation(
-    monkeypatch: pytest.MonkeyPatch, telemetry: dict[str, bool]
+    span_exporter: Any, telemetry: dict[str, bool]
 ) -> None:
     trace_api = pytest.importorskip("opentelemetry.trace")
-    in_memory = pytest.importorskip("opentelemetry.sdk.trace.export.in_memory_span_exporter")
-    import fastapiobserver.otel.tracing as otel_tracing_module
     from fastapiobserver import OTelSettings
     from fastapiobserver.otel.native import native_telemetry_config
 
-    exporter = in_memory.InMemorySpanExporter()
-    monkeypatch.setattr(otel_tracing_module, "build_otlp_exporter", lambda *_: exporter)
     app = FastAPI(telemetry=telemetry)  # type: ignore[arg-type]
     if telemetry.get("tracing", True) and native_telemetry_config(app) is None:
         pytest.skip("FastAPI traces requests itself from 0.142")
@@ -105,6 +102,7 @@ def test_the_request_span_is_named_after_the_operation(
     flush_logging()
 
     assert response.status_code == 200
-    [server] = [s for s in exporter.get_finished_spans() if s.kind == trace_api.SpanKind.SERVER]
+    spans = span_exporter.get_finished_spans()
+    [server] = [s for s in spans if s.kind == trace_api.SpanKind.SERVER]
     assert server.name == "graphql.operation.Greet"
     assert server.attributes["graphql.operation.name"] == "Greet"

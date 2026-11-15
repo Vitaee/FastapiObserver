@@ -63,10 +63,7 @@ flowchart TB
 
 Purple is fastapi-observer, green is where data leaves the process, and orange is what you run already. The optional runtime control endpoint is left out.
 
-These diagrams show the default library-owned logging pipeline. With
-`configure_logging=False`, diagnostics use the application's existing handlers,
-sanitizer, formatting, export and shutdown. The library adds no logging queue or
-log exporter in that mode. See [application-owned logging](logging.md#application-owned-logging).
+These diagrams show the default logging pipeline. For `configure_logging=False`, see [application-owned logging](logging.md#application-owned-logging).
 
 ## What `install_observability()` Wires Up
 
@@ -77,7 +74,7 @@ log exporter in that mode. See [application-owned logging](logging.md#applicatio
 5. Optional OTel metrics setup, and OTel logs when enabled with library-owned logging.
 6. Request logging middleware with correlation, body-capture controls and context cleanup.
 7. Runtime control endpoint when runtime control is enabled.
-8. A lifespan hook that runs diagnostic watchers and flushes library-managed logging and the OTel providers it uses when the app stops.
+8. A lifespan hook that runs diagnostic watchers, discovers routes to leave out of [metrics](configuration.md#metrics) and traces, and flushes library-managed logging and the OTel providers it uses when the app stops.
 
 ## One request
 
@@ -117,11 +114,11 @@ sequenceDiagram
   M->>M: N+1 check, then clear the context
 ```
 
-- The request ID comes from `X-Request-ID` only when the peer is a trusted proxy. Otherwise it's a new UUID. The HTTPX/HTTPX2 and Requests client helpers forward it without tracing; with OpenTelemetry, instrumented clients can send it alongside `traceparent`.
-- A request that takes `OBS_LOG_SLOW_REQUEST_MS` or longer has its sampled-out records written too, and so does every request that fails.
-- The request line is redacted before it's written. It also counts completed database queries and outbound HTTP calls (`db` and `http`, each with `count` and `ms`): SQLAlchemy queries from its events, HTTPX/HTTPX2 and Requests from explicitly installed client helpers, and other clients from sampled spans. HTTP failures add bounded categories in `http.errors`; a call and its span count once.
-- HTTP metrics and `duration_ms` stop at the final successful response send (or interruption). `app_duration_ms` includes background work and cleanup. The request log is emitted at application completion, retaining later failures without changing an already-sent status. See [timing semantics](logging.md#what-the-durations-mean).
-- Requests no route matches, such as scanners, CORS preflights and requests an auth middleware rejects, share one `<unmatched>` metrics label, and made-up methods share `_OTHER`. No client can add a time series per URL or per method.
+- Trusted request IDs: [decision 0003](decisions/0003-trust-only-known-peers.md). Forwarding them: [request ID forwarding](opentelemetry.md#request-id-forwarding).
+- Held and sampled records: [sampling request logs](logging.md#sampling-request-logs).
+- `db` and `http` totals: [query count and time](db-tracing.md#query-count-and-time-on-the-request-line) and [outbound HTTP diagnostics](opentelemetry.md#outbound-http-diagnostics).
+- `duration_ms` and `app_duration_ms`: [what the durations mean](logging.md#what-the-durations-mean).
+- Metric labels for unmatched requests and made-up methods: [decision 0011](decisions/0011-every-unmatched-request-shares-one-label.md).
 
 ## The log pipeline
 
@@ -173,7 +170,7 @@ flowchart TB
 
 ## Diagnosing "slow, but CPU is low"
 
-This is the question asked most in FastAPI's GitHub Discussions about production. Requests are waiting, not working, and each place they can wait has its own warning.
+Requests are waiting, not working, and each place they can wait has its own warning.
 
 ```mermaid
 flowchart TD
@@ -206,20 +203,9 @@ flowchart TD
 ```
 
 - `event_loop.blocked` needs `OBS_LOOP_BLOCK_THRESHOLD_MS`. The pool warnings are always on. SQLAlchemy query totals and explicitly installed HTTP client diagnostics do not need tracing.
-- `request.cancelled` means the application received cancellation. It does not identify whether the cause was a client disconnect, a timeout or shutdown. An `http.disconnect` observed before response completion produces `request.client_disconnected`; the middleware adds no reader, so an application that never receives the event can leave a disconnect unobserved. Further shutdown attribution is covered by the [roadmap](roadmap.md#delivery-and-shutdown-contract).
+- For `request.cancelled` and `request.client_disconnected`, see [client disconnects and shutdown](servers.md#client-disconnects-and-shutdown).
 
-### Route Exclusion Auto-Discovery
-
-At application lifespan start, observability scans registered routes and auto-discovers paths that should be excluded from telemetry noise:
-
-- FastAPI utility routes such as `/docs`, `/redoc`, `/openapi.json`
-- Routes marked `include_in_schema=False`
-
-Discovered paths are normalized (including dynamic path variants like `/:id`) and used for metrics exclusion. They're added to the trace exclusions too, unless those were set explicitly, with `OBS_OTEL_EXCLUDED_URLS` or OpenTelemetry's `OTEL_PYTHON_*_EXCLUDED_URLS`.
-
-### Internal Package Layout (Contributor Map)
-
-The project is now organized as focused subpackages instead of large monolithic modules:
+## Internal Package Layout (Contributor Map)
 
 - `fastapiobserver/logging/`: formatter, queueing, filters, setup lifecycle, sink circuit-breakers.
 - `fastapiobserver/middleware/`: request logging orchestration, context, IP resolution, headers, body capture, metrics hooks.
@@ -236,5 +222,3 @@ The project is now organized as focused subpackages instead of large monolithic 
 - `testing.py`: `assert_query_budget()`, a native SQL query budget for tests.
 
 The top-level `fastapiobserver` package exports only the names in its `__init__.py`. Everything else is imported from its submodule, without the same promise of stability.
-
----

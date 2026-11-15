@@ -3,83 +3,45 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+import pytest
+
 from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 
 from fastapiobserver import ObservabilitySettings, SecurityPolicy, install_observability
 
 
-def _build_app(policy: SecurityPolicy) -> FastAPI:
+@pytest.mark.parametrize(
+    ("media_types", "content", "content_type", "captured"),
+    [
+        (("application/json",), b'{"hello": "world"}', "application/json", True),
+        (("application/json",), b"\x00\x01\x02", "application/octet-stream", False),
+        (None, b"\x00\x01\x02", "application/octet-stream", True),
+    ],
+)
+def test_request_body_capture_follows_the_media_type_allowlist(
+    caplog: Any, media_types: tuple[str, ...] | None, content: bytes, content_type: str,
+    captured: bool,
+) -> None:
     app = FastAPI()
 
     @app.post("/echo")
     async def echo(request: Request) -> dict[str, int]:
-        payload = await request.body()
-        return {"size": len(payload)}
+        return {"size": len(await request.body())}
 
     install_observability(
         app,
         ObservabilitySettings(app_name="test", service="svc", environment="test"),
-        security_policy=policy,
+        security_policy=SecurityPolicy(log_request_body=True, body_capture_media_types=media_types),
         metrics_enabled=False,
     )
-    return app
-
-
-def _latest_event(caplog: Any) -> dict[str, Any]:
-    for record in reversed(caplog.records):
-        if record.name == "fastapiobserver.middleware" and hasattr(record, "event"):
-            return record.event
-    raise AssertionError("No middleware log event found")
-
-
-def test_json_body_captured_when_in_allowlist(caplog: Any) -> None:
-    app = _build_app(
-        SecurityPolicy(
-            log_request_body=True,
-            body_capture_media_types=("application/json",),
-        )
-    )
-
-    with caplog.at_level(logging.INFO, logger="fastapiobserver.middleware"):
-        response = TestClient(app).post("/echo", json={"hello": "world"})
-
-    assert response.status_code == 200
-    event = _latest_event(caplog)
-    assert "request_body" in event
-    assert "hello" in event["request_body"]
-
-
-def test_binary_body_not_captured_when_not_in_allowlist(caplog: Any) -> None:
-    app = _build_app(
-        SecurityPolicy(
-            log_request_body=True,
-            body_capture_media_types=("application/json",),
-        )
-    )
-
     with caplog.at_level(logging.INFO, logger="fastapiobserver.middleware"):
         response = TestClient(app).post(
-            "/echo",
-            content=b"\x00\x01\x02",
-            headers={"content-type": "application/octet-stream"},
+            "/echo", content=content, headers={"content-type": content_type}
         )
 
     assert response.status_code == 200
-    event = _latest_event(caplog)
-    assert "request_body" not in event
-
-
-def test_all_bodies_captured_when_allowlist_is_none(caplog: Any) -> None:
-    app = _build_app(SecurityPolicy(log_request_body=True))
-
-    with caplog.at_level(logging.INFO, logger="fastapiobserver.middleware"):
-        response = TestClient(app).post(
-            "/echo",
-            content=b"\x00\x01\x02",
-            headers={"content-type": "application/octet-stream"},
-        )
-
-    assert response.status_code == 200
-    event = _latest_event(caplog)
-    assert "request_body" in event
+    [event] = [r.event for r in caplog.records if r.name == "fastapiobserver.middleware"]
+    assert ("request_body" in event) is captured
+    if captured and media_types:
+        assert "hello" in event["request_body"]

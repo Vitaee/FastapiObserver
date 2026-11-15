@@ -4,6 +4,22 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+- Docs that did not match 2.4.0:
+  - CPU figures in the README and on the benchmarks page are re-measured for 2.4.0, next to 2.3.0 on the same machine: about 42 µs per request by default and 26 µs with application-owned logging. An outbound call through `instrument_httpx_client` adds about 55 µs, not the 12 µs the page stated. The end-to-end latency table is removed because no script in the repository produces it.
+  - `http.timeout_missing` is documented in the OpenTelemetry guide.
+  - The `db.n_plus_one` and `threadpool.saturated` triggers, the compatibility probe's excluded fields, and the backends page's screenshot link match the code.
+
+### Maintenance
+- The docs are about 1,270 lines shorter:
+  - ROADMAP.md is rewritten around 2.4.0, from 792 lines to 58.
+  - `spec/README.md` is the one source for operation-event rules. `operation-contract.md` and `tuning.md` are removed, and the URL-exclusion note moved to the configuration guide.
+  - Content that appeared on several pages now lives on one and is linked from the others.
+- The test suite is about 1,600 lines shorter and runs in about 25s instead of 47s, with the same coverage. Shared helpers are in `tests/helpers.py`, the full-stack example tests share one server, repeated tests are parametrized, and tests that repeated others are removed.
+
+### Testing
+- Three tests could not fail: the forwarded-headers warning test looked for text the warning never has, a content-type check compared a value with itself, and the metrics-extra test passed whether or not the extra was installed.
+
 ## [2.4.0] - 2026-11-16
 
 ### Added
@@ -11,13 +27,13 @@ All notable changes to this project will be documented in this file.
 - The warning also names the ORM relationship being loaded, as `relationship`, such as `Order.items`. That identifies lazy loads that run while FastAPI serializes the response, where no application code is on the stack. It uses SQLAlchemy's `do_orm_execute` event for every `Session` in the process.
 - Prometheus counters for the diagnostics, so they can be graphed and alerted on: `fastapiobserver_db_n_plus_one_total{route}`, `fastapiobserver_http_n_plus_one_total{route}`, `fastapiobserver_db_connection_held_during_http_total{route}`, `fastapiobserver_http_validation_errors_total{route,field}`, `fastapiobserver_db_pool_exhausted_total{engine}`, `fastapiobserver_threadpool_saturated_total` and `fastapiobserver_event_loop_blocked_total`. They count every occurrence, not only the rate-limited warnings, and are exported in multiprocess mode.
 - WebSocket session diagnostics (`websocket.closed`, `websocket.rejected`, `websocket.failed`) with `close_code`, `messages_sent`, `messages_received`, `bytes_sent`, `bytes_received`, `db`/`http` totals, and per-session `diagnostics`.
-- Zero-tracing request diagnostics: `event.diagnostics` list on affected requests, `422` `validation_errors` field locations and types (never raw input values), startup route checks (`route.shadowed`, `route.duplicate`), `http.timeout_missing` and `http.n_plus_one` warnings, `db.connection_held_during_http` (when a connection overlaps an outbound HTTP call and `conn_held_ms >= 10 * db.ms`), `response_bytes`, `after_disconnect_calls`, `error.fingerprint`, and URL credential stripping in exception messages and tracebacks.
-- `fastapiobserver_log_bytes_total{route}` counter tracking JSON log volume by route template, and terminal event short-circuiting when fast `INFO` requests are dropped by `OBS_LOG_SAMPLE_RATE`.
+- Zero-tracing request diagnostics: `event.diagnostics` list on affected requests, `422` `validation_errors` field locations and types (never raw input values), startup route checks (`route.shadowed`, `route.duplicate`), `http.timeout_missing` and `http.n_plus_one` warnings, `db.connection_held_during_http` (when a connection overlaps an outbound HTTP call and `conn_held_ms >= 10 * db.ms`), `response_bytes` and `after_disconnect_calls`.
+- A request whose line the log level or `OBS_LOG_SAMPLE_RATE` would drop no longer builds and redacts that line first.
 
 ### Fixed
 - Logs are no longer lost after another logging configuration runs. `logging.config.dictConfig()` and `fileConfig()` close every existing handler, and this library's queue handler then refused every later record without counting it. That happened with `uvicorn.run(app)`, which configures uvicorn's logging after the app is imported: request lines and warnings stopped after startup. The [server guide](https://vitaee.github.io/FastapiObserver/servers/#uvicorn) shows how to keep uvicorn's own lines as JSON in that case.
 - Docs that no longer matched 2.3.0 are corrected:
-  - the README's CPU cost (about 55 µs per request in 2.3.0, not 49 µs) and the benchmarks page, which now has the 2.3.0 figures and says which version its older table measured;
+  - the README's CPU cost and the benchmarks page;
   - the supported versions in `SECURITY.md`;
   - the logging guide's list of request events and fields, which lacked `request.client_disconnected` and the fields added in 2.3.0, and its sample line;
   - the README's claim that request IDs reach every service you call: they're forwarded through the client helpers, `inject_trace_headers()` and OpenTelemetry-instrumented clients;

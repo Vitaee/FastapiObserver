@@ -1,17 +1,10 @@
 # Kubernetes Deployment Guide (FastAPI Observer)
 
-This guide deploys a complete observability stack to Kubernetes using only:
-
-```bash
-kubectl kustomize --load-restrictor=LoadRestrictionsNone examples/k8s | kubectl apply -f -
-```
-
-Why this command: the k8s example reuses the dashboard JSON from `examples/full_stack/...`, which is outside the `examples/k8s` folder. `LoadRestrictionsNone` allows that shared-file reference.
-
-After deployment, Grafana will show:
-- Metrics from Prometheus (`/metrics` scraped from `app-a`, `app-b`, `app-c`)
-- Structured logs from Loki (via OTel Collector OTLP pipeline)
-- Traces in Tempo (including cross-service `/chain` requests)
+`examples/k8s` deploys three FastAPI services, a traffic generator, an
+OpenTelemetry Collector, Prometheus, Loki, Tempo and Grafana into the
+`observability` namespace. Grafana shows metrics scraped from `/metrics` on
+`app-a`, `app-b` and `app-c`, logs sent to Loki through the Collector, and
+traces in Tempo, including cross-service `/chain` requests.
 
 ## Architecture
 
@@ -44,6 +37,9 @@ flowchart LR
 ```bash
 kubectl kustomize --load-restrictor=LoadRestrictionsNone examples/k8s | kubectl apply -f -
 ```
+
+`--load-restrictor=LoadRestrictionsNone` lets Kustomize read the dashboard JSON
+from `examples/full_stack`, outside the `examples/k8s` folder.
 
 Wait for all Deployments:
 
@@ -92,14 +88,12 @@ kubectl -n observability port-forward svc/loki 3100:3100
 kubectl -n observability port-forward svc/tempo 3200:3200
 ```
 
-## Key Production Notes
+## Production differences
 
-This example is intentionally zero-glue and demo-first. For production:
-- Build and pin your own app image instead of runtime `pip install` in the app Pods.
-- Add persistent volumes for Loki/Tempo/Prometheus.
-- Add auth/TLS for Grafana and telemetry backends.
-- Set resource requests/limits according to real traffic.
-- Add PodDisruptionBudgets and anti-affinity for HA.
+The app Pods run `pip install` at startup, and Loki, Tempo and Prometheus have no
+persistent volumes. Grafana allows anonymous access, and the Collector sends to
+Tempo and Loki over plain HTTP. Build your own image, add storage and turn on
+authentication and TLS before running this outside a demo.
 
 ## Cleanup
 

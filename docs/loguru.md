@@ -74,10 +74,3 @@ Do not install both directions at the same time:
 - stdlib -> Loguru intercept
 
 Running both in one process can create recursive log loops.
-
-## Migration Playbook (Low Risk)
-
-1. Keep existing `loguru` calls and add `install_loguru_bridge()`.
-2. Verify logs in staging (fields, redaction, request IDs, trace IDs).
-3. Migrate module-by-module to stdlib logging only if you want to simplify dependencies.
-4. Remove bridge once all call sites are stdlib.

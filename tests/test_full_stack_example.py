@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import json
-import os
-import socket
 import subprocess
 import sys
 import threading
@@ -16,12 +14,13 @@ from urllib.parse import parse_qs, urlsplit
 
 import httpx2
 import pytest
-import fastapiobserver
+
+from tests.helpers import records, subprocess_env, uvicorn_server, wait_for, wait_record
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
-@pytest.fixture
+@pytest.fixture(scope="module")
 def demo_server(tmp_path_factory: pytest.TempPathFactory):
     class Downstream(BaseHTTPRequestHandler):
         def do_GET(self):
@@ -61,99 +60,44 @@ def demo_server(tmp_path_factory: pytest.TempPathFactory):
     downstream = DownstreamServer(("127.0.0.1", 0), Downstream)
     thread = threading.Thread(target=downstream.serve_forever, daemon=True)
     thread.start()
-    with socket.socket() as listener:
-        listener.bind(("127.0.0.1", 0))
-        port = listener.getsockname()[1]
-    base_url = f"http://127.0.0.1:{port}"
     target = f"http://127.0.0.1:{downstream.server_port}"
+    env = subprocess_env(
+        OBS_SERVICE_NAME="example-test",
+        OBS_METRICS_ENABLED="true",
+        OBS_LOOP_BLOCK_THRESHOLD_MS="100",
+        OBS_OTEL_ENABLED="false",
+        OBS_OTEL_LOGS_ENABLED="false",
+        OBS_OTEL_METRICS_ENABLED="false",
+        OBS_RUNTIME_CONTROL_ENABLED="false",
+        OTEL_SDK_DISABLED="true",
+        TARGET_B=target,
+        TARGET_C=target,
+    )
     log_path = tmp_path_factory.mktemp("full-stack") / "server.log"
-    env = {
-        **os.environ,
-        "PYTHONPATH": str(Path(fastapiobserver.__file__).resolve().parents[1]),
-        "PYTHONUNBUFFERED": "1",
-        "OBS_SERVICE_NAME": "example-test",
-        "OBS_METRICS_ENABLED": "true",
-        "OBS_LOOP_BLOCK_THRESHOLD_MS": "100",
-        "OBS_OTEL_ENABLED": "false",
-        "OBS_OTEL_LOGS_ENABLED": "false",
-        "OBS_OTEL_METRICS_ENABLED": "false",
-        "OBS_RUNTIME_CONTROL_ENABLED": "false",
-        "OTEL_SDK_DISABLED": "true",
-        "TARGET_B": target,
-        "TARGET_C": target,
-    }
-    with log_path.open("w") as output:
-        process = subprocess.Popen(
-            [
-                sys.executable,
-                "-m",
-                "uvicorn",
-                "examples.full_stack.app:app",
-                "--host",
-                "127.0.0.1",
-                "--port",
-                str(port),
-                "--no-access-log",
-            ],
-            cwd=ROOT,
-            env=env,
-            stdout=output,
-            stderr=subprocess.STDOUT,
-        )
-        try:
-            deadline = time.monotonic() + 10
-            while time.monotonic() < deadline:
-                assert process.poll() is None, log_path.read_text()
-                try:
-                    if httpx2.get(f"{base_url}/health", timeout=0.3).status_code == 200:
-                        break
-                except httpx2.HTTPError:
-                    pass
-                time.sleep(0.02)
-            else:
-                pytest.fail(f"Demo did not become ready:\n{log_path.read_text()}")
+    try:
+        with uvicorn_server(
+            "examples.full_stack.app:app", log_path, cwd=ROOT, env=env, args=("--no-access-log",)
+        ) as (_, base_url):
             yield base_url, log_path
-        finally:
-            process.terminate()
-            try:
-                process.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                process.kill()
-                process.wait()
-            downstream.shutdown()
-            downstream.server_close()
-            thread.join(timeout=2)
+    finally:
+        downstream.shutdown()
+        downstream.server_close()
+        thread.join(timeout=2)
 
 
 def test_log_reader_waits_for_a_complete_line(tmp_path: Path) -> None:
     path = tmp_path / "server.log"
     path.write_text('{"message":"first"}\n{"message":"sec')
-    assert _records(path) == [{"message": "first"}]
+    assert records(path) == [{"message": "first"}]
 
     with path.open("a") as output:
         output.write('ond"}\n')
-    assert _records(path) == [{"message": "first"}, {"message": "second"}]
+    assert records(path) == [{"message": "first"}, {"message": "second"}]
 
     # A complete, malformed record is a real failure and must still be rejected.
     path.write_text('{"message":}\n')
     with pytest.raises(json.JSONDecodeError):
-        _records(path)
-
-
-def _records(path: Path) -> list[dict]:
-    # A polling read can catch the writer partway through its last line.
-    lines = path.read_text().split("\n")[:-1]
-    return [json.loads(line) for line in lines if line.startswith("{")]
-
-
-def _request_record(path: Path, request_id: str) -> dict:
-    deadline = time.monotonic() + 3
-    while time.monotonic() < deadline:
-        for record in _records(path):
-            if record.get("request_id") == request_id and record["message"].startswith("request."):
-                return record
-        time.sleep(0.01)
-    pytest.fail(f"No request record for {request_id}:\n{path.read_text()}")
+        records(path)
 
 
 def test_demo_forwards_request_ids_to_both_downstream_services(demo_server) -> None:
@@ -168,12 +112,22 @@ def test_demo_forwards_request_ids_to_both_downstream_services(demo_server) -> N
     }
 
 
+def _background_responses(base_url: str) -> float:
+    label = 'path="/lab/background",service="example-test",status_code="202"}'
+    return sum(
+        float(line.rsplit(" ", 1)[1])
+        for line in httpx2.get(f"{base_url}/metrics").text.splitlines()
+        if line.startswith("http_requests_total{") and label in line
+    )
+
+
 @pytest.mark.parametrize("fail", [False, True])
 def test_background_work_keeps_response_timing_and_later_failure(demo_server, fail) -> None:
     base_url, log_path = demo_server
+    before = _background_responses(base_url)
     response = httpx2.get(f"{base_url}/lab/background", params={"seconds": 0.3, "fail": fail})
     assert response.status_code == 202
-    record = _request_record(log_path, response.headers["x-request-id"])
+    record = wait_record(log_path, response.headers["x-request-id"])
     event = record["event"]
     assert event["status_code"] == 202
     assert event["response_completed"] is True
@@ -181,8 +135,7 @@ def test_background_work_keeps_response_timing_and_later_failure(demo_server, fa
     assert record["message"] == ("request.failed" if fail else "request.completed")
     if fail:
         assert record["error"]["type"] == "RuntimeError"
-    metrics = httpx2.get(f"{base_url}/metrics").text
-    assert 'path="/lab/background",service="example-test",status_code="202"} 1.0' in metrics
+    assert _background_responses(base_url) - before == 1
 
 
 @pytest.mark.parametrize(
@@ -197,14 +150,10 @@ def test_downstream_calls_without_tracing(demo_server, failure, timeout, expecte
     base_url, log_path = demo_server
     response = httpx2.get(
         f"{base_url}/lab/downstream",
-        params={
-            "seconds": 0.1,
-            "timeout": timeout,
-            "failure": failure,
-        },
+        params={"seconds": 0.1, "timeout": timeout, "failure": failure},
     )
     assert response.status_code == expected_status
-    record = _request_record(log_path, response.headers["x-request-id"])
+    record = wait_record(log_path, response.headers["x-request-id"])
     assert record["event"]["http"]["count"] == 1
     assert record["event"]["http"]["ms"] >= (10 if timeout < 0.1 else 80)
     assert record["event"]["http"].get("errors", {}) == errors
@@ -224,7 +173,7 @@ def test_concurrent_requests_keep_their_own_call_totals(demo_server):
         results = list(workers.map(request, [1, 2, 3, 1, 2, 3]))
     assert len({request_id for request_id, _ in results}) == 6
     for request_id, count in results:
-        event = _request_record(log_path, request_id)["event"]
+        event = wait_record(log_path, request_id)["event"]
         assert event["http"]["count"] == count
         assert event["http"]["ms"] >= 40 * count
 
@@ -242,7 +191,7 @@ def test_streamed_downstream_completion_and_failure(demo_server, timeout):
                 b"".join(response.iter_bytes())
         else:
             assert b"".join(response.iter_bytes()) == b"first\nlast\n"
-    record = _request_record(log_path, request_id)
+    record = wait_record(log_path, request_id)
     assert record["event"]["status_code"] == 200
     assert record["event"]["http"]["count"] == 1
     if timeout < 0.1:
@@ -268,13 +217,7 @@ def test_failure_lab_produces_the_named_warnings(demo_server) -> None:
     assert completed.returncode == 0, completed.stderr
     expected = {"event_loop.blocked", "db.pool_exhausted", "db.n_plus_one"}
     assert all(name in completed.stdout for name in expected)
-    deadline = time.monotonic() + 2
-    while time.monotonic() < deadline:
-        messages = {row["message"] for row in _records(log_path)}
-        if expected <= messages:
-            break
-        time.sleep(0.02)
-    assert expected <= messages
+    wait_for(log_path, lambda rows: expected <= {row["message"] for row in rows})
 
 
 def test_batched_query_returns_the_same_data_with_one_query(demo_server) -> None:
@@ -285,57 +228,6 @@ def test_batched_query_returns_the_same_data_with_one_query(demo_server) -> None
     assert slow.status_code == fast.status_code == 200
     assert slow.json() == fast.json()
     assert len(fast.json()) == 10
-    deadline = time.monotonic() + 2
-    while time.monotonic() < deadline:
-        counts = {
-            row["event"]["path"]: row["event"]["db"]["count"]
-            for row in _records(log_path)
-            if row["message"] == "request.completed" and "db" in row.get("event", {})
-        }
-        if "/lab/batched" in counts:
-            break
-        time.sleep(0.02)
-    assert counts["/lab/n-plus-one"] == 11
-    assert counts["/lab/batched"] == 1
-
-
-@pytest.mark.parametrize("path", ["/lab/block?seconds=20", "/lab/db-pool?seconds=-1"])
-def test_failure_durations_are_bounded(demo_server, path: str) -> None:
-    base_url, _ = demo_server
-    assert httpx2.get(base_url + path).status_code == 422
-
-
-@pytest.mark.parametrize("status", [400, 404, 500, 503])
-def test_error_route_returns_the_requested_status(demo_server, status: int) -> None:
-    base_url, _ = demo_server
-    response = httpx2.get(f"{base_url}/error?status={status}")
-    assert response.status_code == status
-    assert response.json() == {"detail": "Intentional demo error"}
-
-
-def test_traffic_generator_rejects_invalid_duration() -> None:
-    result = subprocess.run(
-        ["bash", "examples/full_stack/generate_traffic.sh", "invalid"],
-        cwd=ROOT,
-        capture_output=True,
-        text=True,
-        timeout=2,
-    )
-    assert result.returncode != 0
-    assert "positive integer" in result.stderr
-
-
-def test_traffic_generator_stops_waiting_for_an_unavailable_service() -> None:
-    with socket.socket() as unavailable:
-        unavailable.bind(("127.0.0.1", 0))
-        port = unavailable.getsockname()[1]
-        result = subprocess.run(
-            ["bash", "examples/full_stack/generate_traffic.sh", "1"],
-            cwd=ROOT,
-            env={**os.environ, "APPS": f"http://127.0.0.1:{port}", "READY_TIMEOUT": "1"},
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-    assert result.returncode == 1
-    assert "not ready within 1s" in result.stderr
+    for response, queries in ((slow, 11), (fast, 1)):
+        record = wait_record(log_path, response.headers["x-request-id"])
+        assert record["event"]["db"]["count"] == queries

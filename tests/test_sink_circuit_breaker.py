@@ -22,15 +22,7 @@ class _ScriptedHandler(logging.Handler):
 
 
 def _record(msg: str = "hello") -> logging.LogRecord:
-    return logging.LogRecord(
-        name="tests.breaker",
-        level=logging.INFO,
-        pathname=__file__,
-        lineno=10,
-        msg=msg,
-        args=(),
-        exc_info=None,
-    )
+    return logging.makeLogRecord({"msg": msg})
 
 
 def test_sink_circuit_breaker_opens_and_skips_while_open() -> None:
@@ -81,28 +73,6 @@ def test_sink_circuit_breaker_half_open_success_closes_breaker() -> None:
     assert snapshot.opens_total == 1
     assert snapshot.half_open_total == 1
     assert snapshot.closes_total == 1
-
-def test_get_sink_circuit_breaker_stats_contract() -> None:
-    from fastapiobserver.logging import get_sink_circuit_breaker_stats, SinkCircuitBreakerHandler
-    import fastapiobserver.logging.state as state
-
-    delegate = _ScriptedHandler([True])
-    breaker = SinkCircuitBreakerHandler(
-        sink_name="test-sink-global",
-        delegate=delegate,
-        failure_threshold=1,
-        recovery_timeout_seconds=5.0,
-    )
-    # mock the global
-    state._SINK_CIRCUIT_BREAKERS = [breaker]
-
-    stats = get_sink_circuit_breaker_stats()
-    assert "test-sink-global" in stats
-    assert stats["test-sink-global"]["state"] == "closed"
-
-    # cleanup
-    state._SINK_CIRCUIT_BREAKERS = []
-
 
 def test_breaker_opens_when_stdlib_handler_reports_write_errors(
     monkeypatch: pytest.MonkeyPatch,

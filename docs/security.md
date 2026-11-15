@@ -33,7 +33,7 @@ establish regulatory compliance. Keep body capture off unless you need it.
 These protections cover the library's own output paths. Independently configured
 handlers and exporters require their own sanitizer.
 
-### Retain an approved organisation sanitizer
+### Keep your own sanitizer
 
 If your application already has a redaction filter, JSON formatter or shared
 Python/TypeScript sanitization contract, retain it with
@@ -62,7 +62,7 @@ This callback replaces the formatter's sanitization step; composing it with
 output, not other handlers or direct OTel exports. The
 [runnable application example](https://github.com/Vitaee/FastapiObserver/blob/main/examples/existing_logging_app.py)
 demonstrates a custom filter instead, including traceback sanitization. Its
-illustrative patterns are not a replacement for an approved sanitizer.
+patterns are examples only.
 
 ### Presets for regulated environments
 
@@ -114,6 +114,3 @@ policy = SecurityPolicy(
     body_capture_media_types=("application/json",),
 )
 ```
-
----
-

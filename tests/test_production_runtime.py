@@ -2,12 +2,9 @@
 
 from __future__ import annotations
 
-import json
 import os
 import signal
 import socket
-import subprocess
-import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
@@ -15,7 +12,8 @@ from pathlib import Path
 
 import httpx2
 import pytest
-import fastapiobserver
+
+from tests.helpers import free_port, records, subprocess_env, uvicorn_server, wait_record
 
 APP = '''
 import asyncio, gc, logging, os, threading, tracemalloc
@@ -91,72 +89,27 @@ async def churn(number: int):
 '''
 
 
-def records(path: Path) -> list[dict]:
-    return [json.loads(line) for line in path.read_text().split("\n")[:-1]
-            if line.startswith("{")]
-
-
-def wait_record(path: Path, message: str, request_id: str) -> dict:
-    deadline = time.monotonic() + 5
-    while time.monotonic() < deadline:
-        for record in records(path):
-            if record["message"] == message and record.get("request_id") == request_id:
-                return record
-        time.sleep(0.01)
-    pytest.fail(f"Missing {message} for {request_id}: {path.read_text()[-5000:]}")
-
-
 @contextmanager
 def server(tmp_path: Path, *, collector_down: bool = False, blocked_sink: bool = False):
     (tmp_path / "probe.py").write_text(APP)
-    with socket.socket() as sock:
-        sock.bind(("127.0.0.1", 0))
-        port = sock.getsockname()[1]
-    with socket.socket() as sock:
-        sock.bind(("127.0.0.1", 0))
-        collector_port = sock.getsockname()[1]
-    env = {key: value for key, value in os.environ.items()
+    env = {key: value for key, value in subprocess_env().items()
            if not key.startswith(("OBS_", "OTEL_"))}
     env.update({
-        "PYTHONPATH": str(Path(fastapiobserver.__file__).resolve().parents[1]),
-        "PYTHONUNBUFFERED": "1", "OBS_OTEL_ENABLED": str(collector_down).lower(),
+        "OBS_OTEL_ENABLED": str(collector_down).lower(),
         "OBS_OTEL_LOGS_ENABLED": str(collector_down).lower(),
         "OBS_OTEL_LOGS_MODE": "both", "OTEL_EXPORTER_OTLP_PROTOCOL": "http/protobuf",
-        "OTEL_EXPORTER_OTLP_ENDPOINT": f"http://127.0.0.1:{collector_port}",
+        "OTEL_EXPORTER_OTLP_ENDPOINT": f"http://127.0.0.1:{free_port()}",
         "OTEL_EXPORTER_OTLP_TIMEOUT": "0.2", "OTEL_BSP_SCHEDULE_DELAY": "100",
         "OTEL_BLRP_SCHEDULE_DELAY": "100",
     })
     if blocked_sink:
         env["PROBE_BLOCK_SINK"] = "1"
     log_path = tmp_path / "server.log"
-    with log_path.open("w") as output:
-        process = subprocess.Popen(
-            [sys.executable, "-m", "uvicorn", "probe:app", "--port", str(port),
-             "--timeout-graceful-shutdown", "1", "--no-access-log"],
-            cwd=tmp_path, env=env, stdout=output, stderr=subprocess.STDOUT,
-        )
-        base = f"http://127.0.0.1:{port}"
-        try:
-            deadline = time.monotonic() + 10
-            while time.monotonic() < deadline:
-                assert process.poll() is None, log_path.read_text()
-                try:
-                    if httpx2.get(base + "/health", timeout=0.5).status_code == 200:
-                        break
-                except httpx2.HTTPError:
-                    pass
-                time.sleep(0.02)
-            else:
-                pytest.fail(log_path.read_text())
-            yield process, base, log_path
-        finally:
-            if process.poll() is None:
-                process.terminate()
-                try:
-                    process.wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    process.kill()
-                    process.wait()
+    with uvicorn_server(
+        "probe:app", log_path, cwd=tmp_path, env=env,
+        args=("--timeout-graceful-shutdown", "1", "--no-access-log"),
+    ) as (process, base):
+        yield process, base, log_path
 
 
 def test_real_disconnect_reports_work_after_observation(tmp_path):
@@ -166,8 +119,8 @@ def test_real_disconnect_reports_work_after_observation(tmp_path):
             connection.sendall(
                 b"GET /disconnect HTTP/1.1\r\nHost: localhost\r\nX-Request-ID: left\r\n\r\n"
             )
-            wait_record(path, "probe.started", "left")
-        event = wait_record(path, "request.client_disconnected", "left")["event"]
+            wait_record(path, "left", "probe.started")
+        event = wait_record(path, "left", "request.client_disconnected")["event"]
         assert event["client_disconnected"] is True
         assert event["cancelled"] is False
         assert event["after_disconnect_ms"] >= 40
@@ -181,7 +134,7 @@ def test_sigterm_drains_inflight_work_without_telemetry_loss(tmp_path, route):
             futures = [workers.submit(client.get, "/" + route + "?seconds=0.4",
                                       headers={"X-Request-ID": f"draining-{i}"}) for i in range(8)]
             for i in range(8):
-                wait_record(path, "probe.started", f"draining-{i}")
+                wait_record(path, f"draining-{i}", "probe.started")
             started = time.monotonic()
             process.terminate()
             responses = [future.result(timeout=5) for future in futures]
@@ -205,11 +158,11 @@ def test_sigterm_cancellation_does_not_claim_a_client_disconnect(tmp_path):
     with server(tmp_path) as (process, base, path), ThreadPoolExecutor() as workers:
         future = workers.submit(httpx2.get, base + "/work?seconds=30",
                                 headers={"X-Request-ID": "cut-off"}, timeout=5)
-        wait_record(path, "probe.started", "cut-off")
+        wait_record(path, "cut-off", "probe.started")
         process.terminate()
         process.wait(timeout=4)
         assert future.result(timeout=5).status_code == 500  # Uvicorn sends the fallback.
-        event = wait_record(path, "request.cancelled", "cut-off")["event"]
+        event = wait_record(path, "cut-off", "request.cancelled")["event"]
         assert event["cancelled"] is True
         assert event["client_disconnected"] is False
         assert event["response_completed"] is False

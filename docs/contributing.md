@@ -1,31 +1,19 @@
 # Maintenance & Contributing
 
-Before changing the middleware, the log queue, redaction, the trust checks or the OpenTelemetry wiring, read the matching [design decision](decisions/index.md). Each one lists the tests that guard it.
+Before changing the middleware, the log queue, redaction, the trust checks or the OpenTelemetry wiring, read the matching [design decision](decisions/index.md). Each one lists the tests that guard it. Planned work is in the [roadmap](roadmap.md), and the 2.2.1 compatibility probe in the [baseline](baseline.md).
 
-Changelog entries say what changed and what users have to do, in one or two sentences. The reasoning goes in the pull request, and for design choices in a decision record.
-
-
-## OTel Test Coverage
-
-Repository integration tests include:
-- `tests/test_otel_log_correlation.py`: verifies trace/span IDs in logs map to real spans.
-- `tests/test_otlp_export_integration.py`: validates OTLP HTTP export with local collector fixtures.
-
----
+Changelog entries say what changed and what users have to do, in one or two sentences, with breaking changes under a `Breaking Changes` heading. The reasoning goes in the pull request, and for design choices in a decision record.
 
 ## Benchmarking
 
-Reproducible benchmark harness and methodology:
-- Guide: [`benchmarks.md`](benchmarks.md)
-- Apps: `examples/benchmarks/app.py`
-- Runner: `examples/benchmarks/harness.py`
-
----
+- CPU per request: `examples/benchmarks/request_cpu.py`, described in [benchmarks](benchmarks.md).
+- Throughput under load: `python examples/benchmarks/harness.py [SCENARIO ...]` runs
+  `examples/benchmarks/app.py` under ApacheBench and writes `examples/benchmarks/results.json`.
 
 ## Runtime Stress Validation
 
-For high-risk changes in logging lifecycle, queue pressure behavior, fork safety,
-or FastAPI lifespan teardown, run the runtime stress harness:
+For changes to logging lifecycle, queue pressure behavior, fork safety or
+FastAPI lifespan teardown, run the runtime stress harness:
 
 ```bash
 uv run python scripts/runtime_stress.py --profile quick
@@ -34,23 +22,38 @@ uv run python scripts/runtime_stress.py --profile standard --json
 
 Profiles:
 - `quick`: fast local sanity pass.
-- `standard`: recommended pre-merge/pre-release validation.
+- `standard`: required in shared validation; run it before merging.
 - `deep`: heavy soak run for major refactors.
 
-Implementation note:
-- Fork replay verification is executed in an isolated subprocess so the main harness run stays clean on Python versions that warn about multi-threaded `os.fork()`.
+The workload mixes four request types: a `200` with database and HTTP calls and
+redacted fields, a `422` validation failure, a `200` with ten repeated queries
+(`db.n_plus_one`) and a held connection (`db.connection_held_during_http`), and a
+`500` whose exception carries URL credentials. It also churns lifespans,
+overflows the queue under each policy and replays `os.fork()` in a subprocess.
 
-CI automation:
-- Manual workflow: `.github/workflows/runtime-stress.yml` (`workflow_dispatch`)
-- Weekly scheduled quick stress run
+CI runs it from `.github/workflows/runtime-stress.yml`: weekly with `quick`, and
+on demand (`workflow_dispatch`).
 
----
+## Release validation budgets
 
-## Changelog Policy
+PRs and releases call the same validation workflow. A release must identify one
+immutable tagged commit and publish the stored, hash-checked distributions that
+passed its gates. The backend jobs install that wheel into the Compose apps and
+run the verifier with tracing enabled and disabled.
 
-Breaking changes must be listed under a `Breaking Changes` section in `CHANGELOG.md`.
+| Scenario | Gate |
+|---|---|
+| SIGTERM with eight concurrent requests | Ordinary responses, streams and background work finish within four seconds with one terminal JSON record per request and no local request-log loss; Uvicorn's request grace is one second |
+| Request exceeding that grace | Cancellation is recorded, without a client-disconnect cause |
+| Collector unavailable | Ten requests finish within two seconds; process shutdown within four seconds with a 0.2-second OTLP transport timeout; all ten local terminal records survive in `both` mode |
+| Blocked sink | A 50 ms drain/stop wait returns within 500 ms; 100 loopback requests keep p95 below 100 ms while queue drops are counted; active outputs stay open for retry |
+| Warm worker | After 300 warm-up and 1,000 further distinct-query requests, retained Python heap grows less than 8 MiB, Linux RSS less than 32 MiB, and thread count by at most two |
+| Worker replacement | Twelve sequential workers keep one bounded route series and accurate cumulative request/histogram counts |
 
----
+These budgets apply to the test workload, not to arbitrary applications. The
+stress report is kept as a workflow artifact. CPU comparisons between versions
+don't gate a release; run them by hand as described in
+[benchmarks](benchmarks.md#manual-version-comparison).
 
 ## Releasing (Maintainers)
 
@@ -67,16 +70,13 @@ Releases are published from CI with PyPI Trusted Publishing; no token is stored 
 On a tag push, `.github/workflows/release.yml` verifies that the tag and
 checked-out commit agree, then calls the same validation workflow as pull
 requests. It builds the distributions once, tests that wheel, runs the dependency
-matrix, quality/audit, runtime budgets and Compose backend checks, then publishes
-the stored artifact with attestations. The publisher checks its commit and file
-hashes instead of rebuilding it. CPU comparisons between versions don't gate a
-release; run them by hand as described in
-[benchmarks](benchmarks.md#manual-version-comparison).
+matrix, quality/audit, the [release budgets](#release-validation-budgets) and
+Compose backend checks, then publishes the stored artifact with attestations.
+The publisher checks its commit and file hashes instead of rebuilding it.
 
-Experimental versions such as `2.3.0a1` use the same gates and tag convention.
+Prerelease versions such as `X.Y.Za1` use the same gates and tag convention.
 Their GitHub releases are marked as prereleases and do not replace the latest
-stable release. Keep the package's Beta classification until stability evidence
-supports a separate promotion decision.
+stable release.
 
 Keep published tags immutable. After a partial publication, use **Re-run failed
 jobs** on the original workflow run so the original distribution artifact is
@@ -92,13 +92,10 @@ For a full manual run, select the original tag:
 gh workflow run release.yml --ref vX.Y.Z -f tag=vX.Y.Z
 ```
 
-Selecting a branch whose commit differs from the requested tag now fails before
-validation/publication. Code changes require a new version and tag. Before
+Selecting a branch whose commit differs from the requested tag fails before
+validation and publication. Code changes require a new version and tag. Before
 announcing completion, verify the GitHub Release, both PyPI distributions and a
-fresh installation from PyPI. Standard stress is a required shared validation
-gate; use `uv run python scripts/runtime_stress.py --profile standard` locally too.
-
----
+fresh installation from PyPI.
 
 ## Local Git Hook (Recommended)
 
@@ -111,8 +108,6 @@ The pre-push hook runs:
 - `uv run mypy src`
 - `uv run pytest -q --cov`, which fails below 90% branch coverage, as CI does
 
----
-
 ## Documentation Site
 
 The site at [vitaee.github.io/FastapiObserver](https://vitaee.github.io/FastapiObserver/) is built from `docs/` and `mkdocs.yml` with [Zensical](https://zensical.org/). The `Docs` workflow builds it in strict mode on pull requests and deploys it to GitHub Pages on pushes to `main`.
@@ -124,9 +119,3 @@ uvx zensical==0.0.73 serve
 ```
 
 New pages must be added to `nav` in `mkdocs.yml`.
-
----
-
-## Roadmap Tracking
-
-See [ROADMAP.md](https://github.com/Vitaee/FastapiObserver/blob/main/ROADMAP.md) for planned work.

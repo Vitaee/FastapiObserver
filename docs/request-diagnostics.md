@@ -1,9 +1,5 @@
 # Request summaries and query budgets
 
-`fastapi-observer` attaches zero-tracing request diagnostics, route anomaly checks,
-SQL execution breakdowns, and per-request `diagnostics` tags while preserving
-existing request fields and Prometheus metric labels.
-
 ## Route and timing
 
 `event.http.route` is the matched template, such as `/v1/items/{item_id}`.
@@ -13,10 +9,9 @@ also inspects the registered routing table once and logs `route.duplicate` or
 `route.shadowed` warnings when an earlier static or less-specific route masks a
 later route (for example `/users/{id}` registered before `/users/me`).
 
-`duration_ms` ends at response completion; `app_duration_ms` includes background
-tasks and dependency cleanup. `db.ms` and `http.ms` are sums of completed call
-durations, not a partition of request latency. Streaming and payload fields use
-a monotonic clock rounded to three decimals:
+For `duration_ms`, `app_duration_ms`, `db.ms` and `http.ms`, see
+[what the durations mean](logging.md#what-the-durations-mean). The streaming and
+payload fields use a monotonic clock rounded to three decimals:
 
 | Field | Meaning | When unknown |
 |---|---|---|
@@ -25,10 +20,8 @@ a monotonic clock rounded to three decimals:
 | `stream_duration_ms` | First nonempty body send through final body/trailer completion (`0.0` for single-chunk responses) | `null` if empty or interrupted |
 | `response_bytes` | Total bytes sent across `http.response.body` chunks | `0` for empty responses |
 
-When a client disconnects (`client_disconnected: true`) and the handler keeps
-running, `after_disconnect_ms` measures the elapsed time after disconnect and
-`after_disconnect_calls` (`{"db": N, "http": M}`) counts database queries and
-outbound HTTP calls started after the client left.
+For `after_disconnect_ms` and `after_disconnect_calls`, see
+[client disconnects](servers.md#client-disconnects-and-shutdown).
 
 ## Per-request `diagnostics` and 422 validation errors
 
@@ -38,11 +31,11 @@ log record:
 
 | Tag in `event.diagnostics` | Trigger |
 |---|---|
-| `db.n_plus_one` | A single normalized SQL fingerprint executed `>= 10` times in the request |
+| `db.n_plus_one` | The same SQL statement text (compared by SHA-256, never logged) executed `>= 10` times in the request |
 | `http.n_plus_one` | Outbound HTTP calls to the same `(method, host)` ran `>= 10` times in the request |
 | `db.connection_held_during_http` | A SQLAlchemy connection stayed checked out across an outbound HTTP call and was held `>= 10 × db.ms` (or remained checked out at request end) |
 | `db.pool_exhausted` | Request started while a watched SQLAlchemy `QueuePool` was at full capacity |
-| `threadpool.saturated` | Request started while AnyIO's worker thread pool had `0` free tokens |
+| `threadpool.saturated` | Request started while AnyIO's worker thread pool had `0` free tokens and calls were waiting for one |
 | `event_loop.blocked` | The event-loop watchdog detected a stall while this request was in flight |
 
 On `422 Unprocessable Entity` responses, `event.validation_errors` captures up to
@@ -56,29 +49,8 @@ events (at most once each per request) without raw SQL or engine URLs.
 
 ## SQL execution detail
 
-For an explicitly instrumented SQLAlchemy engine (`db_engine=engine`):
-
-```json
-{
-  "db": {
-    "count": 2,
-    "ms": 4.2,
-    "sqlalchemy": {
-      "attempted": 3,
-      "succeeded": 2,
-      "failed": 1,
-      "in_flight": 0,
-      "failed_ms": 1.1,
-      "conn_held_ms": 48.5,
-      "errors": {"execution_error": 1}
-    }
-  }
-}
-```
-
-- `attempted = succeeded + failed + in_flight` across `before_cursor_execute`, `after_cursor_execute`, and `handle_error`.
-- `conn_held_ms` tracks total time connections were checked out from the engine pool during the request (`connect` / `checkout` to `checkin`).
-- Bounded error categories are `integrity_error`, `disconnect`, and `execution_error` (no SQL text, parameters, or connection URLs are included).
+The `db.sqlalchemy` breakdown of attempted, failed and in-flight queries is
+described in [database tracing](db-tracing.md#sql-execution-detail).
 
 ## Observation coverage
 

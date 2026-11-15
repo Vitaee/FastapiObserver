@@ -30,7 +30,7 @@ All OpenTelemetry settings are listed in the [configuration guide](configuration
 
 ## Grafana: Loki, Tempo and Prometheus
 
-- [`examples/full_stack`](https://github.com/Vitaee/FastapiObserver/tree/main/examples/full_stack) is a Docker Compose stack with three services, an OpenTelemetry Collector, Prometheus, Loki, Tempo and a ready-made Grafana dashboard. Screenshots are on the [advanced operations](advanced.md) page.
+- [`examples/full_stack`](https://github.com/Vitaee/FastapiObserver/tree/main/examples/full_stack) is a Docker Compose stack with three services, an OpenTelemetry Collector, Prometheus, Loki, Tempo and a ready-made Grafana dashboard, shown in the [README](https://github.com/Vitaee/FastapiObserver#readme).
 - [Production deployment](deployment.md) shows the Collector configuration for this stack and what to do when one part of it is down.
 
 ## Datadog, Honeycomb and other vendors

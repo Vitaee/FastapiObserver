@@ -1,6 +1,6 @@
 # 0008: One state object per request
 
-**Status:** accepted · **Reviewed:** 2026-10-31
+**Status:** accepted · **Reviewed:** 2026-10-31 · Narrowed by [0014](0014-diagnosis-without-tracing.md), which counts SQLAlchemy queries without tracing
 
 ## Context
 

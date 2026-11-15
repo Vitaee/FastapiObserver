@@ -1,44 +1,29 @@
 # 0017: Record calls against their start owner
 
-**Status:** accepted for the experiment · **Reviewed:** 2026-11-04
+**Status:** accepted, for the experiment · **Reviewed:** 2026-11-04
 
 ## Context
 
-Native HTTP already retained request state, while SQL and sampled-span fallback
-selected current state at completion. A span ending in a nested operation could
-be credited to the wrong owner; an unrelated completion thread lost its count.
-Current-context HTTP deduplication could also drop or double-count a late span.
+Native HTTP calls already stayed with the request that started them. SQL queries and sampled client spans went to whichever state was current when they finished. A span that ended inside a nested operation was credited to the wrong owner, and one that finished on an unrelated thread was lost. HTTP deduplication also looked at the current context, so a late span could be dropped or counted twice.
 
 ## Decision
 
-- Use one completed-call admission seam and exactly-once monotonic handles.
-  Preserve the existing aggregation fields, SQL successful-execution layer,
-  fingerprint algorithm, logging/provider ownership and stable root interface.
-- Let state own one lazy lifetime token, borrowed weakly by handles and bounded
-  sampled-span tracking. Close invalidates it after final diagnostics are built;
-  neither callback handles nor trackers retain closed request payloads.
-- Capture SQL/span/native-HTTP ownership at start, never from the completion
-  context. Keep native/span deduplication attached to that original owner.
-- Expose explicit experimental manual recording for custom clients. Bound error
-  categories and reject invalid/nonfinite input before it can corrupt totals.
-- Keep a narrow draft JSON contract with positive/negative fixtures. Do not
-  promote the full portable specification or claim new automatic adapters.
+- Every completed call goes through `record_completed_call()` or a `CallHandle` that finishes once on a monotonic clock ([`core/recording.py`](https://github.com/Vitaee/FastapiObserver/blob/v2.3.0/src/fastapiobserver/core/recording.py)). The aggregation fields, SQL counts of successful executions, the fingerprint algorithm, logging and provider ownership and the root API stay the same.
+- Each state owns one lifetime token, created lazily. Handles and the sampled-span tracker hold it weakly. Closing invalidates it after the final diagnostics are built, so neither keeps a closed request's payload alive.
+- SQL queries, sampled spans and native HTTP calls capture their owner when they start. Native/span deduplication stays with that owner.
+- Operations get `record_call()` and `start_call()` for custom clients. Error categories are bounded, and invalid or non-finite input is rejected before it reaches the totals.
+- `spec/` holds a narrow draft JSON contract with valid and invalid fixtures. The full portable specification and new automatic adapters are separate decisions.
 
 ## Evidence
 
-`test_call_ownership.py` reproduces the original failures using real SDK spans,
-nested operations, independent threads and both HTTP deduplication contexts.
-`test_call_recording.py` checks once-only concurrent completion, expiry, weak
-ownership, immediate capacity reclamation, fork inheritance, numeric/category
-bounds and SQL ownership. `test_operation_contract.py` validates fixtures and
-real emitted events. The tagged FastAPI compatibility fixture remains required.
+- [`test_call_ownership.py`](https://github.com/Vitaee/FastapiObserver/blob/v2.3.0/tests/test_call_ownership.py) reproduces the original failures with real SDK spans, nested operations, independent threads and both HTTP deduplication contexts, for example `test_late_child_span_cannot_be_credited_to_parent`.
+- [`test_call_recording.py`](https://github.com/Vitaee/FastapiObserver/blob/v2.3.0/tests/test_call_recording.py) checks once-only completion across threads, expiry, weak ownership, immediate release of tracking capacity, handles inherited across `fork()`, numeric and category bounds, and SQL ownership.
+- [`test_operation_contract.py`](https://github.com/Vitaee/FastapiObserver/blob/v2.3.0/tests/test_operation_contract.py) validates the fixtures and real emitted events against the schema. The `v2.2.1` compatibility fixture still passes.
 
 ## What it cost
 
-Active calls pay for a small handle/token and short ownership/aggregation locks.
-Sampled tracking is capped at 4,096 entries per provider; overflow remains
-partial/unknown and does not affect native counts. Manual adapters still select
-their observing layer and must avoid duplicate third-party instrumentation.
-Generic state extraction, lifecycle/provider APIs, byte budgets and independent
-language conformance remain future slices. The JSON Schema validator is a dev
-dependency; it is not added to normal application installations.
+- Each active call pays for a small handle and token, and takes short ownership and aggregation locks.
+- Sampled-span tracking is capped at 4,096 entries per provider. Spans beyond that are left out of the totals and the record's coverage becomes `partial`. Native counts are unaffected.
+- A manual adapter chooses its own observation layer, and must skip calls that other instrumentation already counts.
+- Generic state extraction, lifecycle and provider APIs, byte limits and conformance in other languages are left for later.
+- `jsonschema` is a development dependency only.

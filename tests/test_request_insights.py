@@ -23,27 +23,7 @@ from fastapiobserver.logging import (
     setup_logging,
     shutdown_logging,
 )
-import fastapiobserver.otel.tracing as otel_tracing_module
-
-
-class _Collector(logging.Handler):
-    def __init__(self) -> None:
-        super().__init__()
-        self.lines: list[str] = []
-
-    def emit(self, record: logging.LogRecord) -> None:
-        self.lines.append(self.format(record))
-
-    @property
-    def payloads(self) -> list[dict[str, Any]]:
-        return [json.loads(line) for line in self.lines]
-
-
-def _capture_logs(settings: ObservabilitySettings, *extra: logging.Handler) -> _Collector:
-    """Send the app's logs, after the queue and formatter, to a collector."""
-    collector = _Collector()
-    setup_logging(settings, logs_mode="otlp", extra_handlers=[collector, *extra])
-    return collector
+from tests.helpers import Collector, capture_logs
 
 
 def test_failed_request_writes_its_held_debug_logs() -> None:
@@ -62,7 +42,7 @@ def test_failed_request_writes_its_held_debug_logs() -> None:
         raise RuntimeError("boom")
 
     install_observability(app, settings, metrics_enabled=False)
-    collector = _capture_logs(settings)
+    collector = capture_logs(settings)
     client = TestClient(app, raise_server_exceptions=False)
     client.get("/ok")
     client.get("/fail")
@@ -104,7 +84,7 @@ def test_user_context_set_in_a_sync_endpoint_reaches_the_request_line() -> None:
     def tenant() -> dict[str, str]:
         return {}
 
-    collector = _capture_logs(settings)
+    collector = capture_logs(settings)
     client = TestClient(app)
     client.get("/me")
     client.get("/anonymous")
@@ -142,7 +122,7 @@ def test_unsampled_requests_write_only_warnings_unless_they_fail_or_are_slow() -
         raise RuntimeError("boom")
 
     install_observability(app, settings, metrics_enabled=False)
-    collector = _capture_logs(settings)
+    collector = capture_logs(settings)
     client = TestClient(app, raise_server_exceptions=False)
     for path in ("/fast", "/slow", "/fail"):
         client.get(path)
@@ -166,7 +146,7 @@ def test_sampling_follows_the_trace_id_as_opentelemetry_does() -> None:
         return {}
 
     install_observability(app, settings, metrics_enabled=False)
-    collector = _capture_logs(settings)
+    collector = capture_logs(settings)
     client = TestClient(app, client=("127.0.0.1", 50000))  # trusted, so traceparent is read
     kept, dropped = "0af7651916cd43dd" + "0" * 16, "0af7651916cd43dd" + "f" * 16
     for trace_id in (kept, dropped):
@@ -186,7 +166,7 @@ def test_sampling_follows_the_trace_id_as_opentelemetry_does() -> None:
 
 def test_runtime_log_level_keeps_holding_lower_records() -> None:
     settings = ObservabilitySettings(log_level="INFO", log_level_on_error="DEBUG")
-    setup_logging(settings, logs_mode="otlp", extra_handlers=[_Collector()])
+    setup_logging(settings, logs_mode="otlp", extra_handlers=[Collector()])
     try:
         assert get_log_level() == "INFO"
         set_log_level(logging.WARNING)
@@ -198,13 +178,9 @@ def test_runtime_log_level_keeps_holding_lower_records() -> None:
 
 
 def test_request_line_has_db_and_http_totals_and_n_plus_one_is_reported_once(
-    monkeypatch: pytest.MonkeyPatch,
+    span_exporter: Any,
 ) -> None:
-    in_memory = pytest.importorskip("opentelemetry.sdk.trace.export.in_memory_span_exporter")
     trace_api = pytest.importorskip("opentelemetry.trace")
-    monkeypatch.setattr(
-        otel_tracing_module, "build_otlp_exporter", lambda *_: in_memory.InMemorySpanExporter()
-    )
     settings = ObservabilitySettings()
     app = FastAPI()
     statement = (
@@ -231,7 +207,7 @@ def test_request_line_has_db_and_http_totals_and_n_plus_one_is_reported_once(
     install_observability(
         app, settings, metrics_enabled=False, otel_settings=OTelSettings(enabled=True)
     )
-    collector = _capture_logs(settings)
+    collector = capture_logs(settings)
     client = TestClient(app)
     client.get("/orders")
     client.get("/orders")
@@ -265,7 +241,7 @@ def test_log_bytes_are_counted_once_per_line_by_route_and_exported() -> None:
 
     install_observability(app, settings, metrics_enabled=True)
     before = get_log_bytes_by_route().get(route, 0)
-    collector = _capture_logs(settings, _Collector())  # two sinks, one count
+    collector = capture_logs(settings, Collector())  # two sinks, one count
     request_id = TestClient(app).get("/bytes/42").headers["x-request-id"]
     shutdown_logging()
 
@@ -314,7 +290,7 @@ def _request_db_totals_and_warnings(
     app: FastAPI, settings: ObservabilitySettings, **install: Any
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     install_observability(app, settings, metrics_enabled=False, **install)
-    collector = _capture_logs(settings)
+    collector = capture_logs(settings)
     client = TestClient(app)
     client.get("/orders")
     client.get("/orders")
@@ -453,17 +429,11 @@ def test_n_plus_one_from_response_serialization_names_the_relationship_and_no_wr
     }]
 
 
-def test_sqlalchemy_queries_count_once_with_tracing_on(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_sqlalchemy_queries_count_once_with_tracing_on(span_exporter: Any) -> None:
     sqlalchemy = pytest.importorskip("sqlalchemy")
-    in_memory = pytest.importorskip("opentelemetry.sdk.trace.export.in_memory_span_exporter")
     trace_api = pytest.importorskip("opentelemetry.trace")
     from fastapiobserver.db_queries import SQLALCHEMY_INSTRUMENTATION, count_queries
 
-    monkeypatch.setattr(
-        otel_tracing_module, "build_otlp_exporter", lambda *_: in_memory.InMemorySpanExporter()
-    )
     engine = sqlalchemy.create_engine("sqlite://")
     count_queries(engine)
     settings = ObservabilitySettings()

@@ -58,6 +58,3 @@ through an internal proxy, set `OBS_HONOR_FORWARDED_HEADERS=true` and limit
 In Kubernetes, the default private networks include every pod in the cluster,
 so the token is what keeps other workloads out. Keep it secret, and narrow
 `OBS_TRUSTED_CIDRS` to your operators' addresses if you can.
-
----
-

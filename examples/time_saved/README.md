@@ -1,13 +1,15 @@
-# Time-Saved: DX Parity Examples
+# Time saved: the same app by hand and with fastapi-observer
 
-This directory contains two FastAPI applications that achieve **functionally equivalent** complex observability outcomes (OTLP traces, Prometheus metrics, structured JSON logging).
+Both apps write a JSON line per request with request and trace IDs, export OTLP
+traces and serve Prometheus metrics labelled by route template.
 
-1. `the_hard_way.py`: A raw implementation needing `~160` lines of boilerplate using the underlying SDKs directly.
-2. `the_easy_way.py`: A declarative implementation needing `~30` lines using `fastapiobserver`.
+1. `the_hard_way.py` (161 lines) wires the OpenTelemetry SDK, `prometheus_client`
+   and a JSON formatter by hand.
+2. `the_easy_way.py` (29 lines) calls `install_observability()`.
 
-## Running the Examples Locally
+## Running the examples locally
 
-You can spin up local Jaeger and Prometheus instances to physically see both applications transmitting functionally equivalent telemetry to the backends.
+Jaeger and Prometheus run in Docker Compose; the apps run on your machine.
 
 ### 1. Start the Backends (Jaeger + Prometheus)
 ```bash
@@ -39,13 +41,11 @@ curl http://localhost:8002/hello/world
 
 ### 4. Observe the Results
 
-* **Console Output**: Look at both terminal windows. Both emit functionally identical JSON logs with trace and request injection.
+* **Console output**: both apps write one JSON line per request with `request_id`, `trace_id` and `span_id`.
 * **Jaeger (Tracing)**: Navigate to `http://localhost:16686` and search for traces under the `hard-way-api` and `easy-way-api` services. Both produce a server span per request; on FastAPI 0.142+ the easy way also has FastAPI's own spans for dependencies, the endpoint and serialization.
-* **Prometheus (Metrics)**: Navigate to `http://localhost:9090` and query `http_requests_total`. Notice how both correctly avoid cardinality explosions by parsing the literal `/hello/{name}` route instead of `/hello/world`.
+* **Prometheus (Metrics)**: Navigate to `http://localhost:9090` and query `http_requests_total`. Both label requests `path="/hello/{name}"`, not `/hello/world`.
 
-### 5. Expected Output Parity
-
-Both the hand-rolled ~160 line script and the ~30 line `fastapiobserver` script generate equivalent contextual telemetry.
+### 5. Sample output
 
 #### Structured Logs (stdout)
 **The Hard Way:**
@@ -58,7 +58,6 @@ Both the hand-rolled ~160 line script and the ~30 line `fastapiobserver` script 
 ```
 
 #### Prometheus Metrics (Scraped on /metrics)
-Notice how both applications protect metric cardinality mapping the traffic down to the ASGI `path="/hello/{name}"` routing template:
 ```promql
 # The Hard Way Output
 http_requests_total{instance="host.docker.internal:8001",job="hard_way_api",method="GET",path="/hello/{name}",status="200"} 7.0
@@ -67,8 +66,10 @@ http_requests_total{instance="host.docker.internal:8001",job="hard_way_api",meth
 http_requests_total{environment="development",instance="host.docker.internal:8002",job="easy_way_api",method="GET",path="/hello/{name}",service="easy-way-api",status_code="200"} 7.0
 ```
 
-### 5. Cleanup
+### 6. Cleanup
+
+Stop both `uvicorn` processes, then:
+
 ```bash
-# Don't forget to kill your uvicorn processes!
 docker compose down
 ```

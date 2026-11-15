@@ -62,7 +62,7 @@ With `install_observability(app, configure_logging=False)`, the application's
 logging handlers, logger provider, log processors and exporters remain in place.
 The library does not call `install_otel_logs()` or attach another logging handler
 or exporting log processor, regardless of `otel_logs_settings` or the log-export
-environment variables. Keep your approved sanitizer on the application-owned
+environment variables. Keep your sanitizer on the application-owned
 OTel logging path as well as local outputs.
 
 Tracing and metrics keep their own enable flags. When enabled, they reuse
@@ -75,9 +75,8 @@ the application owns its logging provider's lifecycle.
 FastAPI's native telemetry configuration is also left intact in this mode.
 On FastAPI 0.142+, its direct OTel error logs bypass stdlib handler filters. If
 your application routes errors through its own sanitized logging pipeline, use
-`FastAPI(telemetry={"logs": False})` as the existing-logger example does, or retain
-an approved sanitizer on that separate native export path. This is an application
-choice; the library does not silently change it.
+`FastAPI(telemetry={"logs": False})` as the existing-logger example does, or put
+your sanitizer on that native export path. The library leaves this setting alone.
 
 ### Request ID forwarding
 
@@ -137,6 +136,9 @@ and with tracing on, counting each call once even when it also creates a span.
   (also used by `content` and `iter_lines()`) and `close()`, not direct `raw` reads.
 - Counters retain no URLs, headers, bodies or exception messages. No new metric
   labels are added. HTTP totals sum concurrent calls and may exceed response time.
+- A call with no connect or read limit (the Requests default, or an HTTPX timeout
+  of `None`) logs one `http.timeout_missing` warning per library and host, with the
+  unlimited phases in `event.unlimited`.
 
 For example, an application that catches a downstream read timeout can still
 return 200 while logging `http: {"count": 1, "ms": 50.2,
@@ -163,6 +165,3 @@ try:
 finally:
     detach(token)
 ```
-
----
-

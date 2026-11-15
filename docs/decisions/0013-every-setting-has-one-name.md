@@ -22,7 +22,7 @@ The settings models also matched variables named like their fields. `ENABLED=tru
 
 ## Evidence
 
-- **Tests:** in [`test_config_settings.py`](https://github.com/Vitaee/FastapiObserver/blob/main/tests/test_config_settings.py), `test_settings_ignore_variables_named_like_their_fields` and `test_otel_service_name_names_the_service_everywhere`. The per-signal protocol fallback and `OTEL_SDK_DISABLED` are in [`test_otel_logs_from_env.py`](https://github.com/Vitaee/FastapiObserver/blob/main/tests/test_otel_logs_from_env.py) and [`test_otel_metrics_from_env.py`](https://github.com/Vitaee/FastapiObserver/blob/main/tests/test_otel_metrics_from_env.py), and the warning in `test_retired_settings_are_reported_with_their_replacements` in [`test_sinks.py`](https://github.com/Vitaee/FastapiObserver/blob/main/tests/test_sinks.py).
+- **Tests:** in [`test_config_settings.py`](https://github.com/Vitaee/FastapiObserver/blob/main/tests/test_config_settings.py), `test_settings_ignore_variables_named_like_their_fields` and `test_otel_service_name_names_the_service_everywhere`. The per-signal protocol fallback and `OTEL_SDK_DISABLED` are in [`test_otel_logs_from_env.py`](https://github.com/Vitaee/FastapiObserver/blob/v2.4.0/tests/test_otel_logs_from_env.py) and [`test_otel_metrics_from_env.py`](https://github.com/Vitaee/FastapiObserver/blob/v2.4.0/tests/test_otel_metrics_from_env.py), and the warning in `test_retired_settings_are_reported_with_their_replacements` in [`test_sinks.py`](https://github.com/Vitaee/FastapiObserver/blob/main/tests/test_sinks.py).
 - **The leak:** before this change, `_RuntimeControlEnvSettings().path` returned the process's `PATH`.
 
 ## What it cost

@@ -45,7 +45,7 @@ Every request now writes one JSON line, with the same `trace_id` as its trace wh
 
 **Documentation:** [vitaee.github.io/FastapiObserver](https://vitaee.github.io/FastapiObserver/)
 
-Already have a JSON logger and approved redaction? Keep them:
+Already have a JSON logger and your own redaction? Keep them:
 
 ```python
 install_observability(app, configure_logging=False)
@@ -85,17 +85,13 @@ Explicit variables and Python arguments always win over profile defaults. Every 
 
 - **One JSON line per request** with method, path, sent status, response duration, total application lifetime and client IP, and your service's name, environment and version on every line, including your own `logging` calls. HTTP latency excludes background work; later failures still appear on the correlated request line.
 - **Request IDs** taken from `X-Request-ID` when the caller is a trusted proxy, generated otherwise, returned in the response and passed on to the services you call through `instrument_httpx_client()`, `instrument_requests_session()`, `inject_trace_headers()` or OpenTelemetry-instrumented clients, so one ID finds a request's logs in every service. See [request ID forwarding](https://vitaee.github.io/FastapiObserver/opentelemetry/#request-id-forwarding).
-- **Field-name redaction on by default.** The library's outputs mask values under configured sensitive field and header names, including passwords, tokens, API keys, `Authorization` and cookies. URL credentials are masked in exception messages and stack traces. Arbitrary free text is not scanned for secrets or personal data; retain your approved sanitizer for that. Presets (`strict`, `pci`, `gdpr`) select fields and masking rules, not compliance guarantees. See the [redaction limits](https://vitaee.github.io/FastapiObserver/security/#what-redaction-covers).
+- **Field-name redaction on by default.** The library's outputs mask values under configured sensitive field and header names, including passwords, tokens, API keys, `Authorization` and cookies. URL credentials are masked in exception messages and stack traces. Arbitrary free text is not scanned for secrets or personal data; keep your own sanitizer for that. Presets (`strict`, `pci`, `gdpr`) select fields and masking rules, not compliance guarantees. See the [redaction limits](https://vitaee.github.io/FastapiObserver/security/#what-redaction-covers).
 - **Prometheus metrics** labelled by route template (`/orders/{order_id}`). Requests no route matches, such as scanners, CORS preflights and requests an auth middleware rejects, share one `<unmatched>` label, and made-up methods share `_OTHER`, so neither IDs nor anonymous clients explode cardinality.
 - **OpenTelemetry traces**, from FastAPI's own support on 0.142 and later, with `trace_id` and `span_id` on log records when trace context is available, and optional log export over OTLP using the same field-name redaction.
 - **Non-blocking log writes.** Lines are written from a background thread, so a slow stdout never stalls the event loop.
 - **Help finding what slows a request down.** A warning with the stack of any sync call that blocks the event loop, on in the `production` profile. A warning when the thread pool or a database connection pool is full, the usual cause when latency climbs while CPU stays low. For the SQLAlchemy engines you pass in, each request line counts its queries, and a query run once per item (N+1) gets a warning. HTTPX/HTTPX2 clients passed to `instrument_httpx_client()`, and Requests instrumented with `instrument_requests_session()`, report outbound counts, duration and failure categories too. These diagnostics work without tracing. Opt-in: `DEBUG` lines written only for requests that fail. With metrics on, `/metrics` shows how many bytes of logs each route writes (in a single process), and `OBS_LOG_SAMPLE_RATE` keeps a share of successful requests, chosen by trace ID, while failed and slow requests are always written in full.
 
 Optional extras: runtime log-level control, SQLAlchemy, `httpx` and `requests` tracing, Strawberry GraphQL and a Loguru bridge. See the [documentation](https://vitaee.github.io/FastapiObserver/).
-
-The logging features above describe the default library-owned pipeline. With
-`configure_logging=False`, formatting, levels, sampling, queuing, redaction and
-log export follow the application's configuration.
 
 ![Grafana dashboard built from fastapi-observer metrics, traces and logs](https://raw.githubusercontent.com/Vitaee/FastapiObserver/main/examples/full_stack/screenshot/dashboard_top.png)
 
@@ -120,7 +116,7 @@ Since 0.142, FastAPI traces requests on its own once an OpenTelemetry provider i
 - You already send everything to Logfire, Datadog or Sentry: their own FastAPI integrations fit better.
 - Your app isn't built on FastAPI or Starlette.
 
-What it costs: in 2.3.0 with default settings, about 55 µs of CPU per request on an Apple ARM64 Mac, including writing the line on a background thread, and about 38 µs when the application owns logging (`configure_logging=False`). See the [benchmarks](https://vitaee.github.io/FastapiObserver/benchmarks/), including outbound HTTP diagnostics and a comparison with wiring the same stack by hand.
+What it costs: in 2.4.0 with default settings, about 42 µs of CPU per request on an Apple ARM64 Mac, including writing the line on a background thread, and about 26 µs when the application owns logging (`configure_logging=False`). See the [benchmarks](https://vitaee.github.io/FastapiObserver/benchmarks/), including outbound HTTP diagnostics and a comparison with wiring the same stack by hand.
 
 ## Works with
 
@@ -151,7 +147,7 @@ What it costs: in 2.3.0 with default settings, about 55 µs of CPU per request o
 - [Security and redaction presets](https://vitaee.github.io/FastapiObserver/security/)
 - [OpenTelemetry](https://vitaee.github.io/FastapiObserver/opentelemetry/)
 - [Production deployment](https://vitaee.github.io/FastapiObserver/deployment/) and [Kubernetes](https://vitaee.github.io/FastapiObserver/kubernetes/)
-- [Benchmarks](https://vitaee.github.io/FastapiObserver/benchmarks/) and [performance tuning](https://vitaee.github.io/FastapiObserver/tuning/)
+- [Benchmarks](https://vitaee.github.io/FastapiObserver/benchmarks/)
 - [Contributing](https://vitaee.github.io/FastapiObserver/contributing/)
 
 ## Support the project

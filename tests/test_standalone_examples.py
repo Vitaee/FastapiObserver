@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import json
-import os
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
-import fastapiobserver
+
+from tests.helpers import subprocess_env
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -22,6 +22,10 @@ ROOT = Path(__file__).resolve().parents[1]
         ("security_presets_app", [["POST", "/payments", {"amount": 100}, 200, {"amount": "100"}]]),
         ("otel_app", [["GET", "/orders/42", None, 200, {"order_id": 42}]]),
         ("graphql_app", [["POST", "/graphql", {"query": "{ hello }"}, 200, None]]),
+        *[
+            (module, [["GET", "/hello/world", None, 200, {"message": "Hello world"}]])
+            for module in ("time_saved.the_hard_way", "time_saved.the_easy_way")
+        ],
         (
             "db_tracing_app",
             [
@@ -55,15 +59,13 @@ shutdown_logging()
     result = subprocess.run(
         [sys.executable, "-c", script, module, json.dumps(requests)],
         cwd=ROOT,
-        env={
-            **os.environ,
-            "PYTHONPATH": str(Path(fastapiobserver.__file__).resolve().parents[1]),
-            "OBS_OTEL_ENABLED": "false",
-            "OBS_OTEL_LOGS_ENABLED": "false",
-            "OBS_OTEL_METRICS_ENABLED": "false",
-            "OBS_RUNTIME_CONTROL_ENABLED": "false",
-            "OTEL_SDK_DISABLED": "true",
-        },
+        env=subprocess_env(
+            OBS_OTEL_ENABLED="false",
+            OBS_OTEL_LOGS_ENABLED="false",
+            OBS_OTEL_METRICS_ENABLED="false",
+            OBS_RUNTIME_CONTROL_ENABLED="false",
+            OTEL_SDK_DISABLED="true",
+        ),
         capture_output=True,
         text=True,
         timeout=15,

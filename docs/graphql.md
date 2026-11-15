@@ -1,44 +1,15 @@
 # GraphQL Observability (Strawberry)
 
-GraphQL APIs often collapse all traffic into one HTTP route (usually `POST /graphql`).
-That makes route-level telemetry too coarse for incident response and capacity planning.
-
-`fastapi-observer` provides a native Strawberry extension that extracts operation names
-and enriches both logs and traces at operation level.
-
-## Why Use This Integration
-
-Without operation-aware telemetry, these different requests all look identical at HTTP level:
-- `GetUsersQuery`
-- `CheckoutMutation`
-- `AdminAuditReportQuery`
-
-This integration restores per-operation visibility while keeping your existing FastAPI + Strawberry architecture.
-
-## Benefits
-
-| Benefit | What you get |
-|---|---|
-| Faster incident triage | See which GraphQL operation is causing errors/latency, not just `/graphql` |
-| Better trace readability | Span names become `graphql.operation.<operation_name>` |
-| Cleaner log correlation | Structured logs include `user_context.graphql.operation_name` |
-| Low coupling | `strawberry-graphql` stays optional: it's imported only when you import the extension |
-| Safe failure behavior | Integration failures degrade gracefully and do not crash request handling |
-
-## Prerequisites
-
-- FastAPI service using `strawberry-graphql`
-- `fastapi-observer` installed and configured
-- Optional: OpenTelemetry enabled if you also want span renaming/attributes
-
-Install:
+A GraphQL API sends every operation to one route, usually `POST /graphql`.
+`StrawberryObservabilityExtension` adds the operation name to the request's log
+line and, with tracing on, to its server span. Importing it without
+`strawberry-graphql` installed raises `ImportError`. An error while renaming
+the span is logged at `DEBUG` as `strawberry_extension.otel_failed` and does not
+fail the request.
 
 ```bash
-# Core + Strawberry usage in your app
 pip install fastapi-observer strawberry-graphql
-
-# Optional: enable trace export setup
-pip install "fastapi-observer[otel]"
+pip install "fastapi-observer[otel]"  # only to rename server spans
 ```
 
 ## Minimal Setup
@@ -103,8 +74,6 @@ Request logs get GraphQL operation context:
 - The request's server span is renamed from `POST /graphql` to `graphql.operation.GetUsersQuery`, whether FastAPI traces the request itself (0.142+) or OpenTelemetry's instrumentation does.
 - It gets the attribute `graphql.operation.name=GetUsersQuery`.
 
-This makes dashboards and trace search much more actionable for GraphQL traffic.
-
 ## Verification Checklist
 
 1. Start your app and run a named operation:
@@ -143,21 +112,3 @@ Expected fallback in context:
 | OpenTelemetry package not present | Log enrichment still works; trace rename is skipped |
 | Existing `user_context` already set | Existing keys are preserved and `graphql.operation_name` is merged |
 | `user_context["graphql"]` is non-dict | Extension does not overwrite it; use a dict shape for GraphQL context |
-
-## Production Best Practices
-
-1. Always send explicit GraphQL operation names from clients.
-2. Keep GraphQL body capture off unless absolutely required for debugging/compliance.
-3. If body capture is required, keep strict redaction and media-type allowlists enabled.
-4. Use operation-level traces/logs for debugging, but keep metrics labels route-templated to avoid cardinality spikes.
-5. Alert on operation-specific error and latency patterns (for example `CheckoutMutation` p95 and failure rate).
-6. Register `StrawberryObservabilityExtension` once per schema; avoid duplicate extension wiring.
-
-## When This Is Most Valuable
-
-Use this integration when:
-- your API traffic is primarily GraphQL,
-- multiple critical business flows share one `/graphql` endpoint,
-- on-call responders need operation-level visibility to isolate incidents quickly.
-
----

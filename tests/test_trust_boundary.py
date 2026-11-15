@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import logging
+
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from fastapiobserver import ObservabilitySettings, install_observability
 from fastapiobserver.middleware import _resolve_request_id
+from fastapiobserver.middleware.ip import _IpResolver
 from fastapiobserver.request_context import get_request_id
 from fastapiobserver.security import TrustedProxyPolicy, resolve_client_ip
 
@@ -72,3 +76,14 @@ def test_forwarded_for_uses_rightmost_hop_outside_trusted_proxies() -> None:
     assert resolve_client_ip("198.51.100.1", [(b"x-forwarded-for", b"6.6.6.6")], policy) == (
         "198.51.100.1"
     )
+
+
+@pytest.mark.parametrize("honor_forwarded_headers", [False, True])
+def test_trusting_forwarded_headers_is_warned_about_at_startup(
+    caplog: pytest.LogCaptureFixture, honor_forwarded_headers: bool
+) -> None:
+    policy = TrustedProxyPolicy(enabled=True, honor_forwarded_headers=honor_forwarded_headers)
+    with caplog.at_level(logging.WARNING, logger="fastapiobserver.security"):
+        _IpResolver(policy)
+
+    assert ("security.forwarded_headers.enabled" in caplog.messages) is honor_forwarded_headers

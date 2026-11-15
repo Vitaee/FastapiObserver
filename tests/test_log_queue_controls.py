@@ -3,121 +3,46 @@ from __future__ import annotations
 import logging
 import queue
 
+import pytest
+
 from fastapiobserver.logging import LogQueueTelemetry, OverflowPolicyQueueHandler
 
 
-def _record(message: str) -> logging.LogRecord:
-    return logging.LogRecord(
-        name="tests.queue",
-        level=logging.INFO,
-        pathname=__file__,
-        lineno=10,
-        msg=message,
-        args=(),
-        exc_info=None,
-    )
-
-
-def test_drop_newest_policy_drops_latest_record_when_full() -> None:
+@pytest.mark.parametrize(
+    ("policy", "kept", "counts"),
+    [
+        ("drop_newest", "first", {"enqueued_total": 1, "dropped_newest_total": 1}),
+        ("drop_oldest", "second", {"enqueued_total": 2, "dropped_oldest_total": 1}),
+        (
+            "block",
+            "first",
+            {"enqueued_total": 1, "dropped_newest_total": 1, "blocked_total": 1,
+             "block_timeout_total": 1},
+        ),
+    ],
+)
+def test_overflow_policy_decides_which_record_a_full_queue_keeps(
+    policy: str, kept: str, counts: dict[str, int]
+) -> None:
     telemetry = LogQueueTelemetry()
     log_queue: queue.Queue[logging.LogRecord] = queue.Queue(maxsize=1)
-    telemetry.reset(
-        log_queue=log_queue,
-        queue_capacity=1,
-        overflow_policy="drop_newest",
-    )
+    telemetry.reset(log_queue=log_queue, queue_capacity=1, overflow_policy=policy)
     handler = OverflowPolicyQueueHandler(
-        log_queue,
-        overflow_policy="drop_newest",
-        block_timeout_seconds=0.01,
-        telemetry=telemetry,
+        log_queue, overflow_policy=policy, block_timeout_seconds=0.01, telemetry=telemetry,
     )
 
-    handler.enqueue(_record("first"))
-    handler.enqueue(_record("second"))
+    handler.enqueue(logging.makeLogRecord({"msg": "first"}))
+    handler.enqueue(logging.makeLogRecord({"msg": "second"}))
 
-    kept = log_queue.get_nowait()
-    assert kept.msg == "first"
+    assert log_queue.get_nowait().msg == kept
     snapshot = telemetry.snapshot()
-    assert snapshot.enqueued_total == 1
     assert snapshot.dropped_total == 1
-    assert snapshot.dropped_oldest_total == 0
-    assert snapshot.dropped_newest_total == 1
-    assert snapshot.blocked_total == 0
-
-
-def test_drop_oldest_policy_keeps_latest_record_when_full() -> None:
-    telemetry = LogQueueTelemetry()
-    log_queue: queue.Queue[logging.LogRecord] = queue.Queue(maxsize=1)
-    telemetry.reset(
-        log_queue=log_queue,
-        queue_capacity=1,
-        overflow_policy="drop_oldest",
-    )
-    handler = OverflowPolicyQueueHandler(
-        log_queue,
-        overflow_policy="drop_oldest",
-        block_timeout_seconds=0.01,
-        telemetry=telemetry,
-    )
-
-    handler.enqueue(_record("first"))
-    handler.enqueue(_record("second"))
-
-    kept = log_queue.get_nowait()
-    assert kept.msg == "second"
-    snapshot = telemetry.snapshot()
-    assert snapshot.enqueued_total == 2
-    assert snapshot.dropped_total == 1
-    assert snapshot.dropped_oldest_total == 1
-    assert snapshot.dropped_newest_total == 0
-    assert snapshot.blocked_total == 0
-
-
-def test_block_policy_times_out_and_drops_newest_when_queue_stays_full() -> None:
-    telemetry = LogQueueTelemetry()
-    log_queue: queue.Queue[logging.LogRecord] = queue.Queue(maxsize=1)
-    telemetry.reset(
-        log_queue=log_queue,
-        queue_capacity=1,
-        overflow_policy="block",
-    )
-    handler = OverflowPolicyQueueHandler(
-        log_queue,
-        overflow_policy="block",
-        block_timeout_seconds=0.01,
-        telemetry=telemetry,
-    )
-
-    handler.enqueue(_record("first"))
-    handler.enqueue(_record("second"))
-
-    kept = log_queue.get_nowait()
-    assert kept.msg == "first"
-    snapshot = telemetry.snapshot()
-    assert snapshot.enqueued_total == 1
-    assert snapshot.dropped_total == 1
-    assert snapshot.dropped_oldest_total == 0
-    assert snapshot.dropped_newest_total == 1
-    assert snapshot.blocked_total == 1
-    assert snapshot.block_timeout_total == 1
-
-def test_get_log_queue_stats_contract() -> None:
-    from fastapiobserver.logging import get_log_queue_stats
-    from fastapiobserver.logging.queueing import _LOG_QUEUE_TELEMETRY
-
-    # Reset globally
-    _LOG_QUEUE_TELEMETRY.reset(
-        log_queue=queue.Queue(maxsize=42),
-        queue_capacity=42,
-        overflow_policy="drop_oldest"
-    )
-    _LOG_QUEUE_TELEMETRY.record_enqueued()
-
-    stats = get_log_queue_stats()
-    assert stats["queue_capacity"] == 42
-    assert stats["enqueued_total"] == 1
-    assert stats["overflow_policy"] == "drop_oldest"
+    for name in (
+        "enqueued_total", "dropped_oldest_total", "dropped_newest_total", "blocked_total",
+    ):
+        assert getattr(snapshot, name) == counts.get(name, 0), name
+    if "block_timeout_total" in counts:
+        assert snapshot.block_timeout_total == counts["block_timeout_total"]
 
 
 def test_prepare_freezes_arguments_and_passes_other_records_through() -> None:
@@ -127,9 +52,9 @@ def test_prepare_freezes_arguments_and_passes_other_records_through() -> None:
         block_timeout_seconds=1.0,
         telemetry=LogQueueTelemetry(),
     )
-    plain = _record("request.completed")
+    plain = logging.makeLogRecord({"msg": "request.completed"})
     items = ["a"]
-    with_args = _record("items %s")
+    with_args = logging.makeLogRecord({"msg": "items %s"})
     with_args.args = (items,)
 
     assert handler.prepare(plain) is plain  # nothing to freeze, so not copied

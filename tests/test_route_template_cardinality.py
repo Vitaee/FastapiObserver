@@ -1,22 +1,14 @@
-"""Tests for route template extraction to prevent metric cardinality explosion."""
-
 from __future__ import annotations
 
 import uuid
 
+import pytest
 from fastapi import APIRouter, FastAPI
 from fastapi.testclient import TestClient
 
 from fastapiobserver import ObservabilitySettings, install_observability
 from fastapiobserver.middleware import _extract_route_template  # type: ignore[attr-defined]
 from fastapiobserver.middleware.events import UNMATCHED_ROUTE
-
-
-class _FakeRoute:
-    """Minimal route stub matching Starlette's Route interface."""
-
-    def __init__(self, path: str) -> None:
-        self.path = path
 
 
 def test_request_line_contains_the_full_route_template(caplog):
@@ -73,21 +65,21 @@ def test_rejected_scope_does_not_scan_routes():
     assert _extract_route_template(scope) == UNMATCHED_ROUTE
 
 
-def test_route_template_preferred_over_raw_path() -> None:
-    """When scope has a matched route, use its template."""
-    scope = {"route": _FakeRoute("/users/{user_id}")}
-    result = _extract_route_template(scope)
-    assert result == "/users/{user_id}"
-
-
-def test_unmatched_404_gets_the_shared_label() -> None:
-    """No route matched: a 404 must not put its raw path in the label."""
-    scope: dict = {}  # no "route" key
-    assert _extract_route_template(scope) == UNMATCHED_ROUTE
+@pytest.mark.parametrize(
+    ("scope", "template"),
+    [
+        ({"route": type("Route", (), {"path": "/orgs/{org_id}/teams/{team_id}"})()},
+         "/orgs/{org_id}/teams/{team_id}"),
+        ({}, UNMATCHED_ROUTE),
+        ({"route": None}, UNMATCHED_ROUTE),
+        ({"route": object()}, UNMATCHED_ROUTE),  # a mounted sub-app's route has no path
+    ],
+)
+def test_route_template_comes_only_from_a_matched_route(scope: dict, template: str) -> None:
+    assert _extract_route_template(scope) == template
 
 
 def test_plain_starlette_route_is_labelled_by_its_path() -> None:
-    """FastAPI records no route for plain Starlette routes, so they're matched."""
     from starlette.responses import PlainTextResponse
 
     app = FastAPI()
@@ -97,29 +89,6 @@ def test_plain_starlette_route_is_labelled_by_its_path() -> None:
     assert client.get("/plain/abc").status_code == 200
 
     assert 'path="/plain/{name}"' in client.get("/metrics").text
-
-
-def test_fallback_when_route_has_no_path_attr() -> None:
-    """Mounted sub-apps may have routes without .path attribute."""
-
-    class _MountedRoute:
-        pass
-
-    scope = {"route": _MountedRoute()}
-    assert _extract_route_template(scope) == UNMATCHED_ROUTE
-
-
-def test_route_is_none() -> None:
-    """scope["route"] explicitly set to None."""
-    scope = {"route": None}
-    assert _extract_route_template(scope) == UNMATCHED_ROUTE
-
-
-def test_nested_route_template() -> None:
-    """Deeply nested route with multiple parameters."""
-    scope = {"route": _FakeRoute("/orgs/{org_id}/teams/{team_id}/members")}
-    result = _extract_route_template(scope)
-    assert result == "/orgs/{org_id}/teams/{team_id}/members"
 
 
 def test_scanner_404s_share_one_metrics_label() -> None:

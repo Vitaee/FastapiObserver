@@ -9,7 +9,6 @@ from fastapiobserver.sinks import (
     RotatingFileSink,
     StdoutSink,
     build_sink_handlers,
-    clear_sinks,
     get_registered_sinks,
     register_sink,
     unregister_sink,
@@ -34,92 +33,34 @@ def test_rotating_file_sink() -> None:
             assert handler.formatter is formatter
             assert handler.baseFilename == os.path.join(d, "test.log")
 
-def test_sink_registry() -> None:
-    clear_sinks()
-
-    class DummySink:
-        @property
-        def name(self) -> str:
-            return "dummy"
-
-        def create_handler(self, formatter: logging.Formatter) -> logging.Handler:
-            return logging.NullHandler()
-
-    sink = DummySink()
-    register_sink(sink)  # type: ignore
-
-    sinks = get_registered_sinks()
-    assert "dummy" in sinks
-    assert sinks["dummy"] is sink
-
-    unregister_sink("dummy")
-    assert "dummy" not in get_registered_sinks()
-
-def test_build_sink_handlers_creates_configured_sinks() -> None:
-    clear_sinks()
-
-    with tempfile.TemporaryDirectory() as d:
-        settings = ObservabilitySettings(
-            app_name="test",
-            service="test",
-            environment="test",
-            log_dir=d,
-        )
-        formatter = logging.Formatter()
-
-        handlers_with_names = build_sink_handlers(settings, formatter)
-
-        try:
-            names = [n for _, n in handlers_with_names]
-            assert "stdout" in names
-            assert "rotating_file" in names
-        finally:
-            for handler, _ in handlers_with_names:
-                handler.close()
-
-def test_sinks_registry_contract() -> None:
-    from fastapiobserver.sinks import register_sink, get_registered_sinks, clear_sinks, StdoutSink
-
-    clear_sinks()
-    assert len(get_registered_sinks()) == 0
-
+def test_sink_registry_is_keyed_by_name() -> None:
+    sink = StdoutSink()
+    register_sink(sink)
     register_sink(StdoutSink())
-    assert len(get_registered_sinks()) == 1
-    assert "stdout" in get_registered_sinks()
 
-    # idempotent
-    register_sink(StdoutSink())
-    assert len(get_registered_sinks()) == 1
+    assert list(get_registered_sinks()) == ["stdout"]
+    unregister_sink("stdout")
+    assert get_registered_sinks() == {}
 
-def test_sinks_build_handlers_contract() -> None:
-    from fastapiobserver.sinks import (
-        StdoutSink,
-        build_sink_handlers,
-        clear_sinks,
-        register_sink,
-    )
-    from fastapiobserver.config import ObservabilitySettings
-    import logging
 
-    settings = ObservabilitySettings(app_name="app", service="svc", environment="env")
+def test_build_sink_handlers_adds_registered_sinks_to_the_configured_ones(tmp_path) -> None:
     formatter = logging.Formatter()
+    settings = ObservabilitySettings(app_name="app", service="svc", environment="env")
 
-    clear_sinks()
-    handlers = build_sink_handlers(settings, formatter)
-    assert len(handlers) == 1
-    assert isinstance(handlers[0][0], logging.StreamHandler)
-    assert handlers[0][1] == "stdout"
+    [(handler, name)] = build_sink_handlers(settings, formatter)
+    assert isinstance(handler, logging.StreamHandler)
+    assert name == "stdout"
 
-    clear_sinks()
     register_sink(StdoutSink())
-    handlers = build_sink_handlers(settings, formatter)
-    # The factory merges registered sinks with builtin sinks.
-    # Both StdoutSink (builtin) and registered StdoutSink will be in the list
-    assert len(handlers) == 2
-    assert handlers[0][1] == "stdout"
-    assert handlers[1][1] == "stdout"
+    assert [n for _, n in build_sink_handlers(settings, formatter)] == ["stdout", "stdout"]
 
-    assert handlers[0][1] == "stdout"
+    with_files = ObservabilitySettings(app_name="app", service="svc", log_dir=str(tmp_path))
+    handlers = build_sink_handlers(with_files, formatter)
+    try:
+        assert "rotating_file" in [n for _, n in handlers]
+    finally:
+        for handler, _ in handlers:
+            handler.close()
 
 
 def test_retired_settings_are_reported_with_their_replacements(

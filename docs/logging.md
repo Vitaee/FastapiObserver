@@ -11,7 +11,7 @@ Configure your application logger first, then install diagnostics:
 ```python
 from fastapiobserver import install_observability
 
-# Your existing logging configuration, including approved redaction, is in place.
+# Your existing logging configuration, including your redaction, is in place.
 install_observability(app, configure_logging=False)
 ```
 
@@ -64,9 +64,8 @@ Standard request event fields include:
 - `http.route`: the matched route template, omitted when no route matched
 - `duration_ms` and `app_duration_ms`
 - `response_start_ms`, `first_body_ms`, `stream_duration_ms`, and `response_bytes` (total response body bytes sent). See [route and timing](request-diagnostics.md#route-and-timing)
-- `response_completed`, `cancelled`, `client_disconnected`, `after_disconnect_ms`, and `after_disconnect_calls` (`{"db": N, "http": M}`)
-- `validation_errors`: on `422` responses, up to 16 field locations and error types (`[{"loc": "body.age", "type": "int_parsing"}]`) without raw input values
-- `diagnostics`: per-request list of triggered anomalies (`db.n_plus_one`, `http.n_plus_one`, `db.connection_held_during_http`, `db.pool_exhausted`, `threadpool.saturated`, `event_loop.blocked`)
+- `response_completed`, `cancelled`, `client_disconnected`, `after_disconnect_ms` and `after_disconnect_calls`. See [client disconnects](servers.md#client-disconnects-and-shutdown)
+- `diagnostics` and, on `422` responses, `validation_errors`. See [per-request diagnostics](request-diagnostics.md#per-request-diagnostics-and-422-validation-errors)
 - `observation` and `log_sampling`: see [observation coverage](request-diagnostics.md#observation-coverage) and [sampling policy](request-diagnostics.md#sampling-policy-and-delivery)
 - `db` and `http`: count and total duration of completed database queries and outbound HTTP calls. See [database tracing](db-tracing.md#query-count-and-time-on-the-request-line) and [HTTP diagnostics](opentelemetry.md#outbound-http-diagnostics).
 
@@ -140,7 +139,7 @@ Two pools make requests wait without using CPU:
 {"level": "WARNING", "logger": "fastapiobserver.pools", "message": "db.pool_exhausted", "event": {"engine": "postgresql://app@db/orders", "checked_out": 15, "limit": 15}}
 ```
 
-With Prometheus metrics enabled, `/metrics` exports pool gauges (`fastapiobserver_threadpool_busy/limit/waiting`, `fastapiobserver_db_pool_checked_out/limit{engine}` in single-process mode) and multiprocess-safe saturation counters (`fastapiobserver_threadpool_saturated_total`, `fastapiobserver_db_pool_exhausted_total{engine}`).
+The pool gauges and counters on `/metrics` are listed under [metrics](advanced.md#metrics).
 
 ## JSON Schema Contract
 

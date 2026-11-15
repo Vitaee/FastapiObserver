@@ -4,21 +4,16 @@ import json
 import logging
 import logging.config
 import sys
-import time
 
 import pytest
 
 from fastapiobserver import ObservabilitySettings, SecurityPolicy
 from fastapiobserver.logging import LOG_SCHEMA_VERSION
 from fastapiobserver import __version__ as package_version
-from fastapiobserver.logging import StructuredJsonFormatter, setup_logging, shutdown_logging
+from fastapiobserver.logging import StructuredJsonFormatter, flush_logging, shutdown_logging
 from fastapiobserver.plugins import register_log_filter
-from fastapiobserver.request_context import (
-    clear_request_id,
-    clear_user_context,
-    set_request_id,
-    set_user_context,
-)
+from fastapiobserver.request_context import set_request_id, set_user_context
+from tests.helpers import capture_logs
 
 
 def test_structured_log_schema_contract() -> None:
@@ -68,9 +63,6 @@ def test_structured_log_schema_contract() -> None:
     assert payload["request_id"] == "req-123"
     assert payload["event"]["headers"]["authorization"] == "***"
     assert payload["user_context"]["password"] == "***"
-
-    clear_request_id()
-    clear_user_context()
 
 
 def test_structured_formatter_supports_injected_dependencies() -> None:
@@ -122,137 +114,50 @@ def test_structured_formatter_supports_injected_dependencies() -> None:
 
 
 def test_queued_records_keep_exception_and_user_context() -> None:
-    class _CollectingHandler(logging.Handler):
-        def __init__(self) -> None:
-            super().__init__()
-            self.messages: list[str] = []
-
-        def emit(self, record: logging.LogRecord) -> None:
-            self.messages.append(self.format(record))
-
-    settings = ObservabilitySettings(app_name="test", service="test", environment="test")
-    collector = _CollectingHandler()
-    setup_logging(settings, force=True, logs_mode="otlp", extra_handlers=[collector])
+    collector = capture_logs(
+        ObservabilitySettings(app_name="test", service="test", environment="test")
+    )
 
     set_user_context({"user_id": "42"})
     try:
         raise RuntimeError("boom")
     except RuntimeError:
         logging.getLogger("tests.queued").exception("request failed")
-    finally:
-        clear_user_context()
     shutdown_logging()
 
-    payload = next(json.loads(m) for m in collector.messages if '"tests.queued"' in m)
+    payload = next(p for p in collector.payloads if p["logger"] == "tests.queued")
     assert payload["message"] == "request failed"
     assert payload["error"]["type"] == "RuntimeError"
     assert payload["user_context"] == {"user_id": "42"}
 
 
-def test_setup_logging_is_idempotent_with_force_mode() -> None:
+def test_setup_logging_again_writes_each_line_once() -> None:
     settings = ObservabilitySettings(app_name="test", service="test", environment="test")
-    root = logging.getLogger()
-    import fastapiobserver.logging.state as state
+    capture_logs(settings)
+    collector = capture_logs(settings)
 
-    setup_logging(settings, force=True)
-    first_count = sum(
-        1
-        for handler in root.handlers
-        if handler in state._MANAGED_HANDLERS
-    )
+    logging.getLogger("tests.twice").warning("once")
+    assert flush_logging()
 
-    setup_logging(settings, force=True)
-    second_count = sum(
-        1
-        for handler in root.handlers
-        if handler in state._MANAGED_HANDLERS
-    )
-
-    assert first_count == 1
-    assert second_count == 1
-
-
-def test_shutdown_logging_stops_queue_listener_and_removes_managed_handlers() -> None:
-    class _CollectingHandler(logging.Handler):
-        def emit(self, record: logging.LogRecord) -> None:
-            _ = record
-
-    settings = ObservabilitySettings(app_name="test", service="test", environment="test")
-    setup_logging(
-        settings,
-        force=True,
-        logs_mode="otlp",
-        extra_handlers=[_CollectingHandler()],
-    )
-
-    root = logging.getLogger()
-    import fastapiobserver.logging.state as state
-    managed_count_before = sum(
-        1
-        for handler in root.handlers
-        if handler in state._MANAGED_HANDLERS
-    )
-    assert managed_count_before == 1
-    import fastapiobserver.logging.state as state
-    assert state._QUEUE_LISTENER is not None
-
-    shutdown_logging()
-
-    managed_count_after = sum(
-        1
-        for handler in root.handlers
-        if handler in state._MANAGED_HANDLERS
-    )
-    assert managed_count_after == 0
-    assert state._QUEUE_LISTENER is None
+    assert [p["message"] for p in collector.payloads if p["logger"] == "tests.twice"] == ["once"]
 
 
 def test_setup_logging_applies_registered_log_filters() -> None:
-    class _CollectingHandler(logging.Handler):
-        def __init__(self) -> None:
-            super().__init__()
-            self.messages: list[str] = []
-
-        def emit(self, record: logging.LogRecord) -> None:
-            self.messages.append(self.format(record))
-
     register_log_filter(
         "drop.health",
         lambda record: "health probe" not in record.getMessage(),
     )
-
-    settings = ObservabilitySettings(app_name="test", service="test", environment="test")
-    collector = _CollectingHandler()
-    setup_logging(
-        settings,
-        force=True,
-        logs_mode="otlp",
-        extra_handlers=[collector],
+    collector = capture_logs(
+        ObservabilitySettings(app_name="test", service="test", environment="test")
     )
 
     logger = logging.getLogger("tests.log_filter")
     logger.info("health probe")
     logger.info("business event")
+    assert flush_logging()
 
-    deadline = time.time() + 2.0
-    while time.time() < deadline:
-        payloads = [
-            json.loads(message)
-            for message in collector.messages
-            if message.startswith("{")
-        ]
-        filtered = [p for p in payloads if p.get("logger") == "tests.log_filter"]
-        if any(p.get("message") == "business event" for p in filtered):
-            break
-        time.sleep(0.01)
-
-    payloads = [
-        json.loads(message) for message in collector.messages if message.startswith("{")
-    ]
-    filtered = [p for p in payloads if p.get("logger") == "tests.log_filter"]
-
-    assert any(p.get("message") == "business event" for p in filtered)
-    assert not any(p.get("message") == "health probe" for p in filtered)
+    messages = [p["message"] for p in collector.payloads if p["logger"] == "tests.log_filter"]
+    assert messages == ["business event"]
 
 
 def test_structured_formatter_emits_structured_error_payload() -> None:
@@ -316,16 +221,13 @@ def test_request_id_filter_standalone() -> None:
     set_request_id("filter-req-1")
     f.filter(record)
     assert getattr(record, "request_id", None) == "filter-req-1"
-    clear_request_id()
 
 def test_trace_context_filter_standalone() -> None:
     from fastapiobserver.logging import TraceContextFilter
     f = TraceContextFilter()
     record = logging.LogRecord("test", logging.INFO, "", 0, "msg", (), None)
 
-    # We just ensure it doesn't crash when OTel is not present or no active span
-    f.filter(record)
-    # trace_id/span_id should not be set if there is no context
+    assert f.filter(record)
     assert not hasattr(record, "trace_id")
 
 

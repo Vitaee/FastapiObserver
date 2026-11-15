@@ -2,8 +2,6 @@
 
 import asyncio
 import importlib.metadata
-import json
-import logging
 from pathlib import Path
 
 import pytest
@@ -12,20 +10,17 @@ from fastapi.testclient import TestClient
 
 from fastapiobserver import ObservabilitySettings, OTelSettings, install_observability
 from fastapiobserver.db_tracing import uninstrument_sqlalchemy
-from fastapiobserver.logging import setup_logging, shutdown_logging
+from fastapiobserver.logging import shutdown_logging
+from tests.helpers import capture_logs
 
 
 @pytest.mark.parametrize("asynchronous", [False, True])
-def test_real_sql_spans_and_query_totals_share_the_server_trace(asynchronous, monkeypatch):
+def test_real_sql_spans_and_query_totals_share_the_server_trace(asynchronous, span_exporter):
     pytest.importorskip("opentelemetry.instrumentation.sqlalchemy")
     from sqlalchemy import create_engine, event, text
     from sqlalchemy.ext.asyncio import create_async_engine
     from sqlalchemy.pool import NullPool
-    from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
-    import fastapiobserver.otel.tracing as tracing
 
-    exporter = InMemorySpanExporter()
-    monkeypatch.setattr(tracing, "build_otlp_exporter", lambda *_: exporter)
     uninstrument_sqlalchemy()
     engines = [create_async_engine("sqlite+aiosqlite://", poolclass=NullPool)
                if asynchronous else create_engine("sqlite://", poolclass=NullPool)
@@ -57,30 +52,25 @@ def test_real_sql_spans_and_query_totals_share_the_server_trace(asynchronous, mo
                         connection.execute(text("SELECT :number"), {"number": number})
         return {"ok": True}
 
-    class Collector(logging.Handler):
-        def emit(self, record):
-            if record.getMessage() == "request.completed":
-                self.payload = json.loads(self.format(record))
-
-    collector = Collector()
     install_observability(
         app, ObservabilitySettings(), db_engine=engines, db_commenter_enabled=False,
         otel_settings=OTelSettings(enabled=True), metrics_enabled=False,
     )
-    setup_logging(ObservabilitySettings(), logs_mode="otlp", extra_handlers=[collector])
+    collector = capture_logs()
     try:
         with TestClient(app) as client:
             response = client.get("/queries")
         shutdown_logging()
         assert response.status_code == 200
-        assert collector.payload["event"]["db"]["count"] == 12
-        spans = exporter.get_finished_spans()
+        [completed] = [p for p in collector.payloads if p["message"] == "request.completed"]
+        assert completed["event"]["db"]["count"] == 12
+        spans = span_exporter.get_finished_spans()
         queries = [s for s in spans if s.attributes.get("db.statement", "").startswith("SELECT")]
         servers = [s for s in spans if s.kind.name == "SERVER"]
         assert len(queries) == 12
         assert len(servers) == 1
         assert {s.context.trace_id for s in queries} == {servers[0].context.trace_id}
-        assert collector.payload["trace_id"] == f"{servers[0].context.trace_id:032x}"
+        assert completed["trace_id"] == f"{servers[0].context.trace_id:032x}"
         assert all(s.parent is not None for s in queries)
         [diagnostic] = [event for event in servers[0].events
                         if event.name == "fastapiobserver.db.n_plus_one"]

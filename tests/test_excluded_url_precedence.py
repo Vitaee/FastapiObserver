@@ -1,5 +1,3 @@
-"""Tests for the 3-tier excluded URL precedence in build_excluded_urls_csv."""
-
 from __future__ import annotations
 
 import pytest
@@ -12,7 +10,6 @@ parse_excluded_urls = pytest.importorskip("opentelemetry.util.http").parse_exclu
 
 
 def test_tier1_explicit_config_takes_priority(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Tier 1: explicit otel_excluded_urls overrides everything."""
     monkeypatch.setenv("OTEL_PYTHON_FASTAPI_EXCLUDED_URLS", "/should-be-ignored")
     settings = ObservabilitySettings(
         otel_excluded_urls=("/custom/path", "/another"),
@@ -24,8 +21,6 @@ def test_tier1_explicit_config_takes_priority(monkeypatch: pytest.MonkeyPatch) -
 
 
 def test_tier2_otel_env_vars_return_none(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Tier 2: when OTel env vars are set (but no explicit config),
-    return None so the SDK handles them natively."""
     monkeypatch.setenv("OTEL_PYTHON_FASTAPI_EXCLUDED_URLS", "/health,/ready")
     settings = ObservabilitySettings()
     assert settings.otel_excluded_urls is None  # not explicitly set
@@ -34,7 +29,6 @@ def test_tier2_otel_env_vars_return_none(monkeypatch: pytest.MonkeyPatch) -> Non
 
 
 def test_tier2_generic_otel_env_var(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Tier 2: generic OTEL_PYTHON_EXCLUDED_URLS also defers to SDK."""
     monkeypatch.setenv("OTEL_PYTHON_EXCLUDED_URLS", "/ping")
     monkeypatch.delenv("OTEL_PYTHON_FASTAPI_EXCLUDED_URLS", raising=False)
     settings = ObservabilitySettings()
@@ -43,8 +37,6 @@ def test_tier2_generic_otel_env_var(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_tier2_empty_string_env_var_still_defers(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Setting OTEL_PYTHON_FASTAPI_EXCLUDED_URLS='' still counts as 'set'
-    and defers to SDK rather than falling to package defaults."""
     monkeypatch.setenv("OTEL_PYTHON_FASTAPI_EXCLUDED_URLS", "")
     settings = ObservabilitySettings()
     result = build_excluded_urls_csv(settings)
@@ -52,7 +44,6 @@ def test_tier2_empty_string_env_var_still_defers(monkeypatch: pytest.MonkeyPatch
 
 
 def test_tier3_package_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Tier 3: no explicit config, no OTel env vars → auto-derive safe defaults."""
     monkeypatch.delenv("OTEL_PYTHON_FASTAPI_EXCLUDED_URLS", raising=False)
     monkeypatch.delenv("OTEL_PYTHON_EXCLUDED_URLS", raising=False)
     settings = ObservabilitySettings()
@@ -96,7 +87,6 @@ def test_path_pattern_matches_route_templates(template: str, url: str, disabled:
 
 
 def test_explicit_empty_exclusion_returns_empty_string() -> None:
-    """Operators can set OTEL_EXCLUDED_URLS='' to mean 'no exclusions at all'."""
     settings = ObservabilitySettings(otel_excluded_urls="")  # type: ignore[arg-type]
     assert settings.otel_excluded_urls == ()  # validator converts "" → empty tuple
     result = build_excluded_urls_csv(settings)
@@ -106,9 +96,6 @@ def test_explicit_empty_exclusion_returns_empty_string() -> None:
 def test_install_otel_passes_empty_excluded_urls(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Integration: install_otel actually passes excluded_urls='' to instrument_app
-    when otel_excluded_urls is explicitly set to empty. FastAPI's own tracing is
-    off, so the instrumentation is used, as on FastAPI before 0.142."""
     pytest.importorskip("opentelemetry.instrumentation.fastapi")
 
     from fastapi import FastAPI
@@ -123,7 +110,7 @@ def test_install_otel_passes_empty_excluded_urls(
 
     monkeypatch.setattr(FastAPIInstrumentor, "instrument_app", spy_instrument_app)
 
-    app = FastAPI(telemetry={"tracing": False})
+    app = FastAPI(telemetry={"tracing": False})  # the instrumentation, as before 0.142
     settings = ObservabilitySettings(otel_excluded_urls="")  # type: ignore[arg-type]
     otel_settings = OTelSettings(enabled=True, service_name="test-svc")
 

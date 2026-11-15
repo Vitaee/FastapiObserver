@@ -1,12 +1,12 @@
 """Coverage follows the actual observing layer, never the presence of a provider."""
 
 import logging
-import json
 import pytest
 from types import SimpleNamespace
 
 from fastapiobserver.experimental import observe_operation
 from fastapiobserver.request_context import get_request_state
+from tests.helpers import capture_logs
 
 
 def terminal(caplog):
@@ -61,17 +61,10 @@ def test_sampling_is_unknown_for_a_borrowed_logger(caplog):
 
 
 def test_managed_sampling_records_selection_and_failure_promotion():
-    from fastapiobserver import ObservabilitySettings, setup_logging
+    from fastapiobserver import ObservabilitySettings
     from fastapiobserver.request_context import set_trace_id
     from fastapiobserver.logging import flush_logging
-    payloads = []
-
-    class Capture(logging.Handler):
-        def emit(self, record):
-            payloads.append(json.loads(self.format(record)))
-
-    setup_logging(ObservabilitySettings(log_sample_rate=.5), logs_mode="otlp",
-                  extra_handlers=[Capture()])
+    collector = capture_logs(ObservabilitySettings(log_sample_rate=.5))
     set_trace_id("0" * 31 + "1")
     with observe_operation("selected"):
         pass
@@ -81,7 +74,9 @@ def test_managed_sampling_records_selection_and_failure_promotion():
     except ValueError:
         pass
     assert flush_logging()
-    selected, failed = [p["event"] for p in payloads if p["message"].startswith("operation.")]
+    selected, failed = [
+        p["event"] for p in collector.payloads if p["message"].startswith("operation.")
+    ]
     assert selected["log_sampling"] == {
         "owner": "observer", "inclusion_probability": .5, "reason": "sampled",
     }
@@ -131,24 +126,16 @@ def test_sampled_fallback_and_overflow_remain_partial(caplog):
 
 
 def test_sampling_probability_tracks_the_cached_decision_across_reconfiguration():
-    from fastapiobserver import ObservabilitySettings, setup_logging
+    from fastapiobserver import ObservabilitySettings
     from fastapiobserver.request_context import set_trace_id
     from fastapiobserver.logging import flush_logging
-    payloads = []
-
-    class Capture(logging.Handler):
-        def emit(self, record):
-            payloads.append(json.loads(self.format(record)))
-
-    setup_logging(ObservabilitySettings(log_sample_rate=.5), logs_mode="otlp",
-                  extra_handlers=[Capture()])
+    capture_logs(ObservabilitySettings(log_sample_rate=.5))
     set_trace_id("0" * 31 + "1")
     with observe_operation("reconfigured"):
         logging.getLogger("application").info("first.sampling.decision")
-        setup_logging(ObservabilitySettings(log_sample_rate=.25), logs_mode="otlp",
-                      extra_handlers=[Capture()])
+        collector = capture_logs(ObservabilitySettings(log_sample_rate=.25))
     assert flush_logging()
-    [event] = [p["event"] for p in payloads if p["message"] == "operation.completed"]
+    [event] = [p["event"] for p in collector.payloads if p["message"] == "operation.completed"]
     assert event["log_sampling"]["inclusion_probability"] == .5
 
 
@@ -158,21 +145,17 @@ def test_sampling_probability_tracks_the_cached_decision_across_reconfiguration(
 def test_retained_request_records_have_probability_one(path, slow_ms, reason):
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
-    from fastapiobserver import ObservabilitySettings, install_observability, setup_logging
-    payloads = []
-    class Capture(logging.Handler):
-        def emit(self, record):
-            payloads.append(json.loads(self.format(record)))
+    from fastapiobserver import ObservabilitySettings, install_observability
     app = FastAPI()
     @app.get("/ok")
     async def ok():
         return {"ok": True}
     settings = ObservabilitySettings(log_sample_rate=0, log_slow_request_ms=slow_ms)
     install_observability(app, settings, metrics_enabled=False)
-    setup_logging(settings, logs_mode="otlp", extra_handlers=[Capture()])
+    collector = capture_logs(settings)
     with TestClient(app) as client:
         client.get(path)
-    [event] = [p["event"] for p in payloads if p["message"].startswith("request.")]
+    [event] = [p["event"] for p in collector.payloads if p["message"].startswith("request.")]
     assert event["log_sampling"] == {
         "owner": "observer", "inclusion_probability": 1.0, "reason": reason,
     }

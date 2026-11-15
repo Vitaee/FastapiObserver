@@ -56,18 +56,7 @@ def build_my_backend(*, service: str, environment: str, exemplars_enabled: bool)
 register_metrics_backend("my_backend", build_my_backend)
 ```
 
-### Formatter Dependency Injection
+### Formatter callables
 
-`StructuredJsonFormatter` accepts injectable callables for enrichment and
-sanitization, keeping defaults unchanged while improving testability:
-
-```python
-formatter = StructuredJsonFormatter(
-    settings,
-    enrich_event=my_enricher,
-    sanitize_payload=my_sanitizer,
-)
-```
-
----
-
+`StructuredJsonFormatter` takes `enrich_event` and `sanitize_payload` callables.
+See [keep your own sanitizer](security.md#keep-your-own-sanitizer).

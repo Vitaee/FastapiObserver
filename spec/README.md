@@ -1,115 +1,108 @@
 # Draft operation and completed-call contract
 
-Status: **experimental, incomplete**. The JSON representation remains event
-schema **0.1.0**. Python API and library versions evolve separately. This draft
-records the implemented operation/call slice; it is not contract 1.0, a new
-transport protocol, or certification of another-language implementation.
+Status: experimental draft, event schema **0.1.0**. The schema version changes
+independently of the Python package. Usage is in the
+[experimental operations guide](https://vitaee.github.io/FastapiObserver/experimental-core/).
 
-## Representation and lifecycle
+- [`operation-event.schema.json`](operation-event.schema.json) describes the
+  `event` of an operation's terminal log record.
+- [`fixtures/operation-events.json`](fixtures/operation-events.json) holds valid
+  and invalid examples.
+- `tests/test_operation_contract.py` validates the fixtures and real emitted
+  events. Ownership, concurrency, expiry and bounds are covered by
+  `tests/test_call_ownership.py` and `tests/test_call_recording.py`, since a
+  schema check cannot test them.
 
-`operation-event.schema.json` describes the `event` inside an operation terminal
-log record. The surrounding existing JSON log envelope has its own schema.
-Output is UTF-8 JSON with finite numbers. Unknown fields are allowed so consumers
-can ignore additions. Required identifiers are lowercase 32-digit hexadecimal
-strings. Missing dependency groups mean no observations or unknown coverage;
-they must not be interpreted as a measured zero.
+## Event
 
-An operation has a single start and terminal outcome: `success`, `failure`, or
-`cancelled` for observed runtime cancellation. Python currently recognizes
-`asyncio.CancelledError`. A cause such as shutdown/disconnect is not inferred.
-The operation is single-use; exceptions/cancellation propagate unchanged.
-Closing restores outer context and invalidates the operation's recording token.
-No logging handler, provider, exporter, watcher, signal handler or driver hook is
-installed by entering an operation.
+| Outcome | Message | Level |
+|---|---|---|
+| `success` | `operation.completed` | `INFO` |
+| `failure` | `operation.failed` | `ERROR` |
+| `cancelled` (`asyncio.CancelledError`) | `operation.cancelled` | `WARNING` |
 
-`duration_ms` is monotonic operation elapsed time. Dependency `ms` is accumulated
-completed-call time and may exceed elapsed time when work overlaps. Child
-operation totals are exclusive; the parent does not aggregate them again.
-This timing does not replace FastAPI's existing response/application distinction.
+Required fields are `schema_version`, `name`, `operation_id`, `outcome` and
+`duration_ms`. Optional fields are `parent_operation_id`, `db`, `http`,
+`observation` and `log_sampling`. Identifiers are 32 lowercase hexadecimal
+digits. Output is UTF-8 JSON with finite numbers. Consumers ignore unknown
+fields.
+
+A name has 1–128 printable characters (`str.isprintable()`). `duration_ms` is
+monotonic elapsed time. A dependency group's `ms` is the sum of its completed
+calls, so it can exceed `duration_ms` when calls overlap. The event carries no
+exception message, stack trace or SQL text. A missing `db` or `http` group means
+nothing was observed; read it as unknown, not zero.
+
+## Lifecycle and context
+
+- An operation is entered once, with `with` or `async with`. Exceptions and
+  cancellation propagate unchanged. The cause of a cancellation is not recorded.
+- Entering an operation installs no logging handler, provider, exporter,
+  watcher, signal handler or driver hook.
+- A nested operation inherits the request ID and a copy of the user context.
+  Its call totals are its own; the parent's totals exclude them. Leaving it
+  restores the outer state.
+- Concurrent tasks can each own an operation. Work on an executor needs an
+  explicit `contextvars.copy_context().run`; new threads start without the
+  operation's context.
+- Closing an operation invalidates its recording token. Closed copied contexts
+  stop exposing its request ID and user context.
 
 ## Completed-call ownership
 
-- A start handle captures the originating operation, monotonic start and process.
-  Its completion is admitted at most once, including concurrent callbacks.
-- A manual completed-call API records against the explicit operation object,
-  independently of the callback's current thread/task/context.
-- Handles and captured spans reject closed, collected or parent-process owners.
-  A missing owner never falls back to whichever operation is currently running.
-- State owns one lazy lifetime token. Calls and sampled-span tracking borrow it
-  weakly. Closing releases tracking entries even when the application retains
-  the operation object; late handles cannot keep request payloads alive.
-- Sampled spans capture ownership at span start, keyed by trace/span identity.
-  The per-provider registry admits at most 4,096 active entries. Overflowed
-  observations are omitted; they remain unknown rather than being reassigned.
-- Native HTTP deduplication captures ownership at start, including either
-  instrumentor wrapping order. Another active HTTP client at completion cannot
-  suppress an unrelated span. SQLAlchemy's span scope remains excluded because
-  its native engine hooks own those counts.
+- A call belongs to the operation where it started. A start handle captures
+  that operation, a monotonic start time and the process ID.
+- `finish()` is admitted once, even with concurrent callbacks. It returns
+  `False` for a closed, collected or parent-process owner, and the call is not
+  given to whichever operation is current.
+- `record_call()` records against the operation object it is called on,
+  whatever thread, task or context calls it.
+- Handles and sampled-span tracking hold the state's lifetime token weakly, so
+  closing frees their entries even while the application keeps the operation
+  object.
+- Sampled client spans capture their owner at span start, keyed by trace and
+  span ID. Each tracer provider tracks at most 4,096 active spans; spans beyond
+  that are left out of the totals.
+- Native HTTP deduplication uses the owner captured at start, in either
+  instrumentor wrapping order. SQLAlchemy spans are skipped because the engine
+  hooks already count those queries.
 
-## Input, bounds and privacy
+## Input and bounds
 
-Supported call kinds are `db` and `http`. Durations are seconds at the recording
-interface, finite and nonnegative; emitted accumulated milliseconds must remain
-finite. Invalid manual metadata raises before mutation. Invalid adapter input,
-expired ownership and aggregate overflow return false without changing totals.
-A rejected `finish()` attempt is not retried on another owner.
+Call kinds are `db` and `http`. Recorded durations are finite, nonnegative
+seconds; the accumulated milliseconds must stay finite. `record_call()` raises
+`ValueError` or `TypeError` on invalid input before changing anything. Invalid adapter input,
+an expired owner or numeric overflow returns `False` and leaves totals as they
+were.
 
-Error categories contain 1–64 ASCII lowercase letters/digits/underscores and
-start with a letter. Each group keeps at most 32 named categories plus `other`;
-overflow categories join `other`, preserving total/error counts. Category values
-are codes, never exception messages, user identifiers or URLs.
+An error category matches `[a-z][a-z0-9_]{0,63}`. Each group keeps 32 named
+categories; later ones count under `other`, so total and error counts stay
+complete. Categories are codes, never exception messages, user IDs or URLs.
 
-The recorder does not retain raw statements: the existing full-statement SHA-256
-algorithm and cap of 128 fingerprints remain unchanged. A fingerprint is not
-anonymization. The operation boundary emits no SQL text or exception details.
-Application context/logging and upstream span payloads retain their separate
-sanitizer and policy requirements.
+SQL statements are kept only as SHA-256 fingerprints, at most 128 per request.
+A fingerprint can still be matched by guessing the statement, so it is not
+anonymisation.
 
-## Count layer and capability limits
+## Count layers
 
-| Source | Implemented observation layer | Completeness / deduplication |
+| Source | What one call is | Notes |
 |---|---|---|
-| SQLAlchemy engine hooks | Successful completed cursor execution | Failed executions are excluded; trace sampling cannot change native totals |
-| Explicit HTTP helpers | Client send through stream consumption/close | Status/transport/cancellation categories; native/client span counts once |
-| Custom manual adapter | Layer selected by adapter author | Each `record_call` is a new observation; one handle finishes once |
-| Sampled client spans | Completed recording CLIENT span | Partial by sampling, hook availability and ownership-tracking capacity |
+| SQLAlchemy engine hooks | A successful cursor execution | Failures go to `db.sqlalchemy` only; trace sampling has no effect |
+| `instrument_httpx_client()`, `instrument_requests_session()` | One `send()`, until the response or stream is consumed or closed | A call with a client span counts once |
+| `record_call()`, `start_call()` | Whatever the adapter author chose | Each `record_call()` is one call; a handle finishes once |
+| Sampled client spans | A finished recording `CLIENT` span | Partial: depends on sampling and the 4,096-span cap |
 
-The optional `db.sqlalchemy` group separately reports native `attempted`,
-`succeeded`, `failed`, `in_flight`, `failed_ms` and bounded `errors`. Its layer is
-entry to `before_cursor_execute`, completed by the success/error hook for that
-context. Failed execution does not increment legacy `db.count/ms` or fingerprints.
-Acquisition, compilation, fetch and transaction failures are outside this layer.
+Record each call through one source. Recording a call by hand that a native
+hook or a sampled span already counts counts it twice.
 
-Optional `observation` metadata identifies fixed sources and coverage:
-`unknown`, `instrumented_clients`, `caller_reported`, or `partial`. Missing groups
-remain unknown. Instrumented-client coverage is limited to attached clients and
-their documented layers. Sampled sources, unfinished handles, mixed reporting
-and tracking overflow remain partial; `in_flight` and `dropped_spans` disclose
-these conditions. No provider's presence proves completeness.
+`db.sqlalchemy`, `observation` and `log_sampling` are described in
+[request diagnostics](https://vitaee.github.io/FastapiObserver/request-diagnostics/).
+`log_sampling` records the selection made before the queue. Queue overflow,
+sink failures and export losses are counted separately.
 
-Optional `log_sampling` records `owner`, `inclusion_probability` and `reason`.
-Borrowed/application logging has a null probability and unknown reason. Observer
-records its actual cached selection probability, or 1.0 for retained warnings,
-failure/slow promotions and missing identities. This is selection conditional on
-log-level admission, not a delivery guarantee. Queue/sink/export losses and
-application-owned policies require separate accounting.
+## Open before 1.0
 
-Do not manually record a call already owned by a native adapter or sampled-span
-fallback. Automatic deduplication of arbitrary custom-client spans is not
-implemented. A new adapter must declare its observing layer and ownership before
-claiming tracing-independent or complete counts. The manual API alone does not
-establish tested Redis/MongoDB/Tortoise support.
-
-The fixture/schema tests validate structure, finite JSON serialization and real
-emitted events. Behavioral tests separately cover ownership, concurrency,
-deduplication, expiry, resource bounds and exception preservation. Schema
-validation alone is not runtime conformance.
-
-## Decisions still blocking portable 1.0
-
-Common configuration precedence, full metric/semantic-convention mappings,
-integer precision beyond JavaScript's safe range, Unicode name validation,
-byte/depth budgets, adapter capability manifests, deadlines/delivery policy,
-broader cancellation models and independent-language validation remain open.
-Python's current operation names use `str.isprintable()` and a 128-character cap;
-the schema captures structural limits rather than defining Unicode categories.
+Configuration precedence, metric and semantic-convention mappings, integers
+beyond JavaScript's safe range, Unicode rules for names, byte and depth limits,
+adapter capability manifests, shutdown deadlines, other cancellation models and
+a second implementation in another language.
