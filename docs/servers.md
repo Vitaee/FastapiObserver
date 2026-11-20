@@ -57,7 +57,7 @@ Leave the root logger without handlers: in each worker, `install_observability()
 
 ### Several workers and `--preload`
 
-With `--preload`, Gunicorn imports your app and runs `install_observability()` in the master process before forking workers. Each worker gets its own log queue and listener thread after the fork, as described under [the log pipeline](architecture.md#the-log-pipeline). The event-loop watchdog and thread-pool watcher start in each worker's ASGI lifespan. With `--preload` and OTLP export enabled, prefer `OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf` over gRPC channels created pre-fork.
+With `--preload`, Gunicorn imports your app and runs `install_observability()` in the master process before forking workers. Each worker gets its own log queue and listener thread after the fork, as described under [the log pipeline](architecture.md#the-log-pipeline). The event-loop watchdog, the thread-pool watcher and the garbage-collection timer start in each worker's ASGI lifespan. With `--preload` and OTLP export enabled, prefer `OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf` over gRPC channels created pre-fork.
 
 ### Prometheus multiprocess mode
 

@@ -16,6 +16,7 @@ from .config import ObservabilitySettings, retired_env_vars
 from .db_queries import count_queries
 from .control_plane import RuntimeControlSettings, mount_control_plane
 from .logging import flush_logging, setup_logging
+from .gc_pauses import watch_gc
 from .loop_watchdog import EventLoopWatchdog
 from .profiles import apply_profile_context
 from .metrics import (
@@ -477,6 +478,7 @@ async def observability_lifespan(app: FastAPI) -> typing.AsyncGenerator[typing.A
         _auto_discover_excluded_routes(app, state.settings)
         check_routes(app, state.reported_route_issues)
         watch_thread_pool()
+        watch_gc()
         if state.settings.loop_block_threshold_ms:
             watchdog = EventLoopWatchdog(state.settings.loop_block_threshold_ms / 1000)
             watchdog.start()

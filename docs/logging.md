@@ -96,6 +96,7 @@ OBS_LOG_LEVEL_ON_ERROR=DEBUG
 
 - If the request ends in a `5xx` or an unhandled exception, up to the last 200 held lines are flushed just before `request.failed` or `request.server_error` with the same `request_id` and `trace_id`.
 - Otherwise they are dropped without formatting or queue overhead.
+- A message longer than 32 KiB, held or not, is cut to that length and ends with `... [N characters cut]`.
 - A level set through the [runtime control plane](runtime-control.md) replaces `OBS_LOG_LEVEL`, and holding stays active.
 
 ## Sampling request logs
@@ -126,6 +127,23 @@ When the loop stalls past the threshold, the watchdog thread logs one warning pe
 ```json
 {"level": "WARNING", "logger": "fastapiobserver.event_loop", "message": "event_loop.blocked", "event": {"blocked_ms": 212, "stack": "...  File \"/app/orders.py\", line 41, in get_order\n    rates = requests.get(RATES_URL).json()\n"}}
 ```
+
+## Garbage-collection pauses
+
+A garbage collection stops every thread until it ends. An old-generation collection
+on a large heap can take hundreds of milliseconds, and Python reports no duration
+for it. From the app's lifespan on, the library times each collection. A request
+that collections stopped for 100 ms or more in total gets `"gc.pause"` in its
+`diagnostics` and the time in `gc_pause_ms`, and `fastapiobserver_gc_pause_total`
+counts it:
+
+```json
+{"message": "request.completed", "event": {"http.route": "/orders", "duration_ms": 912.4, "diagnostics": ["gc.pause"], "gc_pause_ms": 847}}
+```
+
+Collections that often pause long usually come from many long-lived objects;
+`gc.freeze()` after startup keeps the objects created at import out of later
+collections.
 
 ## Full thread and database pools
 

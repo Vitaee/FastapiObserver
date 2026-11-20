@@ -20,13 +20,15 @@ The library also handles route-template metric labels (`/users/{user_id}` instea
 | `default` (library-owned JSON queue + redaction) | ~42 µs |
 | `application` (`configure_logging=False`) | ~26 µs |
 | `sampled` (`OBS_LOG_SAMPLE_RATE=0.1`) | ~25 µs |
-| Each outbound call through `instrument_httpx_client` (no OTel) | +55 µs |
+| Each outbound call through `instrument_httpx_client` | +16 µs |
+| ...plus OpenTelemetry's HTTPX instrumentation, when `[otel-httpx]` is installed, even with tracing off | +37 µs |
 
 In `sampled` mode, a fast successful request whose line is dropped skips building and redacting it. Metrics, warnings and errors are still recorded for every request.
 
 ```bash
 python examples/benchmarks/request_cpu.py default > /dev/null
-# The HTTP row is this run minus the same run with COUNT_HTTP_CALLS=0:
+# The HTTP rows are this run minus the same run with COUNT_HTTP_CALLS=0,
+# without and with opentelemetry-instrumentation-httpx installed:
 python examples/benchmarks/request_cpu.py http > /dev/null
 ```
 
