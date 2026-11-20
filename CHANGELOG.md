@@ -4,7 +4,17 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Changed
+- A field or header name is masked when it holds a configured name as whole words, not only when it equals one. `new_password`, `passwordConfirmation`, `password2`, `accessToken`, `id_token`, `X-Auth-Token`, `secret_key` and `x_api_key` are now masked by the default list, and the `gdpr` preset covers `user_email` and `phone_number`. Part of a word does not match, so `max_tokens`, `tokenizer` and `passwordless` stay visible. Some harmless fields are masked too, such as `token_type` and `password_changed_at`. The default list itself is unchanged.
+
 ### Fixed
+- In a WebSocket session, `db.n_plus_one` and `http.n_plus_one` count repeats within one message, not across the session. In 2.4.0 a handler that ran one query per message was reported after ten messages.
+- `OBS_LOG_SAMPLE_RATE` no longer applies to WebSocket sessions. In 2.4.0 the `INFO` lines of an unsampled session were held until it closed, up to 200 per open connection, and then dropped; 2.3.0 wrote them as they happened.
+- With `orjson` installed (the `[fast-json]` and `[all]` extras), a log line holding a value orjson can't encode, such as a `Decimal`, `set`, `bytes`, `Path`, a custom object or an integer past 64 bits, is written as the standard-library encoder writes it. Before, the line was lost, and five in a row opened the stdout circuit breaker, which dropped every line for 30 seconds.
+- With body capture on, a captured body is read as a URL-encoded form only when it holds nothing but URL query characters. Multipart, XML and other text containing an `=` used to be logged as one unredacted form field; they are now masked as a whole, as the security guide says. A body with a raw `;` is masked too.
+- `OBS_LOG_SAMPLE_RATE` follows the trace ID again for a trace this service starts. In 2.4.0, a request with no incoming `traceparent` was sampled by a hash of its request ID, so its log line and its trace were kept or dropped independently.
+- The `http.n_plus_one` and `db.connection_held_during_http` warnings show an outbound call's `target` as its method and host, such as `POST hooks.slack.com`. In 2.4.0 they included the path, which holds the secret in webhook URLs and bot tokens. `target_fingerprint` still tells paths apart.
+- A client closing a WebSocket is logged as `websocket.closed` at `INFO` with its close code when the handler does not catch `WebSocketDisconnect`, as the usual receive loop doesn't. In 2.4.0 it was logged as `websocket.failed` at `ERROR` with a traceback. The exception still reaches the server.
 - Docs that did not match 2.4.0:
   - CPU figures in the README and on the benchmarks page are re-measured for 2.4.0, next to 2.3.0 on the same machine: about 42 µs per request by default and 26 µs with application-owned logging. An outbound call through `instrument_httpx_client` adds about 55 µs, not the 12 µs the page stated. The end-to-end latency table is removed because no script in the repository produces it.
   - `http.timeout_missing` is documented in the OpenTelemetry guide.

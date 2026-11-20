@@ -355,7 +355,10 @@ def test_repeated_http_calls_emit_n_plus_one_warning_and_metric(library, caplog)
         @app.get("/orders")
         def list_orders():
             for item_id in range(12):
-                client.get(f"https://user:secret@downstream.test/users/{item_id}?token=secret")
+                client.get(
+                    f"https://user:secret@downstream.test"
+                    f"/hooks/secret-in-path/users/{item_id}?token=secret"
+                )
             return {}
 
         install_observability(app, ObservabilitySettings(), metrics_enabled=True)
@@ -380,7 +383,8 @@ def test_repeated_http_calls_emit_n_plus_one_warning_and_metric(library, caplog)
     assert warning["method"] == "GET"
     assert warning["route"] == "/orders"
     assert warning["count"] == 12
-    assert warning["target"] == "GET downstream.test/users/:id"
+    # Method and host only: a path can hold a secret, as webhook URLs do.
+    assert warning["target"] == "GET downstream.test"
     assert len(warning["target_fingerprint"]) == 64
     assert warning["code.function.name"].endswith("list_orders")
     assert "secret" not in str(warning)

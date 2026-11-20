@@ -4,10 +4,14 @@ import json
 import logging
 import logging.config
 import sys
+from decimal import Decimal
+from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 from fastapiobserver import ObservabilitySettings, SecurityPolicy
+from fastapiobserver.logging import formatter as formatter_module
 from fastapiobserver.logging import LOG_SCHEMA_VERSION
 from fastapiobserver import __version__ as package_version
 from fastapiobserver.logging import StructuredJsonFormatter, flush_logging, shutdown_logging
@@ -258,3 +262,38 @@ def test_formatter_built_by_dictconfig_reads_settings_from_env(
     assert payload["app_name"] == "orders-api"
     assert payload["service"] == "orders"
     assert payload["message"] == "Listening"
+
+
+def _logged_event_value(value: object) -> object:
+    formatter = StructuredJsonFormatter(ObservabilitySettings(), security_policy=SecurityPolicy())
+    record = logging.LogRecord("tests.logger", logging.INFO, __file__, 1, "order.paid", (), None)
+    record.event = {"value": value}
+    return json.loads(formatter.format(record))["event"]["value"]
+
+
+@pytest.mark.parametrize(
+    "value",
+    [Decimal("19.99"), {"a"}, b"abc", Path("/tmp/x"), 2**70],
+    ids=["decimal", "set", "bytes", "path", "big-int"],
+)
+def test_orjson_writes_the_values_the_standard_library_writes(
+    value: object, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # orjson alone rejects these, which lost the line and counted as a sink failure.
+    pytest.importorskip("orjson")
+    with_orjson = _logged_event_value(value)
+
+    monkeypatch.setattr(formatter_module, "orjson", None)
+    assert with_orjson == _logged_event_value(value)
+
+
+def test_a_record_the_fast_encoder_rejects_is_still_written(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Runs without orjson installed: any encoder error falls back to the standard library.
+    def reject(payload: object, default: object = None) -> bytes:
+        raise TypeError("Integer exceeds 64-bit range")
+
+    monkeypatch.setattr(formatter_module, "orjson", SimpleNamespace(dumps=reject))
+
+    assert _logged_event_value(2**70) == 2**70

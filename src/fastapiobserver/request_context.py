@@ -265,6 +265,23 @@ class RequestState:
                 self.after_disconnect_calls = {}
             self.after_disconnect_calls[kind] = self.after_disconnect_calls.get(kind, 0) + 1
 
+    def forget_unrepeated_calls(self) -> None:
+        """Drop the counts of statements and targets that haven't reached the N+1
+        threshold.
+
+        A WebSocket session calls it at each message. The same query once per
+        message isn't a query per item, however long the session lasts, while a
+        burst within one message still counts and stays recorded.
+        """
+        if not self.statements and not self.http_targets:
+            return
+        with _CALLS_LOCK:
+            for counts in (self.statements, self.http_targets):
+                for fingerprint in [
+                    f for f, count in counts.items() if count < _N_PLUS_ONE_MIN_REPEATS
+                ]:
+                    del counts[fingerprint]
+
     def record_diagnostic_fact(self, name: str) -> None:
         with _CALLS_LOCK:
             if not self.closed:

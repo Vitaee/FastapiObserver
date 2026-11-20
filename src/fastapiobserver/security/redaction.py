@@ -18,20 +18,62 @@ _PROCESS_KEY = secrets.token_bytes(32)  # for policies without a hash_key
 # connection errors repeat in their message. Neither part can hold whitespace,
 # "/", "?", "#" or "@" unencoded, so a match never runs past the URL.
 _URL_CREDENTIALS = re.compile(r"://[^\s/?#@:]*:[^\s/?#@]+@")
+# What a URL-encoded form is made of: the characters RFC 3986 allows in a query
+# string. Multipart, XML and free text hold whitespace, quotes or angle brackets,
+# so one "=" doesn't make them a form. ";" is left out because parsers differ on
+# whether it separates fields, which would hide a field name from the check.
+_FORM_BODY = re.compile(r"[A-Za-z0-9\-._~!$&'()*+,/:=?@%]+")
+_WORD = re.compile(r"[^\W\d_]+|\d+")
+# "accessToken" and "APIKey" start a new word without a separator.
+_CAMEL_BOUNDARY = re.compile(r"(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])")
+# Names from captured bodies are the client's to choose: remember only so many,
+# and only short ones.
+_MAX_REMEMBERED_NAMES = 4096
+_MAX_REMEMBERED_NAME_LENGTH = 64
+
+
+def _words(name: str) -> tuple[str, ...]:
+    return tuple(_WORD.findall(name.lower()))
+
+
+class _SensitiveNames(dict[str, bool]):
+    """``names[key]`` is whether *key* holds a configured name, exactly or as whole words.
+
+    ``password`` covers ``new_password``, ``passwordConfirmation`` and
+    ``password2`` but not ``passwordless``, and ``token`` covers ``id_token`` but
+    not ``max_tokens``. A dict, so a name seen before costs one lookup.
+    """
+
+    def __init__(self, names: tuple[str, ...]) -> None:
+        super().__init__()
+        self._exact = frozenset(_normalize_key(name) for name in names)
+        self._phrases = frozenset(filter(None, map(_words, self._exact)))
+        self._longest = max(map(len, self._phrases), default=0)
+
+    def __missing__(self, key: str) -> bool:
+        found = _normalize_key(key) in self._exact or any(
+            words[start:start + size] in self._phrases
+            for words in {_words(key), _words(_CAMEL_BOUNDARY.sub(" ", key))}
+            for size in range(1, min(self._longest, len(words)) + 1)
+            for start in range(len(words) - size + 1)
+        )
+        if len(self) < _MAX_REMEMBERED_NAMES and len(key) <= _MAX_REMEMBERED_NAME_LENGTH:
+            self[key] = found
+        return found
 
 
 @functools.lru_cache(maxsize=64)
 def _policy_key_sets(
     policy: SecurityPolicy,
-) -> tuple[frozenset[str], frozenset[str], frozenset[str] | None, frozenset[str] | None]:
-    # Policies are frozen, so the normalized lookup sets are built once per policy
-    # instead of once per log record.
+) -> tuple[_SensitiveNames, _SensitiveNames, frozenset[str] | None, frozenset[str] | None]:
+    # Policies are frozen, so the lookups are built once per policy instead of
+    # once per log record.
     def normalized(items: tuple[str, ...]) -> frozenset[str]:
         return frozenset(_normalize_key(item) for item in items)
 
     return (
-        normalized(policy.redacted_fields),
-        normalized(policy.redacted_headers),
+        _SensitiveNames(policy.redacted_fields),
+        _SensitiveNames(policy.redacted_headers),
         normalized(policy.header_allowlist) if policy.header_allowlist is not None else None,
         normalized(policy.event_key_allowlist)
         if policy.event_key_allowlist is not None
@@ -66,7 +108,8 @@ def redact_body(body: str, policy: SecurityPolicy) -> str:
     try:
         value = json.loads(body)
     except (ValueError, RecursionError):
-        if body.lstrip().startswith(("{", "[", '"', "\ufeff")):
+        # Also covers cut-off JSON, which starts with "{", "[" or a quote.
+        if not _FORM_BODY.fullmatch(body):
             return policy.mask_text
         try:
             pairs = parse_qsl(body, keep_blank_values=True, strict_parsing=True, errors="strict")
@@ -77,7 +120,7 @@ def redact_body(body: str, policy: SecurityPolicy) -> str:
                 (
                     key,
                     _redact_value(value, policy)
-                    if _normalize_key(key) in sensitive_fields
+                    if sensitive_fields[key]
                     else value,
                 )
                 for key, value in pairs
@@ -139,8 +182,8 @@ def _sanitize(
 def _sanitize_mapping(
     data: Mapping[str, Any],
     policy: SecurityPolicy,
-    sensitive_fields: frozenset[str],
-    sensitive_headers: frozenset[str],
+    sensitive_fields: _SensitiveNames,
+    sensitive_headers: _SensitiveNames,
     parent_is_headers: bool,
     depth: int,
     header_allowlist: frozenset[str] | None,
@@ -148,7 +191,8 @@ def _sanitize_mapping(
 ) -> dict[str, Any]:
     out: dict[str, Any] = {}
     for key, value in data.items():
-        normalized_key = _normalize_key(str(key))
+        name = str(key)
+        normalized_key = _normalize_key(name)
 
         if parent_is_headers and header_allowlist is not None:
             if normalized_key not in header_allowlist:
@@ -157,8 +201,8 @@ def _sanitize_mapping(
             if normalized_key not in event_key_allowlist:
                 continue
 
-        should_redact = normalized_key in sensitive_fields or (
-            parent_is_headers and normalized_key in sensitive_headers
+        should_redact = sensitive_fields[name] or (
+            parent_is_headers and sensitive_headers[name]
         )
 
         if should_redact:
@@ -187,8 +231,8 @@ def _sanitize_mapping(
 def _sanitize_value(
     value: Any,
     policy: SecurityPolicy,
-    sensitive_fields: frozenset[str],
-    sensitive_headers: frozenset[str],
+    sensitive_fields: _SensitiveNames,
+    sensitive_headers: _SensitiveNames,
     parent_is_headers: bool,
     depth: int,
     header_allowlist: frozenset[str] | None,

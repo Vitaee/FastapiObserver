@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import sys
 
 from ..request_context import RequestState, get_request_id, get_request_state, get_trace_id
 from . import state
@@ -79,6 +80,24 @@ def will_write_request_log(level: int, request_state: RequestState) -> bool:
     return level >= held.level and (level >= logging.WARNING or held._sampled(request_state))
 
 
+def _trace_id_here() -> str | None:
+    """The trace ID a record logged now would carry, found as TraceContextFilter
+    finds it: the current OpenTelemetry span's, else the one read from traceparent.
+
+    The span comes first because a trace this service started has no traceparent.
+    """
+    otel_trace = sys.modules.get("opentelemetry.trace")
+    if otel_trace is not None:
+        try:
+            span_context = otel_trace.get_current_span().get_span_context()
+            if span_context and span_context.is_valid:
+                return f"{span_context.trace_id:032x}"
+        except Exception:
+            # Deciding whether to write a line must never fail the request.
+            pass
+    return get_trace_id()
+
+
 def _sampling_bits(record: logging.LogRecord | None = None) -> int | None:
     """The 64 bits that decide whether a record's request is sampled.
 
@@ -87,7 +106,7 @@ def _sampling_bits(record: logging.LogRecord | None = None) -> int | None:
     keeps the same requests. Without a trace ID, a hash of the request ID, which
     services forward to each other.
     """
-    trace_id = get_trace_id() if record is None else getattr(record, "trace_id", None)
+    trace_id = _trace_id_here() if record is None else getattr(record, "trace_id", None)
     if isinstance(trace_id, str):
         try:
             return int(trace_id, 16) & _LOW_64_BITS

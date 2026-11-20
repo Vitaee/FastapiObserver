@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import itertools
 import json
 import linecache
 import logging
 from typing import Any
 
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, WebSocket
 from fastapi.testclient import TestClient
 import pytest
 
@@ -162,6 +164,75 @@ def test_sampling_follows_the_trace_id_as_opentelemetry_does() -> None:
         for trace_id in (kept, dropped)
     ]
     assert decisions == [True, False]
+
+
+def _request_id_hashed_as(*, kept: bool) -> str:
+    """A request ID whose hash would keep, or drop, its request at a 0.5 sample rate."""
+    for number in itertools.count():
+        digest = hashlib.blake2b(f"req-{number}".encode(), digest_size=8).digest()
+        if (int.from_bytes(digest, "big") < 1 << 63) is kept:
+            break
+    return f"req-{number}"
+
+
+def test_sampling_follows_a_trace_this_service_started() -> None:
+    # No traceparent arrives, so the trace ID is only on the current span. Each
+    # request ID is chosen so that hashing it would decide the other way.
+    trace = pytest.importorskip("opentelemetry.trace")
+    settings = ObservabilitySettings(log_sample_rate=0.5)
+    app = FastAPI()
+
+    @app.get("/")
+    async def root() -> dict[str, str]:
+        return {}
+
+    install_observability(app, settings, metrics_enabled=False)
+    kept, dropped = "0af7651916cd43dd" + "0" * 16, "0af7651916cd43dd" + "f" * 16
+    trace_ids = iter((kept, dropped))
+
+    class ServerSpan:  # where OpenTelemetry's middleware sits: outside this library's
+        def __init__(self, inner: Any) -> None:
+            self.inner = inner
+
+        async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
+            context = trace.SpanContext(int(next(trace_ids), 16), 1, is_remote=False)
+            with trace.use_span(trace.NonRecordingSpan(context)):
+                await self.inner(scope, receive, send)
+
+    app.add_middleware(ServerSpan)
+    collector = capture_logs(settings)
+    client = TestClient(app, client=("127.0.0.1", 50000))  # trusted, so X-Request-ID is read
+    for hashed_as_kept in (False, True):
+        client.get("/", headers={"x-request-id": _request_id_hashed_as(kept=hashed_as_kept)})
+    shutdown_logging()
+
+    completed = [p for p in collector.payloads if p["message"] == "request.completed"]
+    assert [payload["trace_id"] for payload in completed] == [kept]
+
+
+def test_sampling_does_not_hold_lines_written_in_a_websocket_session() -> None:
+    # A session can stay open for hours; before 2.4.0 its lines were never held.
+    settings = ObservabilitySettings(log_sample_rate=0.0)
+    app = FastAPI()
+    log = logging.getLogger("tests.chat")
+
+    @app.websocket("/chat")
+    async def chat(websocket: WebSocket) -> None:
+        await websocket.accept()
+        await websocket.receive_text()
+        log.info("chat.message")
+        await websocket.close()
+
+    install_observability(app, settings, metrics_enabled=False)
+    collector = capture_logs(settings)
+    with TestClient(app).websocket_connect("/chat") as ws:
+        ws.send_text("hello")
+    shutdown_logging()
+
+    messages = [payload["message"] for payload in collector.payloads]
+    assert [m for m in messages if m in ("chat.message", "websocket.closed")] == [
+        "chat.message", "websocket.closed",
+    ]
 
 
 def test_runtime_log_level_keeps_holding_lower_records() -> None:
