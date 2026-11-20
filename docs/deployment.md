@@ -75,6 +75,8 @@ exception messages in traces before exporting them from a sensitive app.
 
 ## Alert queries
 
+Ready-to-import Prometheus alert rules covering all 10 diagnostic counters, 5xx error rates, log queue drops, and sink circuit breakers live in [`examples/full_stack/config/alerts.yml`](https://github.com/Vitaee/FastapiObserver/blob/main/examples/full_stack/config/alerts.yml).
+
 ```promql
 # 5xx fraction per service (5 minutes); add a minimum-traffic guard for alerts.
 sum(rate(http_requests_total{status_code=~"5.."}[5m])) by (service)

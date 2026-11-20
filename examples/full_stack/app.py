@@ -11,7 +11,7 @@ from typing import Annotated, Literal
 import httpx2
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Query
 from starlette.responses import StreamingResponse
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, event, text
 from sqlalchemy.pool import QueuePool
 
 from fastapiobserver import (
@@ -38,6 +38,13 @@ engine = create_engine(
     pool_size=1,
     max_overflow=0,
     connect_args={"check_same_thread": False},
+)
+event.listen(
+    engine,
+    "connect",
+    lambda dbapi_conn, _: dbapi_conn.create_function(
+        "sleep_ms", 1, lambda ms: time.sleep(ms / 1000) or 0
+    ),
 )
 
 
@@ -214,3 +221,28 @@ def batched() -> list[str]:
     """The same ten results in one query."""
     with engine.connect() as connection:
         return list(connection.execute(text("SELECT name FROM lab_items ORDER BY id")).scalars())
+
+
+@app.get("/lab/slow-query")
+def slow_query() -> dict:
+    """Intentional bug: a single SQL statement slower than 1 second."""
+    with engine.connect() as connection:
+        connection.execute(text("SELECT sleep_ms(1050)"))
+    return {"slow_query": True}
+
+
+@app.get("/lab/db-during-http")
+async def db_during_http() -> dict:
+    """Intentional bug: keep a DB connection checked out across an outbound HTTP call."""
+    with engine.connect() as connection:
+        connection.execute(text("SELECT 1"))
+        await app.state.http_client.get(f"{TARGET_B}/slow", params={"seconds": 0.2})
+    return {"held_during_http": True}
+
+
+@app.get("/lab/http-n-plus-one")
+async def http_n_plus_one() -> dict:
+    """Intentional bug: fetch items one by one over HTTP in a loop."""
+    for item_id in range(1, 11):
+        await app.state.http_client.get(f"{TARGET_B}/items/{item_id}")
+    return {"calls": 10}

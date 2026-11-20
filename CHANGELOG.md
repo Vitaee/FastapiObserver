@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- `examples/full_stack/config/alerts.yml`: ready-to-import Prometheus alert rules covering all ten diagnostic counters (`db_n_plus_one`, `db_slow_query`, `http_n_plus_one`, `db_connection_held_during_http`, `db_connection_held_idle`, `db_pool_exhausted`, `threadpool_saturated`, `event_loop_blocked`, `gc_pause`, `http_validation_errors`), 5xx rate, log queue drops and sink circuit breakers, wired into the full-stack Compose setup.
+- Updated the Grafana dashboard (`examples/full_stack/config/grafana/dashboards/api-overview.json`) with panels for all ten diagnostic counters, including slow SQL, idle/HTTP-held DB connections, HTTP N+1, GC pauses and 422 validation errors by route and field.
+- Added `--local` standalone mode and `slow-query`, `db-during-http`, `http-n-plus-one` and `validation` scenarios to `examples/full_stack/failure_lab.py` so every detector can be exercised in one command without Docker.
+
+### Changed
+- Updated `README.md` to lead with a diagnostic `request.completed` + `db.n_plus_one` warning example and a 1-command 60-second demo, updated `ROADMAP.md` for `2.5.0`, and promoted the package trove classifier in `pyproject.toml` to `Production/Stable`.
+
 ## [2.5.0] - 2026-11-20
 
 ### Added

@@ -1,0 +1,154 @@
+groups:
+  - name: fastapi_observer_diagnostics
+    rules:
+      - alert: FastAPIDBNPlusOneDetected
+        expr: sum(increase(fastapiobserver_db_n_plus_one_total[5m])) by (job, route) > 0
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "N+1 database queries on {{ $labels.job }} {{ $labels.route }}"
+          description: >-
+            Route {{ $labels.route }} on {{ $labels.job }} executed the same SQL statement
+            at least 10 times per request. Check db.n_plus_one warning logs for the calling line.
+
+      - alert: FastAPIDBSlowQueries
+        expr: sum(increase(fastapiobserver_db_slow_query_total[5m])) by (job, route) > 0
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Slow SQL queries (>= 1s) on {{ $labels.job }} {{ $labels.route }}"
+          description: >-
+            Route {{ $labels.route }} on {{ $labels.job }} ran SQL statements taking 1s or
+            longer. Check db.slow_query warning logs for statement_fingerprint and location.
+
+      - alert: FastAPIHTTPNPlusOneDetected
+        expr: sum(increase(fastapiobserver_http_n_plus_one_total[5m])) by (job, route) > 0
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "N+1 outbound HTTP calls on {{ $labels.job }} {{ $labels.route }}"
+          description: >-
+            Route {{ $labels.route }} on {{ $labels.job }} called the same outbound HTTP
+            endpoint 10 or more times per request. Check http.n_plus_one warning logs.
+
+      - alert: FastAPIDBConnectionHeldDuringHTTP
+        expr: sum(increase(fastapiobserver_db_connection_held_during_http_total[5m])) by (job, route) > 0
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "DB connection held during HTTP call on {{ $labels.job }} {{ $labels.route }}"
+          description: >-
+            Route {{ $labels.route }} on {{ $labels.job }} kept a SQLAlchemy connection checked
+            out across an outbound HTTP call, risking pool exhaustion.
+
+      - alert: FastAPIDBConnectionHeldIdle
+        expr: sum(increase(fastapiobserver_db_connection_held_idle_total[5m])) by (job, route) > 0
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "DB connection held idle on {{ $labels.job }} {{ $labels.route }}"
+          description: >-
+            Route {{ $labels.route }} on {{ $labels.job }} held SQLAlchemy connections out of
+            the pool for >= 100 ms beyond query time without an outbound HTTP call.
+
+      - alert: FastAPIDBPoolExhausted
+        expr: sum(increase(fastapiobserver_db_pool_exhausted_total[5m])) by (job, engine) > 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "SQLAlchemy pool exhausted on {{ $labels.job }} ({{ $labels.engine }})"
+          description: >-
+            Requests on {{ $labels.job }} arrived while database pool {{ $labels.engine }}
+            had zero free connections.
+
+      - alert: FastAPIThreadPoolSaturated
+        expr: sum(increase(fastapiobserver_threadpool_saturated_total[5m])) by (job) > 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "AnyIO thread pool saturated on {{ $labels.job }}"
+          description: >-
+            Sync endpoints/dependencies on {{ $labels.job }} saturated the AnyIO worker thread
+            pool with requests waiting for a free worker.
+
+      - alert: FastAPIEventLoopBlocked
+        expr: sum(increase(fastapiobserver_event_loop_blocked_total[5m])) by (job) > 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Event loop blocked on {{ $labels.job }}"
+          description: >-
+            The event-loop watchdog detected stalls on {{ $labels.job }}. Inspect
+            event_loop.blocked warning logs for the blocking stack trace.
+
+      - alert: FastAPIGCPauseSpikes
+        expr: sum(increase(fastapiobserver_gc_pause_total[5m])) by (job) > 0
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Long garbage-collection pauses (>= 100 ms) on {{ $labels.job }}"
+          description: >-
+            Requests on {{ $labels.job }} were paused 100 ms or more by Python GC. Consider
+            gc.freeze() after startup or reducing long-lived allocations.
+
+      - alert: FastAPIValidationErrorSpike
+        expr: sum(rate(fastapiobserver_http_validation_errors_total[5m])) by (job, route, field) > 0.5
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Elevated 422 validation errors on {{ $labels.job }} {{ $labels.route }}"
+          description: >-
+            Field {{ $labels.field }} on {{ $labels.route }} ({{ $labels.job }}) is failing
+            validation at > 0.5/s.
+
+  - name: fastapi_observer_service_health
+    rules:
+      - alert: FastAPIHighServerErrorRate
+        expr: |
+          (
+            sum(rate(http_requests_total{status_code=~"5.."}[5m])) by (service, environment)
+            /
+            sum(rate(http_requests_total[5m])) by (service, environment)
+          ) > 0.05
+          and
+          sum(rate(http_requests_total[5m])) by (service, environment) > 0.1
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "High 5xx error rate on {{ $labels.service }} ({{ $labels.environment }})"
+          description: >-
+            More than 5% of HTTP requests to {{ $labels.service }} in {{ $labels.environment }}
+            returned 5xx over the last 5 minutes.
+
+      - alert: FastAPILogQueueDropping
+        expr: sum(increase(fastapiobserver_log_queue_dropped_total[5m])) by (job, reason) > 0
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Observability log queue dropping records on {{ $labels.job }}"
+          description: >-
+            Log records on {{ $labels.job }} are being dropped ({{ $labels.reason }}). Raise
+            OBS_LOG_QUEUE_MAX_SIZE or check stdout/sink backpressure.
+
+      - alert: FastAPISinkCircuitBreakerOpen
+        expr: sum(increase(fastapiobserver_sink_circuit_breaker_opens_total[5m])) by (job, sink) > 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Log sink circuit breaker opened on {{ $labels.job }} ({{ $labels.sink }})"
+          description: >-
+            Sink {{ $labels.sink }} on {{ $labels.job }} tripped its failure circuit breaker and
+            temporarily skipped log writes.

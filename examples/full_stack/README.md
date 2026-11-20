@@ -6,7 +6,13 @@ and fix each one. It uses a local SQLite database, so no database service is nee
 
 ## Run
 
-From the repository root, with Docker Compose and Python 3.11+:
+Try every detector in one command without Docker (starts a temporary local server, runs the scenarios, and prints captured JSON diagnostics):
+
+```bash
+python3 examples/full_stack/failure_lab.py --local
+```
+
+Or run the full stack with Docker Compose and Python 3.11+ from the repository root:
 
 ```bash
 docker compose -f examples/full_stack/docker-compose.yml up --build -d --wait
@@ -60,9 +66,13 @@ docker compose -f examples/full_stack/docker-compose.yml restart app-a
 | Scenario | Trigger | Signal | Fix to try |
 |---|---|---|---|
 | Blocked event loop | `GET /lab/block` calls synchronous `time.sleep` inside `async def` | `event_loop.blocked`, with the blocking stack | `GET /slow` awaits `asyncio.sleep`, leaving the worker responsive |
-| Exhausted database pool | `GET /lab/db-pool` holds the only connection while another request arrives | `db.pool_exhausted`, with checked-out connections and pool limit | Release connections before unrelated I/O; size pools for actual concurrency |
+| Exhausted database pool & idle hold | `GET /lab/db-pool` holds the only connection idle while another request arrives | `db.pool_exhausted` and `db.connection_held_idle` (`conn_held_ms`) | Release connections before unrelated I/O; size pools for actual concurrency |
 | N+1 queries | `GET /lab/n-plus-one` fetches IDs, then reads each item separately | `db.n_plus_one`, with the file, line and function that ran the query; the request line has `event.db.count=11` | `GET /lab/batched` returns the same ten items in one query |
+| Slow SQL query | `GET /lab/slow-query` runs a `>= 1s` statement | `db.slow_query`, with `duration_ms`, `statement_fingerprint` and calling line | Index or rewrite the slow query |
+| DB held during HTTP | `GET /lab/db-during-http` awaits `GET /slow` while a connection is open | `db.connection_held_during_http`, with HTTP `target` and calling line | Fetch DB rows first, close the connection, then call HTTP |
+| HTTP N+1 | `GET /lab/http-n-plus-one` calls `GET /items/{id}` ten times in a loop | `http.n_plus_one`, with `target` (`METHOD host`) and calling line | Batch downstream calls or cache responses |
 | Slow downstream | `GET /lab/downstream?seconds=0.3&calls=2` makes two concurrent HTTP calls | `event.http.count=2`; `http.ms` sums both calls, while `duration_ms` measures the response | Set explicit downstream timeouts; check the downstream service |
+| Validation errors | `GET /items/not-an-int` fails FastAPI path validation | `event.validation_errors` with field locations/types (no raw input values) | Return clear client errors and alert on `fastapiobserver_http_validation_errors_total` |
 | Failure after response | `GET /lab/background?seconds=0.3&fail=true` sends 202 before failing | `request.failed` keeps status 202 and `response_completed=true`; `app_duration_ms` includes later work | Monitor background failures separately from HTTP response errors |
 
 Run one scenario:
@@ -71,7 +81,11 @@ Run one scenario:
 python3 examples/full_stack/failure_lab.py --scenario event-loop
 python3 examples/full_stack/failure_lab.py --scenario db-pool
 python3 examples/full_stack/failure_lab.py --scenario n-plus-one
+python3 examples/full_stack/failure_lab.py --scenario slow-query
+python3 examples/full_stack/failure_lab.py --scenario db-during-http
+python3 examples/full_stack/failure_lab.py --scenario http-n-plus-one
 python3 examples/full_stack/failure_lab.py --scenario downstream
+python3 examples/full_stack/failure_lab.py --scenario validation
 python3 examples/full_stack/failure_lab.py --scenario background
 ```
 
@@ -102,7 +116,13 @@ fastapiobserver_db_pool_limit
 
 # How often each diagnostic fired:
 fastapiobserver_db_n_plus_one_total
+fastapiobserver_db_slow_query_total
+fastapiobserver_http_n_plus_one_total
+fastapiobserver_db_connection_held_during_http_total
+fastapiobserver_db_connection_held_idle_total
+fastapiobserver_http_validation_errors_total
 fastapiobserver_event_loop_blocked_total
+fastapiobserver_gc_pause_total
 fastapiobserver_db_pool_exhausted_total
 fastapiobserver_threadpool_saturated_total
 
@@ -112,8 +132,7 @@ histogram_quantile(
 )
 ```
 
-The **API Overview** dashboard shows request rates, latency, errors, CPU, memory,
-how often each diagnostic fired, and logs. Use its service dropdown to compare the three app instances.
+Ready-to-import Prometheus alert rules for these counters live in `config/alerts.yml` (loaded by `config/prometheus.yml`). The **API Overview** dashboard (`config/grafana/dashboards/api-overview.json`) displays request rates, latency, errors, CPU, memory, all ten diagnostic counters across database/HTTP, runtime stalls, and 422 validation errors, plus Loki logs. Use its service dropdown to compare the three app instances.
 
 ## Cross-service correlation
 
