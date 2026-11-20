@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [2.5.0] - 2026-11-20
+
 ### Added
 - `db.slow_query`: when one SQL statement takes 1 second or longer, the request line lists it in `event.diagnostics`, `fastapiobserver_db_slow_query_total{route}` counts the request, and a warning names the request's slowest statement by fingerprint, duration and the application line that ran it, once per method, route and statement. It works without tracing, like `db.n_plus_one`.
 - The OpenTelemetry guide shows how to get latency per downstream host without tracing, from OpenTelemetry's HTTPX histogram: the settings it needs, including `OTEL_SEMCONV_STABILITY_OPT_IN=http` for the `server.address` label, a p95 query, and that calls which raise are not in it.
