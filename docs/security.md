@@ -18,6 +18,14 @@ underscores as hyphens. For example, `{"token": "example-secret"}` is masked;
 `{"message": "token=example-secret"}` keeps its text. Sensitive header rules
 apply inside a mapping named `headers`. Values under other names remain visible.
 
+A name is also masked when it holds a configured name as whole words, split at
+`_`, `-`, `.`, capital letters and digits. `password` covers `new_password`,
+`passwordConfirmation` and `password2`; `token` covers `id_token`, `accessToken`
+and `X-Auth-Token`; `api_key` covers `x_api_key`. Part of a word does not match:
+`max_tokens`, `tokenizer`, `passwordless` and `secretary` stay visible. This can
+mask a harmless field such as `token_type` or `password_changed_at`; the names
+you add with `OBS_REDACTED_FIELDS` match the same way.
+
 URL user/password pairs such as `postgresql://user:password@db/app` are replaced
 with `postgresql://***:***@db/app` in request exception summaries, JSON
 `error.message` / `error.stacktrace`, and the library's OTLP exception attributes.

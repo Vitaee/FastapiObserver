@@ -56,7 +56,8 @@ def _error_category(error: BaseException, library: ModuleType) -> str:
 class _Call:
     recorder: CallHandle
     library: ModuleType
-    target: str | None = None
+    target: str | None = None  # hashed to tell calls apart, never logged
+    label: str | None = None  # what warnings show
     status: int = 0
 
     def finish(self, error: BaseException | None = None) -> None:
@@ -68,11 +69,17 @@ class _Call:
         self.recorder.finish(
             error=category,
             statement=self.target,
-            relationship=self.target[:200] if self.target else None,
+            relationship=self.label[:200] if self.label else None,
         )
 
 
-def _http_target(request: Any) -> tuple[str, str | None]:
+def _http_target(request: Any) -> tuple[str, str | None, str | None]:
+    """The call's host, its target (method, host and path) and its label (method
+    and host).
+
+    Only the label is logged. A path can hold a secret, as webhook URLs and bot
+    tokens do, and no rule tells such a segment from an ordinary one.
+    """
     try:
         method = (getattr(request, "method", None) or "GET").upper()
         url = getattr(request, "url", None)
@@ -86,12 +93,13 @@ def _http_target(request: Any) -> tuple[str, str | None]:
             port = getattr(url, "port", None)
             path = getattr(url, "path", None) or "/"
         if not host:
-            return "", None
+            return "", None, None
         netloc = f"{host}:{port}" if port not in (None, 80, 443) else host
         collapsed = collapse_dynamic_segments(normalize_path(path))
-        return netloc, f"{method} {netloc}{collapsed}"
+        label = f"{method} {netloc}"
+        return netloc, f"{label}{collapsed}", label
     except Exception:
-        return "", None
+        return "", None, None
 
 
 def _unlimited_httpx_phases(timeout: Any) -> tuple[str, ...]:
@@ -259,7 +267,7 @@ def _wrap_send(
         forward(request.headers)
         if _ACTIVE_CLIENT.get() is owner:
             return owner, None
-        host, target = _http_target(request)
+        host, target, label = _http_target(request)
         if library.__name__ == "requests":
             unlimited = _unlimited_requests_phases(
                 kwargs.get("timeout", getattr(owner, "timeout", None))
@@ -277,12 +285,13 @@ def _wrap_send(
         # made by other clients in a request hook.
         if state is None:
             return owner, None
-        state.on_http_start(target)
+        state.on_http_start(label)
         _mark_current_span(state)
         return owner, _Call(
             CallHandle(state, "http", source=library.__name__),
             library,
             target=target,
+            label=label,
         )
 
     @wraps(original)

@@ -124,7 +124,13 @@ def _as_dict(value: Mapping[str, Any]) -> dict[str, Any]:
 
 def _json_dumps(payload: dict[str, Any]) -> str:
     if orjson is not None:
-        return str(orjson.dumps(payload), "utf-8")
+        try:
+            return str(orjson.dumps(payload, default=str), "utf-8")
+        except TypeError:
+            # default= can't help with what orjson refuses outright, such as an
+            # integer past 64 bits. The standard library writes those, and a
+            # line that fails here is lost and counts against the sink.
+            pass
     return json.dumps(payload, ensure_ascii=True, default=str)
 
 

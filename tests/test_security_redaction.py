@@ -35,6 +35,38 @@ def test_sanitize_event_masks_default_sensitive_fields() -> None:
     assert sanitized["nested"]["client_secret"] == "***"
 
 
+@pytest.mark.parametrize(
+    "name",
+    [
+        "new_password", "current_password", "passwordConfirmation", "password2",
+        "accessToken", "refreshToken", "clientSecret", "id_token", "X-Auth-Token",
+        "secret_key", "x_api_key", "APIKey",
+    ],
+)
+def test_names_holding_a_sensitive_word_are_masked(name: str) -> None:
+    assert sanitize_event({name: "private-value"}, SecurityPolicy()) == {name: "***"}
+
+
+@pytest.mark.parametrize(
+    "name",
+    ["max_tokens", "total_tokens", "tokenizer", "secretary", "passwordless", "keyboard", "author"],
+)
+def test_names_that_only_resemble_a_sensitive_word_stay_visible(name: str) -> None:
+    assert sanitize_event({name: "visible"}, SecurityPolicy()) == {name: "visible"}
+
+
+def test_whole_word_matching_covers_headers_presets_and_bodies() -> None:
+    policy = SecurityPolicy()
+
+    headers = sanitize_event({"headers": {"Proxy-Authorization": "Basic abc"}}, policy)
+    assert headers == {"headers": {"Proxy-Authorization": "***"}}
+    gdpr = sanitize_event({"user_email": "ada@example.com"}, SecurityPolicy.from_preset("gdpr"))
+    assert gdpr["user_email"].startswith("hmac-sha256:")
+    form = redact_body("new_password=secret&max_tokens=5", policy)
+    assert form == "new_password=***&max_tokens=5"
+    assert redact_body('{"newPassword":"secret"}', policy) == '{"newPassword":"***"}'
+
+
 def test_sanitize_event_drop_mode_removes_sensitive_fields() -> None:
     payload = {"password": "secret", "username": "alice"}
 
@@ -211,10 +243,26 @@ def test_encoded_body_keys_follow_the_redaction_mode(body: str, mode: str) -> No
         '\ufeff{"password":"secret"}',
         "plain secret text",
         '{"access_token": "abc.de',
+        # Text with an "=" in it isn't a form: these used to be logged as one field.
+        '--b\r\nContent-Disposition: form-data; name="password"\r\n\r\nsecret\r\n--b--',
+        '<login user="ada" password="secret"/>',
+        "note=my password is secret",
+        "user=ada;password=secret",
     ],
 )
 def test_body_redaction_masks_bodies_it_cannot_safely_inspect(body: str) -> None:
     assert redact_body(body, SecurityPolicy()) == "***"
+
+
+def test_body_redaction_reads_forms_sent_without_percent_encoding() -> None:
+    # What `curl -d` sends: reserved characters as they are.
+    result = redact_body("email=ada@example.com&next=/home?tab=1&password=secret", SecurityPolicy())
+
+    assert parse_qsl(result) == [
+        ("email", "ada@example.com"),
+        ("next", "/home?tab=1"),
+        ("password", "***"),
+    ]
 
 
 def test_body_redaction_masks_excessive_nesting() -> None:

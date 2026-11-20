@@ -6,6 +6,7 @@ from typing import Any
 
 from anyio import get_cancelled_exc_class
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
+from starlette.websockets import WebSocketDisconnect
 
 from ..config import ObservabilitySettings
 from ..core.recording import CallKind
@@ -351,6 +352,9 @@ class RequestLoggingMiddleware:
             scope, raw_headers, trusted_source
         )
         request_state.observer_logging = self.configure_logging
+        # OBS_LOG_SAMPLE_RATE is for requests. A session can stay open for hours,
+        # and holding its lines until it closes would then drop them.
+        request_state.sampled = True
         accepted = False
         close_code: int | None = None
         messages_received = messages_sent = bytes_received = bytes_sent = 0
@@ -363,6 +367,7 @@ class RequestLoggingMiddleware:
             if msg_type == "websocket.receive":
                 messages_received += 1
                 bytes_received += _ws_frame_bytes(message)
+                request_state.forget_unrepeated_calls()
             elif msg_type == "websocket.disconnect":
                 close_code = int(message.get("code") or 1000)
                 request_state.disconnected = True
@@ -377,12 +382,19 @@ class RequestLoggingMiddleware:
             elif msg_type == "websocket.send":
                 messages_sent += 1
                 bytes_sent += _ws_frame_bytes(message)
+                request_state.forget_unrepeated_calls()
             elif msg_type == "websocket.close":
                 close_code = int(message.get("code") or 1000)
 
         try:
             check_pools()
             await self.app(scope, ws_receive, ws_send)
+        except WebSocketDisconnect as exc:
+            # The client left and the handler let that propagate, as the usual
+            # receive loop does. That is how a session ends, not a failure of it.
+            if close_code is None:
+                close_code = exc.code
+            raise
         except Exception as exc:
             captured_error = exc
             if close_code is None:

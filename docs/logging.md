@@ -55,9 +55,9 @@ Request middleware emits one primary event per HTTP request or WebSocket session
 | `request.failed` | `ERROR` + traceback | Unhandled exception in HTTP request path |
 | `request.cancelled` | `WARNING` | Cancelled before completion (`status_code` is `499` if no response started) |
 | `request.client_disconnected` | `WARNING` | Application received `http.disconnect` before response completion and ran on (`after_disconnect_ms` and `after_disconnect_calls` report wasted work). See [servers](servers.md) |
-| `websocket.closed` | `INFO` | Accepted WebSocket closed cleanly (`close_code`, `messages_sent`, `messages_received`, `bytes_sent`, `bytes_received`) |
+| `websocket.closed` | `INFO` | Accepted WebSocket closed by either side, including a client disconnect the handler does not catch (`close_code`, `messages_sent`, `messages_received`, `bytes_sent`, `bytes_received`) |
 | `websocket.rejected` | `WARNING` | WebSocket closed before `websocket.accept` |
-| `websocket.failed` | `ERROR` + traceback | Unhandled exception during WebSocket session |
+| `websocket.failed` | `ERROR` + traceback | Unhandled exception during WebSocket session, other than `WebSocketDisconnect` |
 
 Standard request event fields include:
 - `method`, `path`, `status_code`, `client_ip`, `error_type`, and OTel aliases (`http.request.method`, `url.path`, `http.response.status_code`)
@@ -110,6 +110,7 @@ OBS_LOG_SLOW_REQUEST_MS=1000    # Always keep requests >= 1000 ms
 - A request is kept or dropped as a whole, including its terminal `request.completed` line. Unsampled `INFO` requests skip terminal event dictionary construction and sanitization entirely.
 - Any request that fails (`5xx` or unhandled exception), emits `WARNING`+, or takes `OBS_LOG_SLOW_REQUEST_MS` or longer is written in full.
 - Prometheus metrics still count every request.
+- WebSocket sessions are not sampled. A session can stay open for hours, so its lines are written as they happen.
 - Decisions use OpenTelemetry's `TraceIdRatioBased` rule when a `trace_id` is present, or a hash of `request_id` otherwise, keeping whole requests aligned across services.
 
 ## Calls that block the event loop

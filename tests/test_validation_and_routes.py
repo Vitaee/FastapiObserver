@@ -274,7 +274,7 @@ def test_db_connection_held_during_http_warns_and_tracks_conn_held_ms(
     ]
     assert held_warning["method"] == "GET"
     assert held_warning["route"] == "/bad/{item_id}"
-    assert held_warning["target"] == "GET api.example.test/v1/slow-http/:id"
+    assert held_warning["target"] == "GET api.example.test"
     assert held_warning["code.file.path"] == __file__
     assert held_warning["code.function.name"].endswith("bad_endpoint")
 
@@ -449,3 +449,87 @@ def test_websocket_coverage_and_diagnostics(
     assert failed_event["accepted"] is True
     assert failed_event["close_code"] == 1006
     assert failed.exc_info is not None
+
+
+def test_client_closing_a_websocket_is_logged_as_closed(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    app = FastAPI()
+
+    @app.websocket("/echo")
+    async def echo(websocket: WebSocket) -> None:
+        await websocket.accept()
+        while True:  # the usual loop: WebSocketDisconnect ends it, uncaught
+            await websocket.send_text(await websocket.receive_text())
+
+    install_observability(app, ObservabilitySettings(), metrics_enabled=False)
+
+    with caplog.at_level(logging.INFO, logger="fastapiobserver.middleware"):
+        with TestClient(app) as client:
+            # Still raised to the server, as without this library.
+            with pytest.raises(WebSocketDisconnect):
+                with client.websocket_connect("/echo") as ws:
+                    ws.send_text("hello")
+                    assert ws.receive_text() == "hello"
+
+    [session] = [r for r in caplog.records if r.message.startswith("websocket.")]
+    assert session.message == "websocket.closed"
+    assert session.levelno == logging.INFO
+    assert session.exc_info is None
+    assert session.event["close_code"] == 1000  # type: ignore[attr-defined]
+
+
+def test_websocket_queries_spread_over_messages_are_not_n_plus_one(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    from sqlalchemy import create_engine, text
+
+    engine = create_engine("sqlite://")
+    app = FastAPI()
+
+    @app.websocket("/chat")
+    async def chat(websocket: WebSocket) -> None:  # one lookup per message received
+        await websocket.accept()
+        try:
+            while True:
+                message = await websocket.receive_text()
+                with engine.connect() as conn:
+                    conn.execute(text("SELECT 1"))
+                await websocket.send_text(message)
+        except WebSocketDisconnect:
+            pass
+
+    @app.websocket("/ticker")
+    async def ticker(websocket: WebSocket) -> None:  # one lookup per message sent
+        await websocket.accept()
+        for _ in range(12):
+            with engine.connect() as conn:
+                conn.execute(text("SELECT 1"))
+            await websocket.send_text("tick")
+        await websocket.close()
+
+    install_observability(
+        app, ObservabilitySettings(), metrics_enabled=False, db_engine=engine
+    )
+
+    try:
+        with caplog.at_level(logging.INFO, logger="fastapiobserver.middleware"):
+            with TestClient(app) as client:
+                with client.websocket_connect("/chat") as ws:
+                    for number in range(12):
+                        ws.send_text(str(number))
+                        ws.receive_text()
+                with client.websocket_connect("/ticker") as ws:
+                    for _ in range(12):
+                        ws.receive_text()
+    finally:
+        engine.dispose()
+
+    assert not [r for r in caplog.records if r.message == "db.n_plus_one"]
+    sessions = [
+        r.event  # type: ignore[attr-defined]
+        for r in caplog.records
+        if r.message == "websocket.closed"
+    ]
+    assert [event["db"]["count"] for event in sessions] == [12, 12]
+    assert all("diagnostics" not in event for event in sessions)
