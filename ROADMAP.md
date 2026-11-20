@@ -1,13 +1,14 @@
 # Roadmap
 
-Reviewed 16 November 2026, after the 2.4.0 release. Items have no dates.
+Reviewed 20 November 2026, after the 2.5.0 release. Items have no dates.
 Shipped changes are in the
 [changelog](https://github.com/Vitaee/FastapiObserver/blob/main/CHANGELOG.md).
 
-## Where 2.4.0 stands
+## Where 2.5.0 stands
 
-- `install_observability()` gives a FastAPI app JSON request lines, Prometheus
-  metrics and OpenTelemetry traces. The package is classified Beta.
+- `install_observability()` gives a FastAPI app JSON request lines, zero-tracing
+  diagnostics, Prometheus metrics and OpenTelemetry traces. The package is
+  classified Production/Stable.
 - SQLAlchemy engines passed as `db_engine`, and clients set up with
   `instrument_httpx_client()` or `instrument_requests_session()`, are counted on
   every request with tracing off. Other clients, such as Redis, are counted only

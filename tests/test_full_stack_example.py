@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 import sys
 import threading
@@ -211,13 +212,86 @@ def test_failure_lab_produces_the_named_warnings(demo_server) -> None:
         cwd=ROOT,
         capture_output=True,
         text=True,
-        timeout=15,
+        timeout=20,
     )
 
     assert completed.returncode == 0, completed.stderr
-    expected = {"event_loop.blocked", "db.pool_exhausted", "db.n_plus_one"}
+    expected = {
+        "event_loop.blocked",
+        "db.pool_exhausted",
+        "db.n_plus_one",
+        "db.slow_query",
+        "db.connection_held_during_http",
+        "db.connection_held_idle",
+        "http.n_plus_one",
+    }
     assert all(name in completed.stdout for name in expected)
     wait_for(log_path, lambda rows: expected <= {row["message"] for row in rows})
+
+
+def test_failure_lab_local_mode_runs_standalone() -> None:
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "examples/full_stack/failure_lab.py",
+            "--local",
+            "--scenario",
+            "n-plus-one",
+        ],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        timeout=20,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert "db.n_plus_one" in completed.stdout
+
+
+def test_alerts_and_grafana_dashboard_cover_all_diagnostic_metrics() -> None:
+    from fastapiobserver.metrics.prometheus import _DIAGNOSTIC_COUNTERS, _SINK_COUNTERS
+
+    alerts_path = ROOT / "examples/full_stack/config/alerts.yml"
+    prometheus_cfg = (ROOT / "examples/full_stack/config/prometheus.yml").read_text(
+        encoding="utf-8"
+    )
+    compose_cfg = (ROOT / "examples/full_stack/docker-compose.yml").read_text(encoding="utf-8")
+    dashboard_path = ROOT / "examples/full_stack/config/grafana/dashboards/api-overview.json"
+
+    alerts_text = alerts_path.read_text(encoding="utf-8")
+    dashboard_text = dashboard_path.read_text(encoding="utf-8")
+    dashboard = json.loads(dashboard_text)
+
+    assert "/etc/prometheus/alerts.yml" in prometheus_cfg
+    assert "./config/alerts.yml:/etc/prometheus/alerts.yml:ro" in compose_cfg
+
+    # No overlapping Grafana panel grid rectangles.
+    boxes = [
+        (
+            panel["gridPos"]["x"],
+            panel["gridPos"]["y"],
+            panel["gridPos"]["x"] + panel["gridPos"]["w"],
+            panel["gridPos"]["y"] + panel["gridPos"]["h"],
+        )
+        for panel in dashboard["panels"]
+    ]
+    for index, (x1, y1, x2, y2) in enumerate(boxes):
+        for ox1, oy1, ox2, oy2 in boxes[index + 1 :]:
+            assert x2 <= ox1 or ox2 <= x1 or y2 <= oy1 or oy2 <= y1
+
+    prometheus_source = (ROOT / "src/fastapiobserver/metrics/prometheus.py").read_text(
+        encoding="utf-8"
+    )
+    known_metrics = set(re.findall(r"fastapiobserver_[a-z0-9_]+", prometheus_source))
+    known_metrics.update(f"fastapiobserver_sink_circuit_breaker_{key}" for key in _SINK_COUNTERS)
+
+    for text in (alerts_text, dashboard_text):
+        referenced = set(re.findall(r"fastapiobserver_[a-z0-9_]+", text))
+        assert referenced <= known_metrics
+
+    diagnostic_counters = {spec[0] for spec in _DIAGNOSTIC_COUNTERS.values()}
+    assert diagnostic_counters <= set(re.findall(r"fastapiobserver_[a-z0-9_]+", alerts_text))
+    assert diagnostic_counters <= set(re.findall(r"fastapiobserver_[a-z0-9_]+", dashboard_text))
 
 
 def test_batched_query_returns_the_same_data_with_one_query(demo_server) -> None:

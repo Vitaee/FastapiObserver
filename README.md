@@ -5,42 +5,95 @@
 [![Python](https://img.shields.io/pypi/pyversions/fastapi-observer)](https://pypi.org/project/fastapi-observer/)
 [![License](https://img.shields.io/pypi/l/fastapi-observer)](https://github.com/Vitaee/FastapiObserver/blob/main/LICENSE)
 
-**One-call observability for FastAPI.** JSON logs with request IDs, Prometheus metrics and OpenTelemetry traces, with sensitive fields masked by default. No vendor backend: send it to whatever you already run.
+**Zero-tracing production diagnostics and one-call observability for FastAPI.** Catch N+1 SQL/HTTP loops (with the calling file, line, and ORM relationship), slow queries, DB connections held across outbound HTTP or idle work, blocked event loops, full pools, and GC pauses on every request — alongside structured JSON logs, Prometheus `/metrics`, OpenTelemetry traces, and default field redaction. No vendor backend: send it to whatever you already run.
 
 ```python
 from fastapi import FastAPI
 from fastapiobserver import install_observability
 
 app = FastAPI()
-install_observability(app)
+install_observability(app)  # pass db_engine=engine for SQL diagnostics without tracing
 ```
 
-Every request now writes one JSON line, with the same `trace_id` as its trace when tracing is on:
+Every request writes one diagnostic JSON line, followed by targeted warnings pointing straight to the root cause (without logging raw SQL or secrets):
 
 ```json
 {
-  "timestamp": "2026-10-31T09:10:20.345831+00:00",
+  "timestamp": "2026-11-20T09:10:20.345831+00:00",
   "level": "INFO",
   "logger": "fastapiobserver.middleware",
   "message": "request.completed",
   "app_name": "orders-api",
   "service": "orders",
   "environment": "production",
-  "version": "2.3.1",
+  "version": "2.5.0",
   "request_id": "d496f541-5e5e-4f14-9174-e9bd697faa62",
   "trace_id": "11d5b6f088bfdba501927e55463be4cd",
   "span_id": "50a12c2d9937eacb",
   "event": {
     "method": "GET",
     "path": "/orders/42",
+    "http.route": "/orders/{order_id}",
     "status_code": 200,
-    "duration_ms": 1.314,
-    "app_duration_ms": 1.35,
+    "duration_ms": 472.814,
+    "app_duration_ms": 473.12,
     "response_completed": true,
     "client_ip": "203.0.113.7",
-    "error_type": "ok"
+    "error_type": "ok",
+    "diagnostics": ["db.connection_held_during_http", "db.n_plus_one", "gc.pause"],
+    "gc_pause_ms": 142,
+    "db": {
+      "count": 13,
+      "ms": 18.4,
+      "sqlalchemy": {
+        "attempted": 13,
+        "succeeded": 13,
+        "failed": 0,
+        "in_flight": 0,
+        "failed_ms": 0.0,
+        "errors": {},
+        "conn_held_ms": 312.6
+      }
+    },
+    "http": {
+      "count": 1,
+      "ms": 294.1
+    }
   }
 }
+```
+
+```json
+{
+  "level": "WARNING",
+  "logger": "fastapiobserver.middleware",
+  "message": "db.n_plus_one",
+  "request_id": "d496f541-5e5e-4f14-9174-e9bd697faa62",
+  "event": {
+    "method": "GET",
+    "route": "/orders/{order_id}",
+    "statement_fingerprint": "66cbb3a40d4bbd150b75825ad291a6545399f3098fc1079e4d8b5bb061a6a481",
+    "count": 12,
+    "relationship": "Order.items",
+    "code.file.path": "/app/orders.py",
+    "code.line.number": 41,
+    "code.function.name": "orders.get_order"
+  }
+}
+```
+
+## Try it in 60 seconds
+
+Watch every diagnostic fire locally in one command — no Docker or collector required:
+
+```bash
+python3 examples/full_stack/failure_lab.py --local
+```
+
+Or boot the three-service Docker Compose stack with Prometheus + ready-to-import [`alerts.yml`](https://github.com/Vitaee/FastapiObserver/blob/main/examples/full_stack/config/alerts.yml), Loki, Tempo, and the [Grafana dashboard](https://github.com/Vitaee/FastapiObserver/blob/main/examples/full_stack/config/grafana/dashboards/api-overview.json):
+
+```bash
+docker compose -f examples/full_stack/docker-compose.yml up --build -d --wait && python3 examples/full_stack/failure_lab.py
 ```
 
 **Documentation:** [vitaee.github.io/FastapiObserver](https://vitaee.github.io/FastapiObserver/)
@@ -102,6 +155,7 @@ Optional extras: runtime log-level control, SQLAlchemy, `httpx` and `requests` t
 | | fastapi-observer | FastAPI 0.142+ built in | structlog or loguru | OpenTelemetry auto-instrumentation | Logfire |
 |---|---|---|---|---|---|
 | JSON log line per request | Built in | No, only errors as OTLP log records | You write the middleware | No | A span per request |
+| Zero-tracing diagnostics | N+1 SQL/HTTP (file/line/relationship), slow SQL, idle/HTTP-held DB, blocked loop, full pools, GC pauses, 422 fields | No | You build it | Trace spans only | Trace spans + profiler |
 | Request ID on every log line | Built in | No | You wire it up | No | Trace IDs |
 | Redaction by default | Field/header names and exception URL credentials; presets | Signed-URL query parameters only | You write a processor | No | Yes |
 | Prometheus `/metrics` | Built in | Through an exporter | No | Through an exporter | No |
@@ -116,7 +170,7 @@ Since 0.142, FastAPI traces requests on its own once an OpenTelemetry provider i
 - You already send everything to Logfire, Datadog or Sentry: their own FastAPI integrations fit better.
 - Your app isn't built on FastAPI or Starlette.
 
-What it costs: in 2.4.0 with default settings, about 42 µs of CPU per request on an Apple ARM64 Mac, including writing the line on a background thread, and about 26 µs when the application owns logging (`configure_logging=False`). See the [benchmarks](https://vitaee.github.io/FastapiObserver/benchmarks/), including outbound HTTP diagnostics and a comparison with wiring the same stack by hand.
+What it costs: with default settings, about 42 µs of CPU per request on an Apple ARM64 Mac (including writing the line on a background thread), about 26 µs when the application owns logging (`configure_logging=False`), and about +16 µs per outbound HTTP call. See the [benchmarks](https://vitaee.github.io/FastapiObserver/benchmarks/), including a comparison with wiring the same stack by hand.
 
 ## Works with
 
