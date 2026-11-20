@@ -147,6 +147,41 @@ return 200 while logging `http: {"count": 1, "ms": 50.2,
 Without these helpers, other instrumented clients continue to contribute sampled
 client spans to the totals when tracing is enabled.
 
+### Latency per downstream host
+
+The request line totals each request's outbound calls. For latency per downstream
+host over time, use the histogram OpenTelemetry's HTTPX instrumentation records.
+It needs no tracing.
+
+1. Install `fastapi-observer[otel,otel-httpx]`.
+2. Turn on metric export and the stable HTTP metric names:
+
+    ```bash
+    export OBS_OTEL_METRICS_ENABLED=true
+    export OTEL_EXPORTER_OTLP_METRICS_ENDPOINT=http://otel-collector:4317
+    export OTEL_SEMCONV_STABILITY_OPT_IN=http
+    ```
+
+3. Pass your HTTPX or HTTPX2 clients to `instrument_httpx_client()`, before or after
+   `install_observability()`.
+
+Each call that gets a response is recorded in `http.client.request.duration`, in
+seconds, with `server.address`, `http.request.method`, `http.response.status_code`,
+and `error.type` for 4xx and 5xx responses. Without `OTEL_SEMCONV_STABILITY_OPT_IN=http`,
+the instrumentation records `http.client.duration` in milliseconds, with no host;
+the same variable also moves client spans to the stable attribute names.
+
+p95 per host, after a Collector's Prometheus exporter:
+
+```promql
+histogram_quantile(0.95, sum by (le, server_address) (rate(http_client_request_duration_seconds_bucket[5m])))
+```
+
+- A call that raises, such as a timeout or a refused connection, is not recorded in
+  the histogram. The request line's `http.errors` counts it by category.
+- The instrumentation adds about 37 µs of CPU per call, even with tracing off
+  ([benchmarks](benchmarks.md)).
+
 ### Baggage propagation
 
 `inject_trace_headers()` uses OpenTelemetry propagation, so it forwards

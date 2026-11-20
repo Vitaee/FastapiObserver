@@ -62,3 +62,24 @@ def test_prepare_freezes_arguments_and_passes_other_records_through() -> None:
     items.append("b")  # changed after the call, before the listener formats it
     assert prepared is not with_args
     assert (prepared.getMessage(), prepared.args) == ("items ['a']", None)
+
+
+@pytest.mark.parametrize(
+    ("msg", "arg", "message_end"),
+    [
+        ("%(body)s", {"body": "x" * 40_000}, " characters cut]"),  # mapping argument
+        ("%.5s", "x" * 40_000, "xxxxx"),  # long argument, short message: frozen, not cut
+    ],
+)
+def test_cap_message_measures_arguments_and_formats_only_long_ones(
+    msg: str, arg: object, message_end: str
+) -> None:
+    from fastapiobserver.logging.queueing import MAX_MESSAGE_CHARS, cap_message
+
+    record = logging.LogRecord("tests", logging.INFO, __file__, 1, msg, (arg,), None)
+    capped = cap_message(record)
+
+    assert capped is not record and capped.args is None
+    assert capped.getMessage().endswith(message_end)
+    assert len(capped.getMessage()) <= MAX_MESSAGE_CHARS
+    assert cap_message(capped) is capped

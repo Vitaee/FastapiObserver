@@ -17,6 +17,7 @@ import sys
 
 from ..request_context import RequestState, get_request_id, get_request_state, get_trace_id
 from . import state
+from .queueing import cap_message
 
 # ponytail: fixed cap per request, newest kept; make it a setting if 200 isn't enough.
 _MAX_HELD_RECORDS = 200
@@ -56,7 +57,7 @@ class HeldLogFilter(logging.Filter):
         ):
             return True
         if request_state is not None:
-            request_state.hold_log(record, _MAX_HELD_RECORDS)
+            request_state.hold_log(cap_message(record), _MAX_HELD_RECORDS)
         return False
 
     def _sampled(

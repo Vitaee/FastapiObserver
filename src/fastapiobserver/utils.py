@@ -10,20 +10,16 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 _NULLISH_VALUES = frozenset({"none", "null", "unset"})
 # Each matches a whole segment only, so `/auth/2fa` stays as it is.
-_UUID_RE = re.compile(
-    r"/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}"
-    r"(?=/|$)"
+_DYNAMIC_SEGMENT_RE = re.compile(
+    r"/(?:[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}"
+    r"|[0-9a-fA-F]{16,}|\d+)(?=/|$)"  # a UUID, a long hex ID or a number
 )
-_NUMBER_RE = re.compile(r"/\d+(?=/|$)")
-_HEX_RE = re.compile(r"/[0-9a-fA-F]{16,}(?=/|$)")
 TEnvLoadable = TypeVar("TEnvLoadable", bound="EnvLoadable")
 
 
 def collapse_dynamic_segments(path: str) -> str:
     """Replace dynamic path segments with ``/:id`` to control label cardinality."""
-    normalized = _UUID_RE.sub("/:id", path)
-    normalized = _HEX_RE.sub("/:id", normalized)
-    return _NUMBER_RE.sub("/:id", normalized)
+    return _DYNAMIC_SEGMENT_RE.sub("/:id", path)
 
 
 def endpoint_for_log(endpoint: str | None) -> str | None:

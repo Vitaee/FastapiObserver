@@ -49,11 +49,12 @@ def _request_id_to_forward(carrier: Any) -> str | None:
     request_id = get_request_id()
     if request_id is None:
         return None
-    if isinstance(carrier, Mapping) and any(
-        str(key).lower() == _request_id_header for key in carrier
-    ):
-        return None
-    return request_id
+    if isinstance(carrier, dict):
+        # A plain dict is case-sensitive; HTTPX, Requests and Starlette headers are not.
+        present = any(str(key).lower() == _request_id_header for key in carrier)
+    else:
+        present = isinstance(carrier, Mapping) and _request_id_header in carrier
+    return None if present else request_id
 
 
 def _forward_request_id(headers: Any) -> None:

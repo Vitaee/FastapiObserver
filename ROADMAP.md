@@ -27,11 +27,12 @@ Shipped changes are in the
   operations. Code outside a FastAPI lifespan calls `setup_logging()`,
   `flush_logging()` and `shutdown_logging()` itself and owns its OpenTelemetry
   providers.
-- Byte limits: a request holds at most 200 records and the queue at most
-  `OBS_LOG_QUEUE_MAX_SIZE` records, but nothing limits a record's size.
+- Byte limits: a request holds at most 200 records, the queue at most
+  `OBS_LOG_QUEUE_MAX_SIZE` records, and a message at most 32 KiB. Objects passed in
+  `extra` or as non-string arguments are not measured.
 - Operations: writing held records for slow requests, and the
-  `db.n_plus_one` and `http.n_plus_one` warnings, run for requests only.
-  `observe_operation()` has neither.
+  `db.n_plus_one`, `db.slow_query` and `http.n_plus_one` warnings, run for
+  requests only; `observe_operation()` has none of them.
 - Datastore adapters: Redis (`redis-py` sync and asyncio), PyMongo and
   Tortoise ORM need native hooks that count calls with tracing off, as the
   SQLAlchemy engine events do, plus tests against real servers. Each one starts

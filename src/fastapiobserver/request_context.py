@@ -15,6 +15,7 @@ from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import Any
 
+from .gc_pauses import gc_seconds
 from .core.recording import CallKind, CallOwner
 __all__ = [
     "UNMATCHED_ROUTE",
@@ -54,8 +55,12 @@ _MAX_ERROR_CATEGORIES = 32
 _DIAGNOSTICS = frozenset({"db.n_plus_one", "threadpool.saturated", "db.pool_exhausted"})
 # The same statement this many times in one request is usually a query per item
 # in a loop (N+1), which one query with a join or IN would replace.
-# ponytail: fixed threshold; make it a setting if it's too noisy or quiet for someone.
+# ponytail: fixed thresholds; make them settings if they're too noisy or quiet for someone.
 _N_PLUS_ONE_MIN_REPEATS = 10
+# One statement this slow is worth a look on its own, as in Sentry's slow-query default.
+_SLOW_QUERY_SECONDS = 1.0
+# A connection held this much longer than its queries ran sat idle, out of the pool.
+_IDLE_CONNECTION_SECONDS = 0.1
 _LIBRARY_DIRS = (
     "<",  # frozen modules and code compiled from strings
     os.path.dirname(os.path.abspath(__file__)),
@@ -172,10 +177,14 @@ class RequestState:
     # fingerprint -> the application code and ORM relationship that ran it, for
     # statements repeated enough
     statement_origins: dict[str, dict[str, str | int]] = field(default_factory=dict)
+    # The slowest statement at or over _SLOW_QUERY_SECONDS: fingerprint, seconds, origin.
+    slow_query: tuple[str, float, dict[str, str | int]] | None = None
     http_targets: dict[str, int] = field(default_factory=dict)
     validation_errors: list[dict[str, str]] | None = None
     active_db_connections: int = 0
     conn_held_during_http: dict[str, str | int] | None = None
+    gc_seconds_at_start: float = field(default_factory=gc_seconds)  # read as it starts
+    gc_pause_seconds: float | None = None
     observed_diagnostics: set[str] | None = None
     disconnected: bool = False
     after_disconnect_calls: dict[str, int] | None = None
@@ -232,29 +241,43 @@ class RequestState:
             if source == "sqlalchemy" and self.sql is not None:
                 self.sql.succeeded += 1
             self._complete_call(kind, source, started)
-            repeated = None
+            repeated = slow = None
             targets = self.statements if kind == "db" else self.http_targets
             if statement:
-                # SQL is never retained in request state or emitted by N+1 warnings.
+                # SQL is never retained in request state or emitted by diagnostics.
                 fingerprint = sha256(statement.encode("utf-8", errors="replace")).hexdigest()
                 if fingerprint in targets or len(targets) < _MAX_REQUEST_STATEMENTS:
                     count = targets[fingerprint] = targets.get(fingerprint, 0) + 1
                     if count == _N_PLUS_ONE_MIN_REPEATS:
                         repeated = fingerprint
-                        if self.observed_diagnostics is None:
-                            self.observed_diagnostics = set()
-                        self.observed_diagnostics.add(f"{kind}.n_plus_one")
-        if repeated is not None:
-            # Walk the stack once, when a statement first looks like N+1, so other
-            # queries pay nothing; outside the lock every request shares.
-            origin = _app_code_location() or {}
-            if relationship is not None:
-                origin["relationship" if kind == "db" else "target"] = relationship
-            if origin:
-                with _CALLS_LOCK:
-                    if not self.closed:
-                        self.statement_origins[repeated] = origin
+                        self._observe(f"{kind}.n_plus_one")
+                if kind == "db" and seconds >= _SLOW_QUERY_SECONDS and self._slowest(seconds):
+                    slow = fingerprint
+                    self._observe("db.slow_query")
+        if repeated is None and slow is None:
+            return True
+        # Walk the stack only for a statement that is repeated or slow, so other
+        # queries pay nothing; outside the lock every request shares.
+        origin = _app_code_location() or {}
+        if relationship is not None:
+            origin["relationship" if kind == "db" else "target"] = relationship
+        with _CALLS_LOCK:
+            if not self.closed:
+                if repeated is not None and origin:
+                    self.statement_origins[repeated] = origin
+                if slow is not None and self._slowest(seconds):
+                    self.slow_query = (slow, seconds, origin)
         return True
+
+    def _observe(self, diagnostic: str) -> None:
+        # Caller holds _CALLS_LOCK.
+        if self.observed_diagnostics is None:
+            self.observed_diagnostics = set()
+        self.observed_diagnostics.add(diagnostic)
+
+    def _slowest(self, seconds: float) -> bool:
+        # Caller holds _CALLS_LOCK.
+        return self.slow_query is None or seconds > self.slow_query[1]
 
     def _complete_call(self, kind: str, source: str, started: bool) -> None:
         self.call_sources.setdefault(kind, set()).add(source)
@@ -285,9 +308,13 @@ class RequestState:
     def record_diagnostic_fact(self, name: str) -> None:
         with _CALLS_LOCK:
             if not self.closed:
-                if self.observed_diagnostics is None:
-                    self.observed_diagnostics = set()
-                self.observed_diagnostics.add(name)
+                self._observe(name)
+
+    def record_gc_pause(self, seconds: float) -> None:
+        with _CALLS_LOCK:
+            if not self.closed:
+                self.gc_pause_seconds = seconds
+                self._observe("gc.pause")
 
     def on_db_checkout(self) -> None:
         with _CALLS_LOCK:
@@ -325,24 +352,34 @@ class RequestState:
                 if not self.closed and self.conn_held_during_http is not None:
                     self.conn_held_during_http.update(origin)
 
-    def check_conn_held_during_http(self) -> dict[str, str | int] | None:
-        if self.conn_held_during_http is None:
+    def check_held_connection(self) -> tuple[str, dict[str, str | int]] | None:
+        """The diagnostic for connections this request kept out of the pool unused.
+
+        Both need connections held at least ten times as long as their queries ran.
+        ``db.connection_held_during_http``: one was out during an outbound HTTP call,
+        or is still out. ``db.connection_held_idle``: otherwise, held
+        ``_IDLE_CONNECTION_SECONDS`` or more beyond the queries' time.
+        """
+        if self.sql is None:  # no SQLAlchemy work, as on most requests: skip the lock
             return None
         with _CALLS_LOCK:
-            if self.closed or self.conn_held_during_http is None:
+            if self.closed or self.sql is None:
                 return None
+            held = self.sql.conn_held_seconds
             db_seconds = self.calls.get("db", (0.0, 0.0))[1]
-            if (
-                self.active_db_connections <= 0
-                and self.sql is not None
-                and self.sql.conn_held_seconds < db_seconds * 10.0
+            long_hold = held >= db_seconds * 10.0
+            details: dict[str, str | int]
+            if self.conn_held_during_http is not None and (
+                long_hold or self.active_db_connections > 0
             ):
-                self.conn_held_during_http = None
+                name, details = "db.connection_held_during_http", self.conn_held_during_http
+            elif long_hold and held - db_seconds >= _IDLE_CONNECTION_SECONDS:
+                name = "db.connection_held_idle"
+                details = {"conn_held_ms": round(held * 1000), "db_ms": round(db_seconds * 1000)}
+            else:
                 return None
-            if self.observed_diagnostics is None:
-                self.observed_diagnostics = set()
-            self.observed_diagnostics.add("db.connection_held_during_http")
-            return self.conn_held_during_http
+            self._observe(name)
+            return name, details
 
     def drop_span(self) -> None:
         with _CALLS_LOCK:
@@ -426,10 +463,12 @@ class RequestState:
         self.calls, self.call_errors = {}, {}
         self.statements.clear()
         self.statement_origins.clear()
+        self.slow_query = None
         self.http_targets.clear()
         self.validation_errors = None
         self.active_db_connections = 0
         self.conn_held_during_http = None
+        self.gc_pause_seconds = None
         self.observed_diagnostics = None
         self.disconnected = False
         self.after_disconnect_calls = None

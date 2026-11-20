@@ -13,6 +13,7 @@ from ..core.recording import CallKind
 from ..diagnostics import report_diagnostic
 from ..logging.filters import RequestIdFilter, TraceContextFilter
 from ..logging.held import LogSamplingFilter, keep_request_logs, will_write_request_log
+from ..gc_pauses import GC_PAUSE_SECONDS, gc_seconds
 from ..loop_watchdog import last_loop_block_window
 from ..metrics import MetricsBackend, NoopMetricsBackend
 from ..pools import check_pools
@@ -47,6 +48,16 @@ def _ws_frame_bytes(message: Message) -> int:
     return len(text.encode("utf-8")) if isinstance(text, str) else 0
 
 
+def _tag_pauses(request_state: RequestState, start: float, end: float) -> None:
+    """Tag a request that the event loop or the garbage collector stalled while it ran."""
+    block_start, block_end = last_loop_block_window()
+    if block_end > start and block_start < end:
+        request_state.record_diagnostic_fact("event_loop.blocked")
+    gc_pause = gc_seconds() - request_state.gc_seconds_at_start
+    if gc_pause >= GC_PAUSE_SECONDS:
+        request_state.record_gc_pause(gc_pause)
+
+
 def _attach_state_fields(
     event: dict[str, Any], route_template: str, request_state: RequestState
 ) -> None:
@@ -55,11 +66,13 @@ def _attach_state_fields(
     if request_state.after_disconnect_calls:
         event["after_disconnect_calls"] = dict(request_state.after_disconnect_calls)
     if not request_state.closed:
-        request_state.check_conn_held_during_http()
+        request_state.check_held_connection()
         if request_state.validation_errors:
             event["validation_errors"] = list(request_state.validation_errors)
         if request_state.observed_diagnostics:
             event["diagnostics"] = sorted(request_state.observed_diagnostics)
+        if request_state.gc_pause_seconds is not None:
+            event["gc_pause_ms"] = round(request_state.gc_pause_seconds * 1000)
         event.update(request_state.summarize_calls())
 
 
@@ -265,9 +278,7 @@ class RequestLoggingMiddleware:
         request_state: RequestState,
     ) -> None:
         app_finished = time.perf_counter()
-        block_start, block_end = last_loop_block_window()
-        if block_end > start and block_start < app_finished:
-            request_state.record_diagnostic_fact("event_loop.blocked")
+        _tag_pauses(request_state, start, app_finished)
         app_duration_seconds = max(0.0, app_finished - start)
         duration_seconds = max(
             0.0, (response_finished if response_finished is not None else app_finished) - start
@@ -403,9 +414,7 @@ class RequestLoggingMiddleware:
         finally:
             try:
                 finished = time.perf_counter()
-                block_start, block_end = last_loop_block_window()
-                if block_end > start and block_start < finished:
-                    request_state.record_diagnostic_fact("event_loop.blocked")
+                _tag_pauses(request_state, start, finished)
                 route_template = _extract_route_template(scope, request_state)
                 if captured_error is not None:
                     level, msg = logging.ERROR, "websocket.failed"
@@ -447,15 +456,24 @@ class RequestLoggingMiddleware:
             self._report_repeated_statement(
                 metric_method, route_template, request_state, kind="http"
             )
-        held = request_state.check_conn_held_during_http()
-        if held is not None:
+        if request_state.slow_query is not None:
+            fingerprint, seconds, origin = request_state.slow_query
             self._warn_once(
-                "db.connection_held_during_http",
+                "db.slow_query",
                 metric_method,
                 route_template,
-                str(held["target"]),
-                held,
+                fingerprint,
+                {"statement_fingerprint": fingerprint, "duration_ms": round(seconds * 1000),
+                 **origin},
             )
+        held = request_state.check_held_connection()
+        if held is not None:
+            name, details = held
+            self._warn_once(
+                name, metric_method, route_template, str(details.get("target", "")), details
+            )
+        if request_state.gc_pause_seconds is not None:
+            report_diagnostic("gc.pause")
 
     def _observe_response(
         self, scope: Scope, method: str, status_code: int, duration_seconds: float,

@@ -41,6 +41,21 @@ once per `(method, route, statement_fingerprint)`:
 - `code.*` identifies the innermost application frame that triggered the 10th execution.
 - `relationship` names the SQLAlchemy ORM relationship (e.g. `Order.items`) when triggered by lazy or relationship loading, even if serialized after the route handler returned.
 
+### Slow queries (`db.slow_query`)
+
+When one statement takes 1 second or longer, the request line's `event.diagnostics`
+gets `"db.slow_query"`, `fastapiobserver_db_slow_query_total{route}` counts the
+request, and a warning names the request's slowest statement, once per
+`(method, route, statement_fingerprint)`:
+
+```json
+{"level": "WARNING", "message": "db.slow_query", "request_id": "...", "event": {"method": "GET", "route": "/reports", "statement_fingerprint": "<sha256>", "duration_ms": 2140, "code.file.path": "/app/reports.py", "code.line.number": 27, "code.function.name": "reports.monthly"}}
+```
+
+Fields match the N+1 warning: no SQL text, the application line that ran the
+statement, and `relationship` for an ORM relationship load. Failed statements are
+not included; their time is in `db.sqlalchemy.failed_ms`.
+
 ### Connections held across outbound HTTP calls (`db.connection_held_during_http`)
 
 Holding a SQLAlchemy session/connection open while awaiting an external HTTP API
@@ -50,7 +65,24 @@ connection checkout time (`db.sqlalchemy.conn_held_ms`) is at least `10 × db.ms
 (or the connection remains checked out at request end), `fastapi-observer`:
 1. Appends `"db.connection_held_during_http"` to the request's `event.diagnostics` list.
 2. Increments `fastapiobserver_db_connection_held_during_http_total{route}`.
-3. Emits a rate-limited `db.connection_held_during_http` warning once per `(method, route)` with `conn_held_ms` and `http_ms`.
+3. Emits a rate-limited `db.connection_held_during_http` warning once per `(method, route, target)` with the HTTP `target` (method and host) and the application line that made the call.
+
+### Connections held idle (`db.connection_held_idle`)
+
+A session kept open through other work, such as a CPU-heavy step, a sleep or an
+LLM call through a client the library doesn't instrument, holds its connection
+out of the pool while the database does nothing. When a request held connections
+at least `10 × db.ms` and at least 100 ms longer than its queries ran, and no
+outbound HTTP call explains it, the request line's `event.diagnostics` gets
+`"db.connection_held_idle"`, `fastapiobserver_db_connection_held_idle_total{route}`
+counts the request, and a warning is written once per `(method, route)`:
+
+```json
+{"level": "WARNING", "message": "db.connection_held_idle", "event": {"method": "GET", "route": "/reports", "conn_held_ms": 2340, "db_ms": 12}}
+```
+
+Read what you need, close the session, then do the slow work; open a new session
+if you need to write afterwards.
 
 ## OpenTelemetry SQL Spans and SQLCommenter
 

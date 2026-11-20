@@ -35,6 +35,11 @@ _DIAGNOSTIC_COUNTERS: dict[str, tuple[str, str, str | tuple[str, ...] | None]] =
         "Requests in which one SQL statement ran 10 or more times, by route.",
         "route",
     ),
+    "db.slow_query": (
+        "fastapiobserver_db_slow_query_total",
+        "Requests in which one SQL statement took 1 second or longer, by route.",
+        "route",
+    ),
     "http.n_plus_one": (
         "fastapiobserver_http_n_plus_one_total",
         "Requests in which one outbound HTTP target was called 10 or more times, by route.",
@@ -50,6 +55,12 @@ _DIAGNOSTIC_COUNTERS: dict[str, tuple[str, str, str | tuple[str, ...] | None]] =
         "Requests that made an outbound HTTP call while holding a SQLAlchemy connection, by route.",
         "route",
     ),
+    "db.connection_held_idle": (
+        "fastapiobserver_db_connection_held_idle_total",
+        "Requests that held a SQLAlchemy connection 100 ms or longer beyond their queries' time, "
+        "by route.",
+        "route",
+    ),
     "db.pool_exhausted": (
         "fastapiobserver_db_pool_exhausted_total",
         "Requests that started while a SQLAlchemy pool had no free connection.",
@@ -58,6 +69,11 @@ _DIAGNOSTIC_COUNTERS: dict[str, tuple[str, str, str | tuple[str, ...] | None]] =
     "threadpool.saturated": (
         "fastapiobserver_threadpool_saturated_total",
         "Requests that started while every thread was busy and calls were waiting.",
+        None,
+    ),
+    "gc.pause": (
+        "fastapiobserver_gc_pause_total",
+        "Requests that garbage collection paused for 100 ms or longer in total.",
         None,
     ),
     "event_loop.blocked": (

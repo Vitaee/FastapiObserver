@@ -4,8 +4,16 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- `db.slow_query`: when one SQL statement takes 1 second or longer, the request line lists it in `event.diagnostics`, `fastapiobserver_db_slow_query_total{route}` counts the request, and a warning names the request's slowest statement by fingerprint, duration and the application line that ran it, once per method, route and statement. It works without tracing, like `db.n_plus_one`.
+- The OpenTelemetry guide shows how to get latency per downstream host without tracing, from OpenTelemetry's HTTPX histogram: the settings it needs, including `OTEL_SEMCONV_STABILITY_OPT_IN=http` for the `server.address` label, a p95 query, and that calls which raise are not in it.
+- `gc.pause`: the library times each garbage collection from the app's lifespan on. A request that collections stopped for 100 ms or more in total gets `gc.pause` in `event.diagnostics` and the time in `gc_pause_ms`, and `fastapiobserver_gc_pause_total` counts it. Python reports no collection durations, and an old-generation collection on a large heap can pause every thread for hundreds of milliseconds.
+- `db.connection_held_idle`: a request that held SQLAlchemy connections at least ten times as long as its queries ran, and 100 ms or more beyond them, without an outbound HTTP call to explain it, gets the tag, a warning once per method and route with `conn_held_ms` and `db_ms`, and a count in `fastapiobserver_db_connection_held_idle_total{route}`. It catches a session kept open through CPU work, a sleep or an LLM call made through a client the library doesn't instrument.
+
 ### Changed
 - A field or header name is masked when it holds a configured name as whole words, not only when it equals one. `new_password`, `passwordConfirmation`, `password2`, `accessToken`, `id_token`, `X-Auth-Token`, `secret_key` and `x_api_key` are now masked by the default list, and the `gdpr` preset covers `user_email` and `phone_number`. Part of a word does not match, so `max_tokens`, `tokenizer` and `passwordless` stay visible. Some harmless fields are masked too, such as `token_type` and `password_changed_at`. The default list itself is unchanged.
+- A log message longer than 32 KiB is cut to that length, with `... [N characters cut]` at the end, before it is held for its request or queued. A request's held records and the log queue were bounded by count only, so one large payload logged at `DEBUG` could hold a lot of memory.
+- Outbound HTTP counting costs about 16 µs per call instead of 18 µs. The request ID check reads header containers case-insensitively instead of lowercasing every header name, and path IDs are collapsed in one regular expression instead of three. OpenTelemetry's own HTTPX instrumentation, installed with `[otel-httpx]`, adds about 37 µs per call even with tracing off; the benchmarks page lists both.
 
 ### Fixed
 - In a WebSocket session, `db.n_plus_one` and `http.n_plus_one` count repeats within one message, not across the session. In 2.4.0 a handler that ran one query per message was reported after ten messages.
@@ -15,8 +23,10 @@ All notable changes to this project will be documented in this file.
 - `OBS_LOG_SAMPLE_RATE` follows the trace ID again for a trace this service starts. In 2.4.0, a request with no incoming `traceparent` was sampled by a hash of its request ID, so its log line and its trace were kept or dropped independently.
 - The `http.n_plus_one` and `db.connection_held_during_http` warnings show an outbound call's `target` as its method and host, such as `POST hooks.slack.com`. In 2.4.0 they included the path, which holds the secret in webhook URLs and bot tokens. `target_fingerprint` still tells paths apart.
 - A client closing a WebSocket is logged as `websocket.closed` at `INFO` with its close code when the handler does not catch `WebSocketDisconnect`, as the usual receive loop doesn't. In 2.4.0 it was logged as `websocket.failed` at `ERROR` with a traceback. The exception still reaches the server.
+- The database guide said the `db.connection_held_during_http` warning carried `conn_held_ms` and `http_ms` and was written once per method and route. It carries the HTTP `target` and the application line that made the call, once per method, route and target.
+- The `http.n_plus_one` row of the request diagnostics page said calls were grouped by method and host. They are grouped by method, host and path, with ID segments collapsed.
 - Docs that did not match 2.4.0:
-  - CPU figures in the README and on the benchmarks page are re-measured for 2.4.0, next to 2.3.0 on the same machine: about 42 µs per request by default and 26 µs with application-owned logging. An outbound call through `instrument_httpx_client` adds about 55 µs, not the 12 µs the page stated. The end-to-end latency table is removed because no script in the repository produces it.
+  - CPU figures in the README and on the benchmarks page are re-measured for 2.4.0, next to 2.3.0 on the same machine: about 42 µs per request by default and 26 µs with application-owned logging. An outbound call through `instrument_httpx_client` cost about 55 µs in 2.4.0, not the 12 µs the page stated. The end-to-end latency table is removed because no script in the repository produces it.
   - `http.timeout_missing` is documented in the OpenTelemetry guide.
   - The `db.n_plus_one` and `threadpool.saturated` triggers, the compatibility probe's excluded fields, and the backends page's screenshot link match the code.
 

@@ -32,11 +32,14 @@ log record:
 | Tag in `event.diagnostics` | Trigger |
 |---|---|
 | `db.n_plus_one` | The same SQL statement text (compared by SHA-256, never logged) executed `>= 10` times in the request |
-| `http.n_plus_one` | Outbound HTTP calls to the same method, host and path ran `>= 10` times in the request. The warning names the method and host only, since a path can hold a secret |
+| `db.slow_query` | One SQL statement took `>= 1` second |
+| `http.n_plus_one` | Outbound HTTP calls to the same method, host and path (with numeric, UUID and long hex path segments collapsed) ran `>= 10` times in the request. The warning names the method and host only, since a path can hold a secret |
 | `db.connection_held_during_http` | A SQLAlchemy connection stayed checked out across an outbound HTTP call and was held `>= 10 × db.ms` (or remained checked out at request end) |
+| `db.connection_held_idle` | Without an outbound HTTP call, SQLAlchemy connections were held `>= 10 × db.ms` and `>= 100 ms` longer than the queries ran |
 | `db.pool_exhausted` | Request started while a watched SQLAlchemy `QueuePool` was at full capacity |
 | `threadpool.saturated` | Request started while AnyIO's worker thread pool had `0` free tokens and calls were waiting for one |
 | `event_loop.blocked` | The event-loop watchdog detected a stall while this request was in flight |
+| `gc.pause` | Garbage collection stopped the process for `>= 100 ms` in total while the request ran; the line also gets `gc_pause_ms` |
 
 In a WebSocket session, the two N+1 counts start again at each message sent or
 received. One query per message is not reported, however long the session lasts;

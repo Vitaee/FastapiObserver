@@ -59,12 +59,15 @@ Single process only, left out in [Prometheus multiprocess mode](servers.md#prome
 Diagnostic counters, in both modes:
 
 - `fastapiobserver_db_n_plus_one_total{route}`
+- `fastapiobserver_db_slow_query_total{route}`
 - `fastapiobserver_http_n_plus_one_total{route}`
 - `fastapiobserver_db_connection_held_during_http_total{route}`
+- `fastapiobserver_db_connection_held_idle_total{route}`
 - `fastapiobserver_http_validation_errors_total{route, field}`
 - `fastapiobserver_db_pool_exhausted_total{engine}`
 - `fastapiobserver_threadpool_saturated_total`
 - `fastapiobserver_event_loop_blocked_total`
+- `fastapiobserver_gc_pause_total`
 
 ### Lifespan and Loguru
 

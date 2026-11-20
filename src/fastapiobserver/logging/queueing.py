@@ -6,11 +6,39 @@ import logging.handlers
 import queue
 import threading
 import time
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import cast
 
 from ..config import LogQueueOverflowPolicy
 from .circuit_breaker import _report_logging_failure
+
+# ponytail: caps the message text only. An object passed in `extra`, or as a
+# non-str argument, is not measured and stays referenced until its record is written.
+MAX_MESSAGE_CHARS = 32 * 1024
+
+
+def cap_message(record: logging.LogRecord) -> logging.LogRecord:
+    """*record*, or a copy with its message formatted and cut to ``MAX_MESSAGE_CHARS``.
+
+    The size check reads only string lengths, so records that fit cost no formatting.
+    """
+    args = record.args or ()
+    if isinstance(args, Mapping):
+        args = tuple(args.values())
+    size = len(record.msg) if isinstance(record.msg, str) else 0
+    size += sum(len(arg) for arg in args if isinstance(arg, (str, bytes)))
+    if size <= MAX_MESSAGE_CHARS:
+        return record
+    message = record.getMessage()
+    if len(message) > MAX_MESSAGE_CHARS:
+        # Leave room for the note, so a capped message fits on a second pass.
+        keep = MAX_MESSAGE_CHARS - 40
+        message = f"{message[:keep]}... [{len(message) - keep} characters cut]"
+    record = copy.copy(record)
+    record.msg = record.message = message
+    record.args = None
+    return record
 
 
 @dataclass(frozen=True)
@@ -206,6 +234,7 @@ class OverflowPolicyQueueHandler(logging.handlers.QueueHandler):
         # The stdlib version formats the record here and drops exc_info, which
         # loses the structured `error` field. The queue stays in-process, so keep
         # exc_info and leave formatting to the listener thread.
+        record = cap_message(record)
         if not record.args and isinstance(record.msg, str):
             return record  # nothing to freeze, so no copy (about 1 us a line)
         record = copy.copy(record)

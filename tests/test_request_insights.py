@@ -6,6 +6,7 @@ import itertools
 import json
 import linecache
 import logging
+import time
 from typing import Any
 
 from fastapi import Depends, FastAPI, WebSocket
@@ -59,6 +60,32 @@ def test_failed_request_writes_its_held_debug_logs() -> None:
     failed = collector.payloads[messages.index("request.failed")]
     assert held["level"] == "DEBUG"
     assert held["request_id"] == failed["request_id"]
+
+
+def test_long_messages_are_cut_before_they_are_held_or_queued() -> None:
+    from fastapiobserver.logging.queueing import MAX_MESSAGE_CHARS
+
+    settings = ObservabilitySettings(log_level="INFO", log_level_on_error="DEBUG")
+    app = FastAPI()
+    log = logging.getLogger("tests.long")
+    payload = "x" * (MAX_MESSAGE_CHARS + 100)
+
+    @app.get("/fail")
+    def fail() -> dict[str, str]:
+        log.debug("held %s", payload)
+        raise RuntimeError("boom")
+
+    install_observability(app, settings, metrics_enabled=False)
+    collector = capture_logs(settings)
+    TestClient(app, raise_server_exceptions=False).get("/fail")
+    log.info(payload)
+    shutdown_logging()
+
+    messages = [p["message"] for p in collector.payloads]
+    long_lines = {message[:4]: message for message in messages if len(message) > 1000}
+    assert set(long_lines) == {"held", "xxxx"}
+    for line in long_lines.values():
+        assert len(line) <= MAX_MESSAGE_CHARS and line.endswith(" characters cut]")
 
 
 def test_user_context_set_in_a_sync_endpoint_reaches_the_request_line() -> None:
@@ -369,6 +396,149 @@ def _request_db_totals_and_warnings(
     [first, _] = [p["event"] for p in collector.payloads if p["message"] == "request.completed"]
     warnings = [p["event"] for p in collector.payloads if p["message"] == "db.n_plus_one"]
     return first, warnings
+
+
+def test_slowest_query_is_reported_once_with_the_line_that_ran_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sqlalchemy = pytest.importorskip("sqlalchemy")
+    prometheus_client = pytest.importorskip("prometheus_client")
+    from hashlib import sha256
+
+    import fastapiobserver.request_context as request_context
+
+    monkeypatch.setattr(request_context, "_SLOW_QUERY_SECONDS", 0.01)
+    engine = sqlalchemy.create_engine("sqlite://")
+    sqlalchemy.event.listen(engine, "connect", lambda dbapi_conn, _: dbapi_conn.create_function(
+        "sleep_ms", 1, lambda ms: time.sleep(ms / 1000) or 0))
+    slow = "SELECT sleep_ms(20)"
+    app = FastAPI()
+
+    @app.get("/report")
+    def report() -> dict[str, str]:
+        with engine.connect() as conn:
+            conn.execute(sqlalchemy.text("SELECT 1"))
+            conn.execute(sqlalchemy.text(slow))
+        return {}
+
+    settings = ObservabilitySettings()
+    install_observability(app, settings, metrics_enabled=True, db_engine=engine)
+    collector = capture_logs(settings)
+    client = TestClient(app)
+    client.get("/report")
+    client.get("/report")
+    shutdown_logging()
+
+    lines = [p["event"] for p in collector.payloads if p["message"] == "request.completed"]
+    assert all("db.slow_query" in line["diagnostics"] for line in lines)
+    [warning] = [p["event"] for p in collector.payloads if p["message"] == "db.slow_query"]
+    assert _pop_location(warning) == ("report", "conn.execute(sqlalchemy.text(slow))")
+    assert warning.pop("duration_ms") >= 20
+    assert warning == {
+        "method": "GET",
+        "route": "/report",
+        "statement_fingerprint": sha256(slow.encode()).hexdigest(),
+    }
+    output = prometheus_client.generate_latest().decode()
+    assert 'fastapiobserver_db_slow_query_total{route="/report"} 2.0' in output
+
+
+def _counter(name: str, **labels: str) -> float:
+    prometheus_client = pytest.importorskip("prometheus_client")
+    return prometheus_client.REGISTRY.get_sample_value(name, labels) or 0.0
+
+
+def test_a_long_garbage_collection_pause_is_shown_on_the_request_it_stalled() -> None:
+    from fastapiobserver import gc_pauses
+
+    app = FastAPI()
+
+    @app.get("/stalled")
+    def stalled() -> dict[str, str]:
+        gc_pauses._on_gc("start", {})  # a collection as long as the threshold, simulated
+        time.sleep(gc_pauses.GC_PAUSE_SECONDS + 0.02)
+        gc_pauses._on_gc("stop", {})
+        return {}
+
+    @app.get("/fine")
+    def fine() -> dict[str, str]:
+        return {}
+
+    settings = ObservabilitySettings()
+    install_observability(app, settings, metrics_enabled=True)
+    before = _counter("fastapiobserver_gc_pause_total")
+    collector = capture_logs(settings)
+    client = TestClient(app)
+    client.get("/stalled")
+    client.get("/fine")
+    shutdown_logging()
+
+    stalled_line, fine_line = [
+        p["event"] for p in collector.payloads if p["message"] == "request.completed"
+    ]
+    assert stalled_line["diagnostics"] == ["gc.pause"]
+    assert stalled_line["gc_pause_ms"] >= gc_pauses.GC_PAUSE_SECONDS * 1000
+    assert "gc_pause_ms" not in fine_line and "diagnostics" not in fine_line
+    assert _counter("fastapiobserver_gc_pause_total") - before == 1
+
+
+def test_watch_gc_times_real_collections_once() -> None:
+    import gc
+
+    from fastapiobserver import gc_pauses
+
+    try:
+        gc_pauses.watch_gc()
+        gc_pauses.watch_gc()
+        before = gc_pauses.gc_seconds()
+        gc.collect()
+        assert gc.callbacks.count(gc_pauses._on_gc) == 1
+        assert gc_pauses.gc_seconds() > before
+    finally:
+        gc.callbacks.remove(gc_pauses._on_gc)
+
+
+def test_a_connection_held_idle_is_reported_by_route() -> None:
+    sqlalchemy = pytest.importorskip("sqlalchemy")
+    from sqlalchemy.orm import Session
+
+    engine = sqlalchemy.create_engine("sqlite://")
+    app = FastAPI()
+
+    def get_session() -> Any:
+        with Session(engine) as session:
+            yield session
+
+    @app.get("/report")
+    def report(session: Session = Depends(get_session)) -> dict[str, str]:
+        session.execute(sqlalchemy.text("SELECT 1"))
+        time.sleep(0.12)  # slow work while the session keeps its connection
+        return {}
+
+    @app.get("/quick")
+    def quick(session: Session = Depends(get_session)) -> dict[str, str]:
+        session.execute(sqlalchemy.text("SELECT 1"))
+        return {}
+
+    settings = ObservabilitySettings()
+    install_observability(app, settings, metrics_enabled=True, db_engine=engine)
+    before = _counter("fastapiobserver_db_connection_held_idle_total", route="/report")
+    collector = capture_logs(settings)
+    client = TestClient(app)
+    client.get("/report")
+    client.get("/report")
+    client.get("/quick")
+    shutdown_logging()
+
+    lines = [p["event"] for p in collector.payloads if p["message"] == "request.completed"]
+    assert [line.get("diagnostics") for line in lines] == [
+        ["db.connection_held_idle"], ["db.connection_held_idle"], None,
+    ]
+    warnings = [p for p in collector.payloads if p["message"] == "db.connection_held_idle"]
+    [warning] = [p["event"] for p in warnings]
+    assert warning["route"] == "/report" and warning["conn_held_ms"] >= 120
+    assert warning["db_ms"] * 10 <= warning["conn_held_ms"]
+    assert _counter("fastapiobserver_db_connection_held_idle_total", route="/report") - before == 2
 
 
 def test_sqlalchemy_queries_are_counted_and_n_plus_one_reported_without_tracing() -> None:
