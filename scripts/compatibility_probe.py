@@ -43,6 +43,9 @@ def snapshot() -> dict[str, Any]:
                    "aliases": str(field.validation_alias)}
             for name, field in model.model_fields.items()
         }
+    # Additive settings have their own contract tests. Retain exact comparison
+    # for every setting frozen from the 2.2.1 tag.
+    settings["ObservabilitySettings"].pop("slow_query_ms", None)
 
     payloads = []
     formatter = observer.StructuredJsonFormatter(observer.ObservabilitySettings())

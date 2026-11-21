@@ -221,6 +221,7 @@ def install_observability(
                 "log_sample_rate": settings.log_sample_rate if configure_logging else None,
                 "log_slow_request_ms": settings.log_slow_request_ms if configure_logging else None,
                 "loop_block_threshold_ms": settings.loop_block_threshold_ms,
+                "slow_query_ms": settings.slow_query_ms,
                 "metrics_path": (
                     settings.metrics_path
                     if (settings.metrics_enabled if metrics_enabled is None else metrics_enabled)

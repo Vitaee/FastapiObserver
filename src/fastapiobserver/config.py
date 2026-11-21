@@ -110,6 +110,12 @@ class ObservabilitySettings(InternalSettingsBase):
         default=None, gt=0, validation_alias="OBS_LOOP_BLOCK_THRESHOLD_MS"
     )
 
+    # --- database ---
+    # Tag a request with db.slow_query when one SQL statement takes at least this long.
+    slow_query_ms: float = Field(
+        default=1000.0, gt=0, allow_inf_nan=False, validation_alias="OBS_SLOW_QUERY_MS"
+    )
+
     # --- otel trace noise control ---
     otel_excluded_urls: tuple[str, ...] | None = Field(
         default=None, validation_alias="OBS_OTEL_EXCLUDED_URLS"

@@ -36,30 +36,40 @@ def _words(name: str) -> tuple[str, ...]:
     return tuple(_WORD.findall(name.lower()))
 
 
-class _SensitiveNames(dict[str, bool]):
+def _word_forms(name: str) -> set[tuple[str, ...]]:
+    return {words for words in (_words(name), _words(_CAMEL_BOUNDARY.sub(" ", name))) if words}
+
+
+class _SensitiveNames:
     """``names[key]`` is whether *key* holds a configured name, exactly or as whole words.
 
     ``password`` covers ``new_password``, ``passwordConfirmation`` and
     ``password2`` but not ``passwordless``, and ``token`` covers ``id_token`` but
-    not ``max_tokens``. A dict, so a name seen before costs one lookup.
+    not ``max_tokens``.
     """
 
-    def __init__(self, names: tuple[str, ...]) -> None:
-        super().__init__()
-        self._exact = frozenset(_normalize_key(name) for name in names)
-        self._phrases = frozenset(filter(None, map(_words, self._exact)))
-        self._longest = max(map(len, self._phrases), default=0)
+    __slots__ = ("_match", "_cached")
 
-    def __missing__(self, key: str) -> bool:
-        found = _normalize_key(key) in self._exact or any(
-            words[start:start + size] in self._phrases
-            for words in {_words(key), _words(_CAMEL_BOUNDARY.sub(" ", key))}
-            for size in range(1, min(self._longest, len(words)) + 1)
-            for start in range(len(words) - size + 1)
-        )
-        if len(self) < _MAX_REMEMBERED_NAMES and len(key) <= _MAX_REMEMBERED_NAME_LENGTH:
-            self[key] = found
-        return found
+    def __init__(self, names: tuple[str, ...]) -> None:
+        exact = frozenset(_normalize_key(name) for name in names)
+        phrases = frozenset(phrase for name in names for phrase in _word_forms(name))
+        longest = max(map(len, phrases), default=0)
+
+        def match(key: str) -> bool:
+            return _normalize_key(key) in exact or any(
+                words[start:start + size] in phrases
+                for words in _word_forms(key)
+                for size in range(1, min(longest, len(words)) + 1)
+                for start in range(len(words) - size + 1)
+            )
+
+        self._match = match
+        self._cached = functools.lru_cache(maxsize=_MAX_REMEMBERED_NAMES)(match)
+
+    def __getitem__(self, key: str) -> bool:
+        if len(key) > _MAX_REMEMBERED_NAME_LENGTH:
+            return self._match(key)
+        return self._cached(key)
 
 
 @functools.lru_cache(maxsize=64)

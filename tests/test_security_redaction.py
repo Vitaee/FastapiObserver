@@ -67,6 +67,101 @@ def test_whole_word_matching_covers_headers_presets_and_bodies() -> None:
     assert redact_body('{"newPassword":"secret"}', policy) == '{"newPassword":"***"}'
 
 
+def test_custom_camelcase_redacted_fields_and_headers_match_whole_words(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    custom_fields = ("userSecret", "APIKey", "oauth2Token")
+    monkeypatch.setenv("OBS_REDACTED_FIELDS", ",".join(custom_fields))
+    monkeypatch.setenv("OBS_REDACTED_HEADERS", "X-CustomToken")
+    policies = [
+        SecurityPolicy(redacted_fields=custom_fields, redacted_headers=("X-CustomToken",)),
+        SecurityPolicy.from_env(),
+    ]
+    payload = {
+        "userSecret": "s1",
+        "usersecret": "s2",
+        "myUserSecret": "s3",
+        "user_secret": "s4",
+        "my_api_key": "s5",
+        "myOauth2Token": "s6",
+        "userSecretive": "visible1",
+        "otherSecret": "visible2",
+        "headers": {
+            "X-Custom-Token": "h1",
+            "Proxy-X-Custom-Token": "h2",
+            "X-Custom-Tokens": "visible3",
+        },
+    }
+    expected = {
+        "userSecret": "***",
+        "usersecret": "***",
+        "myUserSecret": "***",
+        "user_secret": "***",
+        "my_api_key": "***",
+        "myOauth2Token": "***",
+        "userSecretive": "visible1",
+        "otherSecret": "visible2",
+        "headers": {
+            "X-Custom-Token": "***",
+            "Proxy-X-Custom-Token": "***",
+            "X-Custom-Tokens": "visible3",
+        },
+    }
+    for policy in policies:
+        assert sanitize_event(payload, policy) == expected
+        assert redact_body('{"myUserSecret":"s3","otherSecret":"ok"}', policy) == (
+            '{"myUserSecret":"***","otherSecret":"ok"}'
+        )
+        assert redact_body("myUserSecret=s3&otherSecret=ok", policy) == (
+            "myUserSecret=***&otherSecret=ok"
+        )
+
+
+def test_sensitive_name_lookup_uses_lru_eviction_and_skips_long_keys() -> None:
+    from concurrent.futures import ThreadPoolExecutor
+
+    from fastapiobserver.security.redaction import (
+        _MAX_REMEMBERED_NAME_LENGTH,
+        _MAX_REMEMBERED_NAMES,
+        _SensitiveNames,
+    )
+
+    names = _SensitiveNames(("password",))
+    for i in range(_MAX_REMEMBERED_NAMES + 50):
+        assert names[f"field_{i}_password"] is True
+        assert names[f"safe_{i}"] is False
+
+    info = names._cached.cache_info()
+    assert info.currsize == _MAX_REMEMBERED_NAMES
+    # New short keys still enter and hit the cache after exceeding _MAX_REMEMBERED_NAMES.
+    assert names["fresh_token_safe"] is False
+    hits_before = names._cached.cache_info().hits
+    assert names["fresh_token_safe"] is False
+    assert names._cached.cache_info().hits == hits_before + 1
+
+    long_key = "a" * (_MAX_REMEMBERED_NAME_LENGTH + 1)
+    assert names[long_key] is False
+    assert names._cached.cache_info().currsize == _MAX_REMEMBERED_NAMES
+
+    def worker(worker_id: int) -> bool:
+        hot_ok = names["user_password"] is True
+        flood_ok = all(
+            names[f"w{worker_id}_k{j}"] is False
+            and names[f"w{worker_id}_password_{j}"] is True
+            for j in range(600)
+        )
+        return hot_ok and flood_ok
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        assert all(pool.map(worker, range(8)))
+
+    assert names._cached.cache_info().currsize <= _MAX_REMEMBERED_NAMES
+    hits_after_flood = names._cached.cache_info().hits
+    assert names["hot_cache_key"] is False
+    assert names["hot_cache_key"] is False
+    assert names._cached.cache_info().hits == hits_after_flood + 1
+
+
 def test_sanitize_event_drop_mode_removes_sensitive_fields() -> None:
     payload = {"password": "secret", "username": "alice"}
 

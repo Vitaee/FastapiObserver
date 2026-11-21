@@ -398,16 +398,16 @@ def _request_db_totals_and_warnings(
     return first, warnings
 
 
-def test_slowest_query_is_reported_once_with_the_line_that_ran_it(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def _counter(name: str, **labels: str) -> float:
+    prometheus_client = pytest.importorskip("prometheus_client")
+    return prometheus_client.REGISTRY.get_sample_value(name, labels) or 0.0
+
+
+def test_slowest_query_is_reported_once_with_the_line_that_ran_it() -> None:
     sqlalchemy = pytest.importorskip("sqlalchemy")
     prometheus_client = pytest.importorskip("prometheus_client")
     from hashlib import sha256
 
-    import fastapiobserver.request_context as request_context
-
-    monkeypatch.setattr(request_context, "_SLOW_QUERY_SECONDS", 0.01)
     engine = sqlalchemy.create_engine("sqlite://")
     sqlalchemy.event.listen(engine, "connect", lambda dbapi_conn, _: dbapi_conn.create_function(
         "sleep_ms", 1, lambda ms: time.sleep(ms / 1000) or 0))
@@ -421,8 +421,9 @@ def test_slowest_query_is_reported_once_with_the_line_that_ran_it(
             conn.execute(sqlalchemy.text(slow))
         return {}
 
-    settings = ObservabilitySettings()
+    settings = ObservabilitySettings(slow_query_ms=10)
     install_observability(app, settings, metrics_enabled=True, db_engine=engine)
+    before = _counter("fastapiobserver_db_slow_query_total", route="/report")
     collector = capture_logs(settings)
     client = TestClient(app)
     client.get("/report")
@@ -440,12 +441,74 @@ def test_slowest_query_is_reported_once_with_the_line_that_ran_it(
         "statement_fingerprint": sha256(slow.encode()).hexdigest(),
     }
     output = prometheus_client.generate_latest().decode()
-    assert 'fastapiobserver_db_slow_query_total{route="/report"} 2.0' in output
+    assert f'fastapiobserver_db_slow_query_total{{route="/report"}} {before + 2}' in output
 
 
-def _counter(name: str, **labels: str) -> float:
-    prometheus_client = pytest.importorskip("prometheus_client")
-    return prometheus_client.REGISTRY.get_sample_value(name, labels) or 0.0
+def test_slow_query_threshold_follows_obs_slow_query_ms(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from hashlib import sha256
+
+    sqlalchemy = pytest.importorskip("sqlalchemy")
+    engine = sqlalchemy.create_engine("sqlite://")
+
+    def _register_sqlite_helpers(dbapi_conn: Any, _: Any) -> None:
+        def fail_after_ms(ms: float) -> int:
+            time.sleep(ms / 1000)
+            raise RuntimeError("boom")
+
+        dbapi_conn.create_function("sleep_ms", 1, lambda ms: time.sleep(ms / 1000) or 0)
+        dbapi_conn.create_function("fail_after_ms", 1, fail_after_ms)
+
+    sqlalchemy.event.listen(engine, "connect", _register_sqlite_helpers)
+    slowest_sql = "SELECT sleep_ms(40)"
+
+    try:
+        for threshold_ms, expect_slow in (("500", False), ("10", True)):
+            monkeypatch.setenv("OBS_SLOW_QUERY_MS", threshold_ms)
+            settings = ObservabilitySettings.from_env()
+            app = FastAPI()
+
+            @app.get("/slow-threshold")
+            def report() -> dict[str, str]:
+                with engine.connect() as conn:
+                    conn.execute(sqlalchemy.text("SELECT sleep_ms(15)"))
+                    conn.execute(sqlalchemy.text(slowest_sql))
+                return {}
+
+            @app.get("/slow-failing")
+            def failing() -> dict[str, str]:
+                with engine.connect() as conn:
+                    try:
+                        conn.execute(sqlalchemy.text("SELECT fail_after_ms(25)"))
+                    except sqlalchemy.exc.OperationalError:
+                        pass
+                return {}
+
+            install_observability(app, settings, metrics_enabled=False, db_engine=engine)
+            collector = capture_logs(settings)
+            client = TestClient(app)
+            client.get("/slow-threshold")
+            client.get("/slow-failing")
+            shutdown_logging()
+
+            completed = [
+                p["event"] for p in collector.payloads if p["message"] == "request.completed"
+            ]
+            warnings = [p["event"] for p in collector.payloads if p["message"] == "db.slow_query"]
+            if expect_slow:
+                assert completed[0]["diagnostics"] == ["db.slow_query"]
+                assert len(warnings) == 1
+                assert warnings[0]["statement_fingerprint"] == sha256(
+                    slowest_sql.encode()
+                ).hexdigest()
+                assert warnings[0]["duration_ms"] >= 40
+                assert "diagnostics" not in completed[1]
+            else:
+                assert all("diagnostics" not in item for item in completed)
+                assert not warnings
+    finally:
+        engine.dispose()
 
 
 def test_a_long_garbage_collection_pause_is_shown_on_the_request_it_stalled() -> None:

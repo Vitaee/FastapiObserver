@@ -55,9 +55,10 @@ _MAX_ERROR_CATEGORIES = 32
 _DIAGNOSTICS = frozenset({"db.n_plus_one", "threadpool.saturated", "db.pool_exhausted"})
 # The same statement this many times in one request is usually a query per item
 # in a loop (N+1), which one query with a join or IN would replace.
-# ponytail: fixed thresholds; make them settings if they're too noisy or quiet for someone.
+# ponytail: fixed thresholds for N+1 and idle connections; make them settings if
+# they're too noisy or quiet for someone.
 _N_PLUS_ONE_MIN_REPEATS = 10
-# One statement this slow is worth a look on its own, as in Sentry's slow-query default.
+# Default slow-query threshold when OBS_SLOW_QUERY_MS isn't configured, as in Sentry's default.
 _SLOW_QUERY_SECONDS = 1.0
 # A connection held this much longer than its queries ran sat idle, out of the pool.
 _IDLE_CONNECTION_SECONDS = 0.1
@@ -177,8 +178,9 @@ class RequestState:
     # fingerprint -> the application code and ORM relationship that ran it, for
     # statements repeated enough
     statement_origins: dict[str, dict[str, str | int]] = field(default_factory=dict)
-    # The slowest statement at or over _SLOW_QUERY_SECONDS: fingerprint, seconds, origin.
+    # The slowest statement at or over slow_query_seconds: fingerprint, seconds, origin.
     slow_query: tuple[str, float, dict[str, str | int]] | None = None
+    slow_query_seconds: float = _SLOW_QUERY_SECONDS
     http_targets: dict[str, int] = field(default_factory=dict)
     validation_errors: list[dict[str, str]] | None = None
     active_db_connections: int = 0
@@ -251,7 +253,7 @@ class RequestState:
                     if count == _N_PLUS_ONE_MIN_REPEATS:
                         repeated = fingerprint
                         self._observe(f"{kind}.n_plus_one")
-                if kind == "db" and seconds >= _SLOW_QUERY_SECONDS and self._slowest(seconds):
+                if kind == "db" and seconds >= self.slow_query_seconds and self._slowest(seconds):
                     slow = fingerprint
                     self._observe("db.slow_query")
         if repeated is None and slow is None:

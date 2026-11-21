@@ -132,10 +132,10 @@ When the loop stalls past the threshold, the watchdog thread logs one warning pe
 
 A garbage collection stops every thread until it ends. An old-generation collection
 on a large heap can take hundreds of milliseconds, and Python reports no duration
-for it. From the app's lifespan on, the library times each collection. A request
+for it. From the app's lifespan on, the library times each collection. An HTTP request
 that collections stopped for 100 ms or more in total gets `"gc.pause"` in its
 `diagnostics` and the time in `gc_pause_ms`, and `fastapiobserver_gc_pause_total`
-counts it:
+counts it (skipped on WebSocket sessions):
 
 ```json
 {"message": "request.completed", "event": {"http.route": "/orders", "duration_ms": 912.4, "diagnostics": ["gc.pause"], "gc_pause_ms": 847}}

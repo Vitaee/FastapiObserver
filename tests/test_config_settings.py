@@ -249,3 +249,24 @@ def test_settings_ignore_variables_named_like_their_fields(
     assert settings.metrics_enabled is False
     # Field names still work in code.
     assert ObservabilitySettings(log_level="DEBUG").log_level == "DEBUG"
+
+
+def test_slow_query_ms_setting_reads_env_and_rejects_non_positive(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    assert ObservabilitySettings().slow_query_ms == 1000.0
+
+    monkeypatch.setenv("SLOW_QUERY_MS", "50")
+    assert ObservabilitySettings.from_env().slow_query_ms == 1000.0
+
+    monkeypatch.setenv("OBS_SLOW_QUERY_MS", "150")
+    assert ObservabilitySettings.from_env().slow_query_ms == 150.0
+
+    for bad in (0, -5, float("inf"), float("nan")):
+        with pytest.raises(ValidationError, match="slow_query_ms"):
+            ObservabilitySettings(slow_query_ms=bad)
+
+    for bad_env in ("0", "inf", "nan"):
+        monkeypatch.setenv("OBS_SLOW_QUERY_MS", bad_env)
+        with pytest.raises(ValidationError, match="OBS_SLOW_QUERY_MS"):
+            ObservabilitySettings.from_env()
