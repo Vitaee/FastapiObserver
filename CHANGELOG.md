@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [2.5.1] - 2026-11-22
+
 ### Added
 - `OBS_SLOW_QUERY_MS` (`ObservabilitySettings.slow_query_ms`, default `1000.0`): configures the `db.slow_query` duration threshold in milliseconds.
 - `examples/full_stack/config/alerts.yml`: ready-to-import Prometheus alert rules covering all ten diagnostic counters (`db_n_plus_one`, `db_slow_query`, `http_n_plus_one`, `db_connection_held_during_http`, `db_connection_held_idle`, `db_pool_exhausted`, `threadpool_saturated`, `event_loop_blocked`, `gc_pause`, `http_validation_errors`), 5xx rate, log queue drops and sink circuit breakers, wired into the full-stack Compose setup.
