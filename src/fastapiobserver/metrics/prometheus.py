@@ -37,7 +37,7 @@ _DIAGNOSTIC_COUNTERS: dict[str, tuple[str, str, str | tuple[str, ...] | None]] =
     ),
     "db.slow_query": (
         "fastapiobserver_db_slow_query_total",
-        "Requests in which one SQL statement took 1 second or longer, by route.",
+        "Requests in which one SQL statement reached the slow-query threshold, by route.",
         "route",
     ),
     "http.n_plus_one": (

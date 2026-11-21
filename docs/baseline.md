@@ -11,9 +11,10 @@ current source on every test run.
 
 The probe normalizes timestamps, generated request IDs, elapsed durations, the
 library version and exception stack locations. Field names and outcomes must
-match exactly. It leaves out fields added since 2.2.1, which have their own
-contract tests: `http.route`, `observation`, `log_sampling`, `response_bytes`,
-`response_start_ms`, `first_body_ms` and `stream_duration_ms`.
+match exactly. It leaves out fields and settings added since 2.2.1, which have their own
+contract tests: `ObservabilitySettings.slow_query_ms`, `http.route`, `observation`,
+`log_sampling`, `response_bytes`, `response_start_ms`, `first_body_ms` and
+`stream_duration_ms`.
 
 To reproduce the baseline without importing the current source:
 

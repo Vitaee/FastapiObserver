@@ -48,14 +48,17 @@ def _ws_frame_bytes(message: Message) -> int:
     return len(text.encode("utf-8")) if isinstance(text, str) else 0
 
 
-def _tag_pauses(request_state: RequestState, start: float, end: float) -> None:
+def _tag_pauses(
+    request_state: RequestState, start: float, end: float, *, include_gc: bool = True
+) -> None:
     """Tag a request that the event loop or the garbage collector stalled while it ran."""
     block_start, block_end = last_loop_block_window()
     if block_end > start and block_start < end:
         request_state.record_diagnostic_fact("event_loop.blocked")
-    gc_pause = gc_seconds() - request_state.gc_seconds_at_start
-    if gc_pause >= GC_PAUSE_SECONDS:
-        request_state.record_gc_pause(gc_pause)
+    if include_gc:
+        gc_pause = gc_seconds() - request_state.gc_seconds_at_start
+        if gc_pause >= GC_PAUSE_SECONDS:
+            request_state.record_gc_pause(gc_pause)
 
 
 def _attach_state_fields(
@@ -414,7 +417,8 @@ class RequestLoggingMiddleware:
         finally:
             try:
                 finished = time.perf_counter()
-                _tag_pauses(request_state, start, finished)
+                # Cumulative process GC time spans a session's whole lifetime, so skip gc.pause.
+                _tag_pauses(request_state, start, finished, include_gc=False)
                 route_template = _extract_route_template(scope, request_state)
                 if captured_error is not None:
                     level, msg = logging.ERROR, "websocket.failed"

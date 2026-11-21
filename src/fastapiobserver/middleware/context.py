@@ -54,6 +54,7 @@ class _RequestContextManager:
     def __init__(self, settings: ObservabilitySettings) -> None:
         self.settings = settings
         self._request_id_header_bytes = settings.request_id_header.lower().encode("latin1")
+        self._slow_query_seconds = settings.slow_query_ms / 1000
 
     def initialize(
         self,
@@ -61,7 +62,11 @@ class _RequestContextManager:
         headers: list[tuple[bytes, bytes]],
         trusted_source: bool,
     ) -> tuple[str, RequestState]:
-        state = RequestState(scope, span=_recording_span())
+        state = RequestState(
+            scope,
+            span=_recording_span(),
+            slow_query_seconds=self._slow_query_seconds,
+        )
         set_request_state(state)
         request_id_header = _get_header(headers, self._request_id_header_bytes)
         request_id = _resolve_request_id(request_id_header, trusted_source)

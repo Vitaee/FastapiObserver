@@ -43,10 +43,7 @@ once per `(method, route, statement_fingerprint)`:
 
 ### Slow queries (`db.slow_query`)
 
-When one statement takes 1 second or longer, the request line's `event.diagnostics`
-gets `"db.slow_query"`, `fastapiobserver_db_slow_query_total{route}` counts the
-request, and a warning names the request's slowest statement, once per
-`(method, route, statement_fingerprint)`:
+When one statement takes at least `OBS_SLOW_QUERY_MS` (default `1000` ms / 1 second), the request line's `event.diagnostics` gets `"db.slow_query"`, `fastapiobserver_db_slow_query_total{route}` counts the request, and a warning names the request's slowest statement, once per `(method, route, statement_fingerprint)`:
 
 ```json
 {"level": "WARNING", "message": "db.slow_query", "request_id": "...", "event": {"method": "GET", "route": "/reports", "statement_fingerprint": "<sha256>", "duration_ms": 2140, "code.file.path": "/app/reports.py", "code.line.number": 27, "code.function.name": "reports.monthly"}}

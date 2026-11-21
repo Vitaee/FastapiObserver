@@ -533,3 +533,57 @@ def test_websocket_queries_spread_over_messages_are_not_n_plus_one(
     ]
     assert [event["db"]["count"] for event in sessions] == [12, 12]
     assert all("diagnostics" not in event for event in sessions)
+
+
+def test_websocket_sessions_skip_gc_pause_diagnostics(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    import time
+
+    from fastapiobserver import gc_pauses
+    from fastapiobserver.middleware import request_logging
+
+    prometheus_client = pytest.importorskip("prometheus_client")
+    app = FastAPI()
+
+    @app.websocket("/chat")
+    async def chat(websocket: WebSocket) -> None:
+        await websocket.accept()
+        gc_pauses._on_gc("start", {})
+        time.sleep(gc_pauses.GC_PAUSE_SECONDS + 0.02)
+        gc_pauses._on_gc("stop", {})
+        await websocket.close()
+
+    @app.websocket("/chat-fail")
+    async def chat_fail(websocket: WebSocket) -> None:
+        await websocket.accept()
+        gc_pauses._on_gc("start", {})
+        time.sleep(gc_pauses.GC_PAUSE_SECONDS + 0.02)
+        gc_pauses._on_gc("stop", {})
+        raise RuntimeError("ws gc boom")
+
+    install_observability(app, ObservabilitySettings(), metrics_enabled=True)
+    before = prometheus_client.REGISTRY.get_sample_value("fastapiobserver_gc_pause_total") or 0.0
+    now = time.perf_counter()
+
+    with caplog.at_level(logging.INFO, logger="fastapiobserver.middleware"):
+        with TestClient(app) as client:
+            with monkeypatch.context() as mp:
+                mp.setattr(request_logging, "last_loop_block_window", lambda: (now, now + 10.0))
+                with client.websocket_connect("/chat"):
+                    pass
+            with pytest.raises(RuntimeError, match="ws gc boom"):
+                with client.websocket_connect("/chat-fail") as ws:
+                    ws.receive_text()
+
+    [closed] = [r.event for r in caplog.records if r.message == "websocket.closed"]  # type: ignore[attr-defined]
+    assert closed["diagnostics"] == ["event_loop.blocked"]
+    assert "gc_pause_ms" not in closed
+
+    [failed] = [r.event for r in caplog.records if r.message == "websocket.failed"]  # type: ignore[attr-defined]
+    assert "diagnostics" not in failed
+    assert "gc_pause_ms" not in failed
+
+    after = prometheus_client.REGISTRY.get_sample_value("fastapiobserver_gc_pause_total") or 0.0
+    assert after == before

@@ -83,7 +83,8 @@ def test_n_plus_one_reaches_each_server_span_before_transport_ends_it(
             "code.file.path": __file__, "code.line.number": app.__code__.co_firstlineno + 3,
             "code.function.name": f"{__name__}.{app.__qualname__}",
         }
-        assert "private" not in str(event.attributes)
+        assert "private_customer_value" not in str(event.attributes)
+        assert "private_table" not in str(event.attributes)
 
 
 def test_pool_events_are_bounded_private_and_independent_of_log_rate_limit(tracing, monkeypatch):

@@ -149,8 +149,6 @@ class SecurityPolicy(EnvLoadable, BaseModel):
         return parse_csv(value, optional=True)
 
     @field_validator(
-        "redacted_fields",
-        "redacted_headers",
         "header_allowlist",
         "event_key_allowlist",
         mode="after",
